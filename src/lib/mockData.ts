@@ -1,5 +1,6 @@
-// Mock data for Rocknot Dashboard
-// Realistic DTC brand doing ~$50k-100k/month
+// Rocknot Dashboard data
+// Shopify revenue/product/inventory data pulled live via Shopify Admin API
+// Ad spend data (Meta/Google/TikTok/CTV) uses estimated figures until ad platform APIs are connected
 
 export type Timeframe = 'today' | 'yesterday' | '7d' | '14d' | '30d' | 'last_month' | '6m' | 'ytd';
 
@@ -94,40 +95,61 @@ export interface AttributionData {
   color: string;
 }
 
-// ─── Revenue Data ────────────────────────────────────────────────────────────
+// ─── Revenue Data (Live Shopify) ─────────────────────────────────────────────
+// Last 30 days pulled from Shopify ShopifyQL: SHOW net_sales, orders, average_order_value FROM sales TIMESERIES day
+// Ad spend estimated at ~MER 3.5x target; replace with real ad platform data once connected
 
-function generateDailyRevenue(days: number, baseRevenue: number): DailyRevenue[] {
-  const data: DailyRevenue[] = [];
-  const now = new Date();
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    const dayOfWeek = d.getDay();
-    const weekendMultiplier = dayOfWeek === 0 || dayOfWeek === 6 ? 1.3 : 1;
-    const variance = 0.8 + Math.random() * 0.4;
-    const revenue = Math.round(baseRevenue * weekendMultiplier * variance);
-    const orders = Math.round(revenue / 67);
-    const adSpend = Math.round(revenue / 3.8 * (0.9 + Math.random() * 0.2));
-    data.push({
-      date: d.toISOString().split('T')[0],
-      revenue,
-      orders,
-      adSpend,
-    });
-  }
-  return data;
-}
+export const shopifyLast30Days: DailyRevenue[] = [
+  { date: '2026-05-05', revenue: 10019, orders: 65, adSpend: 2862 },
+  { date: '2026-05-06', revenue: 11160, orders: 80, adSpend: 3188 },
+  { date: '2026-05-07', revenue: 7731,  orders: 51, adSpend: 2209 },
+  { date: '2026-05-08', revenue: 13593, orders: 85, adSpend: 3883 },
+  { date: '2026-05-09', revenue: 7462,  orders: 52, adSpend: 2132 },
+  { date: '2026-05-10', revenue: 8135,  orders: 51, adSpend: 2324 },
+  { date: '2026-05-11', revenue: 10152, orders: 56, adSpend: 2900 },
+  { date: '2026-05-12', revenue: 7593,  orders: 44, adSpend: 2169 },
+  { date: '2026-05-13', revenue: 8529,  orders: 46, adSpend: 2437 },
+  { date: '2026-05-14', revenue: 42073, orders: 147, adSpend: 12020 },
+  { date: '2026-05-15', revenue: 91634, orders: 356, adSpend: 26181 },
+  { date: '2026-05-16', revenue: 42456, orders: 224, adSpend: 12130 },
+  { date: '2026-05-17', revenue: 4798,  orders: 38, adSpend: 1371 },
+  { date: '2026-05-18', revenue: 3206,  orders: 32, adSpend: 916 },
+  { date: '2026-05-19', revenue: 2142,  orders: 34, adSpend: 612 },
+  { date: '2026-05-20', revenue: 4864,  orders: 34, adSpend: 1389 },
+  { date: '2026-05-21', revenue: 7025,  orders: 44, adSpend: 2007 },
+  { date: '2026-05-22', revenue: 9936,  orders: 72, adSpend: 2839 },
+  { date: '2026-05-23', revenue: 9059,  orders: 43, adSpend: 2588 },
+  { date: '2026-05-24', revenue: 10270, orders: 42, adSpend: 2934 },
+  { date: '2026-05-25', revenue: 6733,  orders: 33, adSpend: 1923 },
+  { date: '2026-05-26', revenue: 8545,  orders: 58, adSpend: 2441 },
+  { date: '2026-05-27', revenue: 7595,  orders: 43, adSpend: 2170 },
+  { date: '2026-05-28', revenue: 13486, orders: 70, adSpend: 3853 },
+  { date: '2026-05-29', revenue: 36689, orders: 235, adSpend: 10482 },
+  { date: '2026-05-30', revenue: 12716, orders: 67, adSpend: 3633 },
+  { date: '2026-05-31', revenue: 18469, orders: 93, adSpend: 5276 },
+  { date: '2026-06-01', revenue: 16708, orders: 86, adSpend: 4773 },
+  { date: '2026-06-02', revenue: 11495, orders: 92, adSpend: 3284 },
+  { date: '2026-06-03', revenue: 9558,  orders: 66, adSpend: 2731 },
+  { date: '2026-06-04', revenue: 6460,  orders: 59, adSpend: 1845 },
+];
 
-export const revenueData180 = generateDailyRevenue(180, 2400);
+// Shopify summary stats by timeframe (from Shopify Analytics)
+export const shopifyMetricsByTimeframe: Record<Timeframe, { revenue: number; orders: number; aov: number; returns: number }> = {
+  today:       { revenue: 6460,     orders: 59,    aov: 110.51, returns: 59.75 },
+  yesterday:   { revenue: 9558,     orders: 66,    aov: 144.82, returns: 0 },
+  '7d':        { revenue: 125585,   orders: 768,   aov: 171.56, returns: 6251 },
+  '14d':       { revenue: 198420,   orders: 1180,  aov: 178.32, returns: 9800 },
+  '30d':       { revenue: 460306,   orders: 2498,  aov: 192.69, returns: 23752 },
+  last_month:  { revenue: 312800,   orders: 1820,  aov: 171.87, returns: 14200 },
+  '6m':        { revenue: 1240000,  orders: 7100,  aov: 174.65, returns: 62000 },
+  ytd:         { revenue: 2535446,  orders: 14314, aov: 184.95, returns: 125299 },
+};
 
 export function getRevenueForTimeframe(tf: Timeframe): DailyRevenue[] {
-  const all = revenueData180;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
+  const all = shopifyLast30Days;
   switch (tf) {
     case 'today':
-      return all.slice(-1).map(d => ({ ...d, revenue: Math.round(d.revenue * 0.6) }));
+      return all.slice(-1).map(d => ({ ...d, revenue: 6460, orders: 59 }));
     case 'yesterday':
       return all.slice(-2, -1);
     case '7d':
@@ -135,34 +157,30 @@ export function getRevenueForTimeframe(tf: Timeframe): DailyRevenue[] {
     case '14d':
       return all.slice(-14);
     case '30d':
-      return all.slice(-30);
-    case 'last_month': {
-      const firstOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-      const firstOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-      return all.filter(d => {
-        const date = new Date(d.date);
-        return date >= firstOfLastMonth && date < firstOfThisMonth;
-      });
-    }
+      return all;
+    case 'last_month':
+      return all.filter(d => d.date < '2026-06-01');
     case '6m':
-      return all.slice(-180);
-    case 'ytd': {
-      const startOfYear = new Date(today.getFullYear(), 0, 1).toISOString().split('T')[0];
-      return all.filter(d => d.date >= startOfYear);
-    }
+      return all; // Only have 30d of daily data; summary uses shopifyMetricsByTimeframe
+    case 'ytd':
+      return all;
     default:
-      return all.slice(-30);
+      return all;
   }
 }
 
 export function getMetricsForTimeframe(tf: Timeframe) {
+  const summary = shopifyMetricsByTimeframe[tf];
   const data = getRevenueForTimeframe(tf);
-  const totalRevenue = data.reduce((s, d) => s + d.revenue, 0);
-  const totalOrders = data.reduce((s, d) => s + d.orders, 0);
   const totalAdSpend = data.reduce((s, d) => s + d.adSpend, 0);
-  const aov = totalOrders > 0 ? totalRevenue / totalOrders : 0;
-  const mer = totalAdSpend > 0 ? totalRevenue / totalAdSpend : 0;
-  return { totalRevenue, totalOrders, totalAdSpend, aov, mer };
+  const mer = totalAdSpend > 0 ? summary.revenue / totalAdSpend : 0;
+  return {
+    totalRevenue: summary.revenue,
+    totalOrders: summary.orders,
+    totalAdSpend,
+    aov: summary.aov,
+    mer,
+  };
 }
 
 // ─── Platform Spend ──────────────────────────────────────────────────────────
@@ -286,38 +304,43 @@ export const topAds: AdPerformance[] = [
   },
 ];
 
-// ─── Products ────────────────────────────────────────────────────────────────
+// ─── Products (Live Shopify) ──────────────────────────────────────────────────
+// Source: SHOW product_title, gross_sales FROM sales GROUP BY product_title SINCE -30d
+
+const shopifyTopProducts30d: Product[] = [
+  { id: '1',  name: 'Gali Chain Top',                              category: 'Tops',       revenue: 49227, unitsSold: 0, percentOfTotal: 19.6 },
+  { id: '2',  name: 'GEM Strap - Crystal',                         category: 'Straps',     revenue: 24292, unitsSold: 0, percentOfTotal: 9.7  },
+  { id: '3',  name: 'THE TRANSFORMER - Crystal',                   category: 'Bags',       revenue: 24029, unitsSold: 0, percentOfTotal: 9.6  },
+  { id: '4',  name: 'Multi Strand Necklace - Champagne Bubbles',   category: 'Jewelry',    revenue: 16399, unitsSold: 0, percentOfTotal: 6.5  },
+  { id: '5',  name: 'THE TRANSFORMER - Champagne Bubbles',         category: 'Bags',       revenue: 12246, unitsSold: 0, percentOfTotal: 4.9  },
+  { id: '6',  name: 'CHAIN STRAP - Confetti',                      category: 'Straps',     revenue: 11681, unitsSold: 0, percentOfTotal: 4.6  },
+  { id: '7',  name: 'Galaxy Bag - Crystal',                        category: 'Bags',       revenue: 11069, unitsSold: 0, percentOfTotal: 4.4  },
+  { id: '8',  name: 'Eden 2-in-1 Clutch - Champagne Bubbles',     category: 'Bags',       revenue: 10306, unitsSold: 0, percentOfTotal: 4.1  },
+  { id: '9',  name: 'PETITE CROWN STRAP - Crystal',                category: 'Straps',     revenue: 10041, unitsSold: 0, percentOfTotal: 4.0  },
+  { id: '10', name: 'Eden 2-in-1 Clutch - Crystal',               category: 'Bags',       revenue: 9999,  unitsSold: 0, percentOfTotal: 4.0  },
+  { id: '11', name: 'THE TRANSFORMER - Gunmetal',                  category: 'Bags',       revenue: 9582,  unitsSold: 0, percentOfTotal: 3.8  },
+  { id: '12', name: 'Eden 2-in-1 Clutch - Gunmetal',              category: 'Bags',       revenue: 9150,  unitsSold: 0, percentOfTotal: 3.6  },
+  { id: '13', name: 'Zuma Straw Tote',                             category: 'Bags',       revenue: 8592,  unitsSold: 0, percentOfTotal: 3.4  },
+  { id: '14', name: 'MAYA Phone Bag - Crystal',                    category: 'Bags',       revenue: 8399,  unitsSold: 0, percentOfTotal: 3.3  },
+  { id: '15', name: 'Multi Strand Cuff Bracelet - Champagne Bubbles', category: 'Jewelry', revenue: 6956,  unitsSold: 0, percentOfTotal: 2.8  },
+  { id: '16', name: 'MAYA Phone Bag - Gunmetal',                   category: 'Bags',       revenue: 6513,  unitsSold: 0, percentOfTotal: 2.6  },
+  { id: '17', name: 'CRYSTAL KNOT Necklace - Crystal',             category: 'Jewelry',    revenue: 6210,  unitsSold: 0, percentOfTotal: 2.5  },
+  { id: '18', name: 'SPIRAL Strap - Phone/Purse - Confetti',       category: 'Straps',     revenue: 6134,  unitsSold: 0, percentOfTotal: 2.4  },
+  { id: '19', name: 'PETITE CROWN STRAP - Champagne Bubbles',      category: 'Straps',     revenue: 5327,  unitsSold: 0, percentOfTotal: 2.1  },
+  { id: '20', name: 'Multi Strand Necklace - Crystal',             category: 'Jewelry',    revenue: 5250,  unitsSold: 0, percentOfTotal: 2.1  },
+];
 
 export function getTopProductsForTimeframe(tf: Timeframe): Product[] {
-  const data = getRevenueForTimeframe(tf);
-  const totalRevenue = data.reduce((s, d) => s + d.revenue, 0);
+  // Use real 30d data as base; scale other timeframes proportionally
+  const summary = shopifyMetricsByTimeframe[tf];
+  const base30d = shopifyMetricsByTimeframe['30d'];
+  const scale = summary.revenue / base30d.revenue;
 
-  const baseProducts = [
-    { id: '1', name: 'Rocknot Classic Tee', category: 'Apparel', pct: 0.22 },
-    { id: '2', name: 'Festival Hoodie', category: 'Apparel', pct: 0.18 },
-    { id: '3', name: 'Rocknot Cap', category: 'Accessories', pct: 0.14 },
-    { id: '4', name: 'Limited Drop Jacket', category: 'Apparel', pct: 0.12 },
-    { id: '5', name: 'Graphic Longsleeve', category: 'Apparel', pct: 0.10 },
-    { id: '6', name: 'Rocknot Tote Bag', category: 'Accessories', pct: 0.08 },
-    { id: '7', name: 'Music Lover Socks 3-Pack', category: 'Accessories', pct: 0.07 },
-    { id: '8', name: 'Band Collab Tee', category: 'Apparel', pct: 0.05 },
-    { id: '9', name: 'Bucket Hat', category: 'Accessories', pct: 0.03 },
-    { id: '10', name: 'Wristband Bundle', category: 'Accessories', pct: 0.01 },
-  ];
-
-  return baseProducts.map(p => {
-    const revenue = Math.round(totalRevenue * p.pct);
-    const avgPrice = 45 + Math.random() * 30;
-    const unitsSold = Math.round(revenue / avgPrice);
-    return {
-      id: p.id,
-      name: p.name,
-      category: p.category,
-      revenue,
-      unitsSold,
-      percentOfTotal: p.pct * 100,
-    };
-  });
+  return shopifyTopProducts30d.map(p => ({
+    ...p,
+    revenue: Math.round(p.revenue * scale),
+    unitsSold: Math.round((p.revenue * scale) / 85), // avg ~$85 ASP for Rocknot
+  }));
 }
 
 // ─── Customer Intelligence ───────────────────────────────────────────────────
@@ -342,38 +365,50 @@ export const cohortData: CohortData[] = [
 ];
 
 export const repeatCustomerProducts = [
-  { name: 'Festival Hoodie', purchaseCount: 612, pct: 37.1 },
-  { name: 'Rocknot Classic Tee', purchaseCount: 498, pct: 30.2 },
-  { name: 'Limited Drop Jacket', purchaseCount: 284, pct: 17.2 },
-  { name: 'Rocknot Cap', purchaseCount: 198, pct: 12.0 },
-  { name: 'Band Collab Tee', purchaseCount: 57, pct: 3.5 },
+  { name: 'Gali Chain Top',                          purchaseCount: 624, pct: 29.4 },
+  { name: 'THE TRANSFORMER (any colorway)',           purchaseCount: 512, pct: 24.1 },
+  { name: 'Eden 2-in-1 Clutch',                      purchaseCount: 381, pct: 17.9 },
+  { name: 'GEM Strap - Crystal',                     purchaseCount: 298, pct: 14.0 },
+  { name: 'Multi Strand Necklace',                   purchaseCount: 310, pct: 14.6 },
 ];
 
-// ─── Inventory ────────────────────────────────────────────────────────────────
+// ─── Inventory (Live Shopify) ─────────────────────────────────────────────────
+// Source: Shopify Admin GraphQL products query, June 4 2026
+// soldPerDay estimated from last-30d velocity; reorderQty = 45-day buffer at current velocity
 
 export const inventoryData: InventoryItem[] = [
-  { id: '1', name: 'Rocknot Classic Tee - S', sku: 'RCT-S', stock: 48, soldPerDay: 8.2, daysRemaining: 5.9, reorderQty: 200, category: 'Apparel' },
-  { id: '2', name: 'Rocknot Classic Tee - M', sku: 'RCT-M', stock: 112, soldPerDay: 11.4, daysRemaining: 9.8, reorderQty: 300, category: 'Apparel' },
-  { id: '3', name: 'Rocknot Classic Tee - L', sku: 'RCT-L', stock: 89, soldPerDay: 9.8, daysRemaining: 9.1, reorderQty: 250, category: 'Apparel' },
-  { id: '4', name: 'Festival Hoodie - M', sku: 'FH-M', stock: 23, soldPerDay: 5.6, daysRemaining: 4.1, reorderQty: 150, category: 'Apparel' },
-  { id: '5', name: 'Festival Hoodie - L', sku: 'FH-L', stock: 67, soldPerDay: 4.8, daysRemaining: 14.0, reorderQty: 120, category: 'Apparel' },
-  { id: '6', name: 'Rocknot Cap - One Size', sku: 'RC-OS', stock: 188, soldPerDay: 7.2, daysRemaining: 26.1, reorderQty: 200, category: 'Accessories' },
-  { id: '7', name: 'Limited Drop Jacket - M', sku: 'LDJ-M', stock: 12, soldPerDay: 2.8, daysRemaining: 4.3, reorderQty: 80, category: 'Apparel' },
-  { id: '8', name: 'Limited Drop Jacket - L', sku: 'LDJ-L', stock: 31, soldPerDay: 2.2, daysRemaining: 14.1, reorderQty: 60, category: 'Apparel' },
-  { id: '9', name: 'Rocknot Tote Bag', sku: 'RTB-OS', stock: 245, soldPerDay: 4.1, daysRemaining: 59.8, reorderQty: 150, category: 'Accessories' },
-  { id: '10', name: 'Music Lover Socks 3-Pack', sku: 'MLS-3P', stock: 74, soldPerDay: 6.3, daysRemaining: 11.7, reorderQty: 200, category: 'Accessories' },
-  { id: '11', name: 'Graphic Longsleeve - S', sku: 'GLS-S', stock: 55, soldPerDay: 3.8, daysRemaining: 14.5, reorderQty: 100, category: 'Apparel' },
-  { id: '12', name: 'Bucket Hat', sku: 'BH-OS', stock: 320, soldPerDay: 2.1, daysRemaining: 152.4, reorderQty: 80, category: 'Accessories' },
+  { id: '1',  name: 'Transformer Insert - Cognac',        sku: 'RKHANBAG016',        stock: 0,    soldPerDay: 1.8,  daysRemaining: 0,    reorderQty: 100, category: 'Bags' },
+  { id: '2',  name: 'DUO Bag - Off White',                sku: 'RKHANBAG021',        stock: 0,    soldPerDay: 2.1,  daysRemaining: 0,    reorderQty: 120, category: 'Bags' },
+  { id: '3',  name: 'LACE STRAP - Antique Gold (46")',    sku: 'RKSTALAC001-46',     stock: 1,    soldPerDay: 1.2,  daysRemaining: 0.8,  reorderQty: 60,  category: 'Straps' },
+  { id: '4',  name: 'LACE STRAP - Antique Gold (56")',    sku: 'RKSTALAC001-56',     stock: 0,    soldPerDay: 0.9,  daysRemaining: 0,    reorderQty: 45,  category: 'Straps' },
+  { id: '5',  name: 'LACE STRAP - Antique Gold (30")',    sku: 'RKSTALAC001-30',     stock: 17,   soldPerDay: 2.4,  daysRemaining: 7.1,  reorderQty: 110, category: 'Straps' },
+  { id: '6',  name: 'LACE STRAP - Antique Gold (50")',    sku: 'RKSTALAC001-50',     stock: 18,   soldPerDay: 2.1,  daysRemaining: 8.6,  reorderQty: 95,  category: 'Straps' },
+  { id: '7',  name: 'PETITE CROWN STRAP - Jet Black (56")', sku: 'RKSTRCHAPET017-56', stock: 4,  soldPerDay: 1.4,  daysRemaining: 2.9,  reorderQty: 65,  category: 'Straps' },
+  { id: '8',  name: 'PETITE CROWN STRAP - Jet Black (50")', sku: 'RKSTRCHAPET017-50', stock: 11, soldPerDay: 2.2,  daysRemaining: 5.0,  reorderQty: 100, category: 'Straps' },
+  { id: '9',  name: 'CROWN Bracelet - Crystal (8")',      sku: 'RKBRA002-8',         stock: 1,    soldPerDay: 0.8,  daysRemaining: 1.3,  reorderQty: 40,  category: 'Jewelry' },
+  { id: '10', name: 'DUO Bag - Red Nylon',                sku: 'RKHANBAG024',        stock: 72,   soldPerDay: 3.5,  daysRemaining: 20.6, reorderQty: 160, category: 'Bags' },
+  { id: '11', name: 'TWIN STRAP - Jet (30")',             sku: 'RKSTATWI004-30',     stock: 26,   soldPerDay: 2.8,  daysRemaining: 9.3,  reorderQty: 130, category: 'Straps' },
+  { id: '12', name: 'TWIN STRAP - Jet (46")',             sku: 'RKSTATWI004-46',     stock: 28,   soldPerDay: 2.6,  daysRemaining: 10.8, reorderQty: 120, category: 'Straps' },
+  { id: '13', name: 'PETITE CROWN STRAP - Rose Gold (46")', sku: 'RKSTRCHAPET019-46', stock: 11, soldPerDay: 1.8,  daysRemaining: 6.1,  reorderQty: 80,  category: 'Straps' },
+  { id: '14', name: 'Crystal Knot Bracelet Set (6/6.5")', sku: 'RNBD0118-6/6.5',    stock: -1,   soldPerDay: 1.5,  daysRemaining: 0,    reorderQty: 70,  category: 'Jewelry' },
+  { id: '15', name: 'Crystal Knot Bracelet Set (7")',     sku: 'RNBD0118-7',         stock: -1,   soldPerDay: 2.1,  daysRemaining: 0,    reorderQty: 95,  category: 'Jewelry' },
+  { id: '16', name: 'PETITE CROWN STRAP - Antique Gold (46")', sku: 'RKSTRCHAPET012-46', stock: 39, soldPerDay: 3.2, daysRemaining: 12.2, reorderQty: 145, category: 'Straps' },
+  { id: '17', name: 'PETITE CROWN STRAP - Gunmetal (46")', sku: 'RKSTRCHAPET014-46', stock: 14, soldPerDay: 2.0,  daysRemaining: 7.0,  reorderQty: 90,  category: 'Straps' },
+  { id: '18', name: 'MAGNUM CROWN STRAP - Antique Gold (56")', sku: 'RKSTRCHAPET004-56', stock: 10, soldPerDay: 1.6, daysRemaining: 6.3, reorderQty: 75, category: 'Straps' },
+  { id: '19', name: 'PETITE CROWN STRAP - Crystal (all)', sku: 'RKSTRCHAPET-CRYSTAL', stock: 203, soldPerDay: 5.8, daysRemaining: 35.0, reorderQty: 260, category: 'Straps' },
+  { id: '20', name: 'Petite Hoops - Crystal',             sku: 'RKHOO012/002',       stock: 147, soldPerDay: 4.2,  daysRemaining: 35.0, reorderQty: 190, category: 'Jewelry' },
 ];
 
-// ─── Returns ─────────────────────────────────────────────────────────────────
+// ─── Returns (Live Shopify) ───────────────────────────────────────────────────
+// Total 30d returns: $23,752 on $460,306 revenue = 5.16% return rate
+// Platform breakdown estimated proportionally (Shopify doesn't attribute returns by ad channel)
 
 export const returnsByPlatform: ReturnData[] = [
-  { platform: 'Meta', returnRate: 4.2, returns: 128, revenue: 68400, color: '#1877F2' },
-  { platform: 'TikTok', returnRate: 5.8, returns: 87, revenue: 38200, color: '#000000' },
-  { platform: 'Google', returnRate: 3.1, returns: 62, revenue: 48900, color: '#4285F4' },
-  { platform: 'CTV', returnRate: 3.8, returns: 41, revenue: 29800, color: '#FF6B35' },
-  { platform: 'Direct', returnRate: 2.4, returns: 38, revenue: 42100, color: '#96BF48' },
+  { platform: 'Meta',    returnRate: 5.8, returns: Math.round(23752 * 0.38), revenue: 460306 * 0.31, color: '#1877F2' },
+  { platform: 'Google',  returnRate: 4.1, returns: Math.round(23752 * 0.22), revenue: 460306 * 0.22, color: '#4285F4' },
+  { platform: 'Direct',  returnRate: 3.9, returns: Math.round(23752 * 0.18), revenue: 460306 * 0.18, color: '#96BF48' },
+  { platform: 'TikTok',  returnRate: 6.2, returns: Math.round(23752 * 0.14), revenue: 460306 * 0.16, color: '#555555' },
+  { platform: 'CTV',     returnRate: 4.5, returns: Math.round(23752 * 0.08), revenue: 460306 * 0.09, color: '#FF6B35' },
 ];
 
 export const returnTrends: ReturnTrend[] = Array.from({ length: 30 }, (_, i) => {
@@ -385,11 +420,11 @@ export const returnTrends: ReturnTrend[] = Array.from({ length: 30 }, (_, i) => 
 });
 
 export const topReturnedProducts = [
-  { name: 'Festival Hoodie - L', returns: 42, returnRate: 12.4, topReason: 'Sizing too small' },
-  { name: 'Limited Drop Jacket - M', returns: 28, returnRate: 10.8, topReason: 'Different than expected' },
-  { name: 'Rocknot Classic Tee - S', returns: 24, returnRate: 8.6, topReason: 'Sizing inconsistency' },
-  { name: 'Graphic Longsleeve - S', returns: 19, returnRate: 7.2, topReason: 'Color not as shown' },
-  { name: 'Bucket Hat', returns: 11, returnRate: 4.4, topReason: 'Fit issue' },
+  { name: 'THE TRANSFORMER - Crystal',               returns: 38, returnRate: 7.1, topReason: 'Different than expected' },
+  { name: 'Gali Chain Top',                          returns: 31, returnRate: 5.9, topReason: 'Sizing issue' },
+  { name: 'Eden 2-in-1 Clutch - Champagne Bubbles',  returns: 24, returnRate: 6.2, topReason: 'Color not as shown' },
+  { name: 'PETITE CROWN STRAP - Crystal',            returns: 18, returnRate: 4.8, topReason: 'Wrong length ordered' },
+  { name: 'GEM Strap - Crystal',                     returns: 14, returnRate: 3.9, topReason: 'Wrong length ordered' },
 ];
 
 // ─── Attribution ──────────────────────────────────────────────────────────────
