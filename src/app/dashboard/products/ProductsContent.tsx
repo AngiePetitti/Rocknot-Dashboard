@@ -1,0 +1,167 @@
+'use client';
+
+import { useSearchParams } from 'next/navigation';
+import { Timeframe, getTopProductsForTimeframe, getMetricsForTimeframe } from '@/src/lib/mockData';
+import { formatCurrency, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
+import Header from '@/src/components/Header';
+import Card from '@/src/components/ui/Card';
+import MetricCard from '@/src/components/ui/MetricCard';
+import TimeframeSelector from '@/src/components/ui/TimeframeSelector';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+} from 'recharts';
+
+const PRODUCT_COLORS = ['#c4b5fd', '#f9a8d4', '#fde68a', '#86efac', '#93c5fd', '#fdba74', '#ddd6fe', '#fce7f3', '#fef9c3', '#dcfce7'];
+
+export default function ProductsContent() {
+  const searchParams = useSearchParams();
+  const tf = (searchParams.get('tf') || '30d') as Timeframe;
+
+  const products = getTopProductsForTimeframe(tf);
+  const metrics = getMetricsForTimeframe(tf);
+  const totalRevenue = metrics.totalRevenue;
+  const totalUnits = products.reduce((s, p) => s + p.unitsSold, 0);
+  const topProduct = products[0];
+
+  const barData = products.slice(0, 8).map((p, i) => ({
+    name: p.name.replace('Rocknot ', '').replace('Music Lover ', '').slice(0, 20),
+    revenue: p.revenue,
+    color: PRODUCT_COLORS[i],
+  }));
+
+  return (
+    <div>
+      <Header title="Top Products" subtitle={`Sales performance · ${TIMEFRAME_LABELS[tf] || tf}`}>
+        <TimeframeSelector />
+      </Header>
+
+      {/* Metrics */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <MetricCard
+          title="Total Revenue"
+          value={formatCurrency(totalRevenue)}
+          subtitle={`${products.length} products`}
+          accentColor="#fde68a"
+        />
+        <MetricCard
+          title="Units Sold"
+          value={totalUnits.toLocaleString()}
+          subtitle="Across all products"
+          accentColor="#86efac"
+        />
+        <MetricCard
+          title="Top Product"
+          value={topProduct.name.split(' ').slice(0, 2).join(' ')}
+          subtitle={formatCurrency(topProduct.revenue)}
+          accentColor="#c4b5fd"
+        />
+        <MetricCard
+          title="Top Product Share"
+          value={formatPercent(topProduct.percentOfTotal)}
+          subtitle="Of total revenue"
+          accentColor="#f9a8d4"
+        />
+      </div>
+
+      {/* Bar Chart */}
+      <Card accentColor="#fde68a" className="mb-6">
+        <h2 className="text-sm font-bold text-gray-700 mb-1">Revenue by Product</h2>
+        <p className="text-xs text-gray-400 mb-4">Top 8 products</p>
+        <ResponsiveContainer width="100%" height={280}>
+          <BarChart data={barData} layout="vertical" margin={{ top: 0, right: 20, left: 10, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+            <XAxis
+              type="number"
+              tick={{ fontSize: 10, fill: '#94a3b8' }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v) => '$' + (v / 1000).toFixed(0) + 'k'}
+            />
+            <YAxis
+              type="category"
+              dataKey="name"
+              tick={{ fontSize: 10, fill: '#374151', fontWeight: 500 }}
+              axisLine={false}
+              tickLine={false}
+              width={130}
+            />
+            <Tooltip
+              formatter={(v: unknown) => [formatCurrency(Number(v)), 'Revenue']}
+              contentStyle={{ borderRadius: 12, border: '1px solid #f1f5f9', fontSize: 12 }}
+              cursor={{ fill: '#f8fafc' }}
+            />
+            <Bar dataKey="revenue" radius={[0, 6, 6, 0]} barSize={22}>
+              {barData.map((entry, i) => (
+                <Cell key={i} fill={entry.color} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+
+      {/* Products Table */}
+      <Card accentColor="#86efac">
+        <h2 className="text-sm font-bold text-gray-700 mb-4">Top Sellers Table</h2>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100">
+                <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4">Rank</th>
+                <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4">Product</th>
+                <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4">Category</th>
+                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Units Sold</th>
+                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Revenue</th>
+                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-4">% of Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {products.map((product, i) => (
+                <tr key={product.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                  <td className="py-3 pr-4">
+                    <span
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white"
+                      style={{ backgroundColor: PRODUCT_COLORS[i] || '#e2e8f0', color: i < 3 ? '#374151' : '#374151' }}
+                    >
+                      {i + 1}
+                    </span>
+                  </td>
+                  <td className="py-3 pr-4 font-medium text-gray-800">{product.name}</td>
+                  <td className="py-3 pr-4">
+                    <span className="text-xs font-medium px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full">
+                      {product.category}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4 text-right text-gray-600">{product.unitsSold.toLocaleString()}</td>
+                  <td className="py-3 px-4 text-right font-semibold text-gray-800">{formatCurrency(product.revenue)}</td>
+                  <td className="py-3 pl-4 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${product.percentOfTotal}%`,
+                            backgroundColor: PRODUCT_COLORS[i],
+                          }}
+                        />
+                      </div>
+                      <span className="text-gray-600 w-12 text-right">
+                        {formatPercent(product.percentOfTotal)}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
