@@ -77,10 +77,11 @@ export async function GET(request: NextRequest) {
       const src = (row.source || '').toLowerCase();
 
       byDate[date].adSpend += spend;
-      byDate[date].revenue += revenue;
-      byDate[date].orders += Number(row.orders || row.purchases || 0);
-      byDate[date].newCustomers += Number(row.new_customers || 0);
-      byDate[date].returningCustomers += Number(row.returning_customers || 0);
+      // Windsor uses 'revenue' for Shopify, 'conversion_value' for ad platforms
+      byDate[date].revenue += Number(row.revenue || row.conversion_value || 0);
+      byDate[date].orders += Math.round(Number(row.orders || row.purchases || row.conversions || 0));
+      byDate[date].newCustomers += Math.round(Number(row.new_customers || 0));
+      byDate[date].returningCustomers += Math.round(Number(row.returning_customers || 0));
 
       if (src.includes('facebook') || src.includes('meta') || src.includes('instagram')) {
         byDate[date].metaSpend += spend;
@@ -99,7 +100,7 @@ export async function GET(request: NextRequest) {
 
     const totalRevenue = shopifyRevenue || dailyData.reduce((s, d) => s + d.revenue, 0);
     const totalAdSpend = dailyData.reduce((s, d) => s + d.adSpend, 0);
-    const totalOrders = dailyData.reduce((s, d) => s + d.orders, 0);
+    const totalOrders = Math.round(dailyData.reduce((s, d) => s + d.orders, 0));
     const totalMetaSpend = dailyData.reduce((s, d) => s + d.metaSpend, 0);
     const totalGoogleSpend = dailyData.reduce((s, d) => s + d.googleSpend, 0);
     const totalTikTokSpend = dailyData.reduce((s, d) => s + d.tiktokSpend, 0);
@@ -112,7 +113,7 @@ export async function GET(request: NextRequest) {
       revenueData: dailyData.map(d => ({
         date: d.date,
         revenue: Math.round(d.revenue),
-        orders: d.orders,
+        orders: Math.round(d.orders),
         adSpend: Math.round(d.adSpend),
       })),
       metrics: {
