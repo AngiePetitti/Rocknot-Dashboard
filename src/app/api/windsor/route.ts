@@ -5,16 +5,16 @@ import { Timeframe } from '@/src/lib/mockData';
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 
 // Windsor.ai date presets — format: last_Xd (excludes today), last_XdT (includes today)
-// No "today" or "yesterday" presets — use last_1dT and last_1d respectively
+// last_XdT includes today's partial data; last_Xd is fully completed days only
 const DATE_PRESETS: Record<Timeframe, string> = {
-  today:      'last_1dT',   // last 1 day including today
-  yesterday:  'last_1d',    // last 1 day excluding today
-  '7d':       'last_7d',
-  '14d':      'last_14d',
-  '30d':      'last_30d',
-  last_month: 'this_month',
-  '6m':       'last_180d',
-  ytd:        'this_year',
+  today:      'last_1dT',    // today only (partial)
+  yesterday:  'last_1d',     // yesterday only (completed)
+  '7d':       'last_7dT',    // last 7 days including today
+  '14d':      'last_14dT',   // last 14 days including today
+  '30d':      'last_30dT',   // last 30 days including today
+  last_month: 'last_1m',     // previous calendar month (May when current is June)
+  '6m':       'last_180d',   // last 180 days
+  ytd:        'this_year',   // Jan 1 to today
 };
 
 interface WindsorRow {
