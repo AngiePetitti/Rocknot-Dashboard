@@ -77,9 +77,9 @@ export default function TimeframeSelector() {
   }
 
   return (
-    <div className="flex flex-col gap-2 items-end">
+    <div className="flex flex-col gap-2 items-start w-full">
       {/* Horizontally scrollable on mobile, wraps on desktop */}
-      <div className="flex gap-1.5 items-center overflow-x-auto pb-1 md:flex-wrap md:pb-0 scrollbar-hide">
+      <div className="flex gap-1.5 items-center overflow-x-auto pb-1 md:flex-wrap md:pb-0 scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
         {TIMEFRAMES.map(tf => (
           <button
             key={tf.value}
@@ -106,7 +106,7 @@ export default function TimeframeSelector() {
       </div>
 
       {/* Compare toggle — always visible */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 pl-0.5">
         <label className="flex items-center gap-1.5 cursor-pointer select-none">
           <div
             onClick={() => handleCompareToggle(!compare)}
