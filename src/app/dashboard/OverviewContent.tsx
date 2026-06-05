@@ -141,9 +141,11 @@ export default function OverviewContent() {
             fetch(`/api/windsor?${p}`)
               .then(r => r.json())
               .then(data => {
-                if (data.metrics) setMetrics({ returns: 0, ...data.metrics });
+                const m = data.metrics ? { returns: 0, ...data.metrics } : metrics;
+                if (data.metrics) setMetrics(m);
                 if (data.revenueData?.length) setRevenueData(data.revenueData);
                 if (data.priorPeriod) { setPriorPeriod(data.priorPeriod); setPriorLabel(data.priorLabel || ''); }
+                setLivePlatformSpend(buildLivePlatformSpend(m));
                 setLiveSource(data.source || 'unknown');
                 setLastUpdated(new Date().toLocaleTimeString());
               })

@@ -93,7 +93,7 @@ function aggregateRows(rows: WindsorRow[]) {
 
     if (src.includes('facebook') || src.includes('meta') || src.includes('instagram')) {
       byDate[date].metaSpend += spend;
-    } else if (src.includes('google') || src.includes('youtube')) {
+    } else if (src.includes('google') || src.includes('youtube') || src.includes('adwords') || src.includes('gads') || src.includes('pmax')) {
       byDate[date].googleSpend += spend;
     } else if (src.includes('tiktok')) {
       byDate[date].tiktokSpend += spend;
@@ -182,7 +182,8 @@ export async function GET(request: NextRequest) {
       const fields = 'date,source,spend,revenue,conversion_value,roas,impressions,clicks,conversions,purchases';
       const qs = new URLSearchParams({ api_key: '[KEY]', fields, _renderer: 'json', ...currentParams });
       const raw = await fetchWindsor(currentParams);
-      return NextResponse.json({ debug: true, url: `https://connectors.windsor.ai/all?${qs}`, raw: raw.slice(0, 5) });
+      const sources = [...new Set(raw.map(r => r.source))];
+      return NextResponse.json({ debug: true, url: `https://connectors.windsor.ai/all?${qs}`, sources, raw: raw.slice(0, 20) });
     }
 
     // Fetch current period
