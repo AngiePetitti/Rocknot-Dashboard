@@ -4,15 +4,15 @@ import { Timeframe } from '@/src/lib/mockData';
 
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 
-// Windsor.ai date presets
+// Windsor.ai date presets (Windsor uses underscores with full words)
 const DATE_PRESETS: Record<Timeframe, string> = {
   today:      'today',
   yesterday:  'yesterday',
-  '7d':       'last_7d',
-  '14d':      'last_14d',
-  '30d':      'last_30d',
+  '7d':       'last_7_days',
+  '14d':      'last_14_days',
+  '30d':      'last_30_days',
   last_month: 'last_month',
-  '6m':       'last_180d',
+  '6m':       'last_180_days',
   ytd:        'this_year',
 };
 
@@ -38,14 +38,19 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const datePreset = DATE_PRESETS[tf] || 'last_30d';
+    const datePreset = DATE_PRESETS[tf] || 'last_30_days';
+    const debug = request.nextUrl.searchParams.get('debug') === 'true';
 
-    // Fetch blended daily data from Windsor (all channels combined)
-    const fields = 'date,source,spend,revenue,roas,impressions,clicks,purchases,orders,new_customers,returning_customers';
+    // Windsor field names: spend, revenue (Shopify), conversion_value (ad platforms), conversions, impressions, clicks, roas
+    const fields = 'date,source,spend,revenue,conversion_value,roas,impressions,clicks,conversions,purchases';
     const url = `https://connectors.windsor.ai/all?api_key=${WINDSOR_API_KEY}&date_preset=${datePreset}&fields=${fields}&_renderer=json`;
 
-    const res = await fetch(url, { next: { revalidate: 3600 } }); // cache 1 hour
+    const res = await fetch(url, { next: { revalidate: 3600 } });
     const json = await res.json();
+
+    if (debug) {
+      return NextResponse.json({ debug: true, url: url.replace(WINDSOR_API_KEY!, '[KEY]'), raw: json });
+    }
 
     if (!res.ok || json.error) {
       throw new Error(json.error || `Windsor API error: ${res.status}`);
@@ -73,13 +78,14 @@ export async function GET(request: NextRequest) {
         byDate[date] = { date, revenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, newCustomers: 0, returningCustomers: 0 };
       }
       const spend = Number(row.spend || 0);
-      const revenue = Number(row.revenue || 0);
+      // 'revenue' = Shopify total; 'conversion_value' = ad-attributed revenue from Meta/Google
+      const rowRevenue = Number(row.revenue || 0);
+      const rowConvValue = Number(row.conversion_value || 0);
       const src = (row.source || '').toLowerCase();
 
       byDate[date].adSpend += spend;
-      // Windsor uses 'revenue' for Shopify, 'conversion_value' for ad platforms
-      byDate[date].revenue += Number(row.revenue || row.conversion_value || 0);
-      byDate[date].orders += Math.round(Number(row.orders || row.purchases || row.conversions || 0));
+      byDate[date].revenue += rowRevenue || rowConvValue;
+      byDate[date].orders += Math.round(Number(row.conversions || row.purchases || row.orders || 0));
       byDate[date].newCustomers += Math.round(Number(row.new_customers || 0));
       byDate[date].returningCustomers += Math.round(Number(row.returning_customers || 0));
 
