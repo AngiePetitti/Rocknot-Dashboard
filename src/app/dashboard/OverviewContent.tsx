@@ -20,6 +20,14 @@ interface LiveMetrics {
   aov: number;
   mer: number;
   returns: number;
+  metaSpend?: number;
+  googleSpend?: number;
+  newCustomers?: number;
+  returningCustomers?: number;
+  newCustomerRevenue?: number;
+  returningCustomerRevenue?: number;
+  pctNew?: number;
+  pctReturning?: number;
 }
 
 export default function OverviewContent() {
@@ -40,23 +48,45 @@ export default function OverviewContent() {
     setRevenueData(staticRevenueData);
     setLiveSource('loading');
 
-    fetch(`/api/shopify?tf=${tf}`)
+    // Try Google Sheets API first (Funnel.io data), fall back to Shopify API
+    fetch(`/api/sheets?tf=${tf}`)
       .then(r => r.json())
-      .then(data => {
-        if (data.metrics) setMetrics({ returns: 0, ...data.metrics });
-        if (data.revenueData?.length) setRevenueData(data.revenueData);
-        setLiveSource(data.source || 'unknown');
+      .then(sheetsData => {
+        if (sheetsData.summary) {
+          setMetrics({ returns: 0, ...sheetsData.summary });
+        }
+        if (sheetsData.dailyData?.length) {
+          setRevenueData(sheetsData.dailyData.map((d: { date: string; revenue: number; orders: number; adSpend: number }) => ({
+            date: d.date,
+            revenue: d.revenue,
+            orders: d.orders,
+            adSpend: d.adSpend,
+          })));
+        }
+        setLiveSource(sheetsData.source === 'google_sheets_live' ? 'sheets_live' : 'sheets_static');
         setLastUpdated(new Date().toLocaleTimeString());
       })
       .catch(() => {
-        setLiveSource('mock_fallback');
-        setLastUpdated(new Date().toLocaleTimeString());
+        // Fall back to Shopify API
+        fetch(`/api/shopify?tf=${tf}`)
+          .then(r => r.json())
+          .then(data => {
+            if (data.metrics) setMetrics({ returns: 0, ...data.metrics });
+            if (data.revenueData?.length) setRevenueData(data.revenueData);
+            setLiveSource(data.source || 'unknown');
+            setLastUpdated(new Date().toLocaleTimeString());
+          })
+          .catch(() => {
+            setLiveSource('mock_fallback');
+            setLastUpdated(new Date().toLocaleTimeString());
+          });
       });
   }, [tf]);
 
   const merColor = metrics.mer >= MER_GOAL ? '#22c55e' : '#ef4444';
   const merLabel = metrics.mer >= MER_GOAL ? '✓ Above Goal' : '✗ Below Goal';
-  const isLive = liveSource === 'shopify_live';
+  const isLive = liveSource === 'shopify_live' || liveSource === 'sheets_live';
+  const isSheets = liveSource === 'sheets_live' || liveSource === 'sheets_static';
 
   return (
     <div>
@@ -74,7 +104,11 @@ export default function OverviewContent() {
         />
         <span className="text-xs text-gray-400">
           {liveSource === 'loading'
-            ? 'Loading live Shopify data...'
+            ? 'Loading data...'
+            : liveSource === 'sheets_live'
+            ? `Live · Funnel.io via Google Sheets · Updated ${lastUpdated}`
+            : liveSource === 'sheets_static'
+            ? `Funnel.io data (May 2026) · ${lastUpdated}`
             : isLive
             ? `Live Shopify data · Updated ${lastUpdated}`
             : `Estimated data · ${lastUpdated}`}
@@ -82,12 +116,14 @@ export default function OverviewContent() {
         <button
           onClick={() => {
             setLiveSource('loading');
-            fetch(`/api/shopify?tf=${tf}`)
+            fetch(`/api/sheets?tf=${tf}`)
               .then(r => r.json())
               .then(data => {
-                if (data.metrics) setMetrics({ returns: 0, ...data.metrics });
-                if (data.revenueData?.length) setRevenueData(data.revenueData);
-                setLiveSource(data.source || 'unknown');
+                if (data.summary) setMetrics({ returns: 0, ...data.summary });
+                if (data.dailyData?.length) setRevenueData(data.dailyData.map((d: { date: string; revenue: number; orders: number; adSpend: number }) => ({
+                  date: d.date, revenue: d.revenue, orders: d.orders, adSpend: d.adSpend,
+                })));
+                setLiveSource(data.source === 'google_sheets_live' ? 'sheets_live' : 'sheets_static');
                 setLastUpdated(new Date().toLocaleTimeString());
               })
               .catch(() => setLiveSource('mock_fallback'));
@@ -155,7 +191,7 @@ export default function OverviewContent() {
       </div>
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard
           title="Shopify Net Sales"
           value={formatCurrency(metrics.totalRevenue)}
@@ -166,7 +202,7 @@ export default function OverviewContent() {
         <MetricCard
           title="Total Ad Spend"
           value={formatCurrency(metrics.totalAdSpend)}
-          subtitle="Meta + TikTok + Google + CTV"
+          subtitle={metrics.metaSpend ? `Meta ${formatCurrency(metrics.metaSpend)} · Google ${formatCurrency(metrics.googleSpend ?? 0)}` : 'Meta + Google'}
           accentColor="#f9a8d4"
           trend={{ value: '8.1% vs prior period', positive: false }}
         />
@@ -178,7 +214,7 @@ export default function OverviewContent() {
           trend={{ value: '3.2% vs prior period', positive: true }}
         />
         <MetricCard
-          title="Blended ROAS"
+          title="Blended MER"
           value={formatROAS(metrics.mer)}
           subtitle="Across all platforms"
           accentColor={metrics.mer >= MER_GOAL ? '#86efac' : '#fca5a5'}
@@ -189,6 +225,38 @@ export default function OverviewContent() {
           }}
         />
       </div>
+
+      {/* New vs Returning Customer Cards */}
+      {metrics.newCustomers !== undefined && metrics.newCustomers > 0 && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <MetricCard
+            title="New Customers"
+            value={String(metrics.newCustomers)}
+            subtitle={`${metrics.pctNew?.toFixed(1) ?? 0}% of orders`}
+            accentColor="#a5f3fc"
+            trend={{ value: formatCurrency(metrics.newCustomerRevenue ?? 0) + ' revenue', positive: true }}
+          />
+          <MetricCard
+            title="Returning Customers"
+            value={String(metrics.returningCustomers ?? 0)}
+            subtitle={`${metrics.pctReturning?.toFixed(1) ?? 0}% of orders`}
+            accentColor="#bbf7d0"
+            trend={{ value: formatCurrency(metrics.returningCustomerRevenue ?? 0) + ' revenue', positive: true }}
+          />
+          <MetricCard
+            title="Meta Spend"
+            value={formatCurrency(metrics.metaSpend ?? 0)}
+            subtitle={`${metrics.metaSpend && metrics.totalAdSpend ? ((metrics.metaSpend / metrics.totalAdSpend) * 100).toFixed(0) : 0}% of total spend`}
+            accentColor="#c7d2fe"
+          />
+          <MetricCard
+            title="Google Spend"
+            value={formatCurrency(metrics.googleSpend ?? 0)}
+            subtitle={`${metrics.googleSpend && metrics.totalAdSpend ? ((metrics.googleSpend / metrics.totalAdSpend) * 100).toFixed(0) : 0}% of total spend`}
+            accentColor="#fef08a"
+          />
+        </div>
+      )}
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">

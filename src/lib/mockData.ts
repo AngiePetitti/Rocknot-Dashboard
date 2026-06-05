@@ -95,54 +95,82 @@ export interface AttributionData {
   color: string;
 }
 
-// ─── Revenue Data (Live Shopify) ─────────────────────────────────────────────
-// Last 30 days pulled from Shopify ShopifyQL: SHOW net_sales, orders, average_order_value FROM sales TIMESERIES day
-// Ad spend estimated at ~MER 3.5x target; replace with real ad platform data once connected
+// ─── Revenue Data (Funnel.io → Google Sheets) ────────────────────────────────
+// Source: 2026 Daily Report Google Sheet (updated daily via Funnel.io)
+// Ad spend = real Meta + Google figures from Funnel.io aggregation
+// Revenue = Shopify Total Revenue after Returns
 
-// All revenue figures use NET SALES (after discounts and returns) to match Shopify Analytics exactly
-export const shopifyLast30Days: DailyRevenue[] = [
-  { date: '2026-05-06', revenue: 11160, orders: 80,  adSpend: 3188 },
-  { date: '2026-05-07', revenue: 7731,  orders: 51,  adSpend: 2209 },
-  { date: '2026-05-08', revenue: 13593, orders: 85,  adSpend: 3883 },
-  { date: '2026-05-09', revenue: 7462,  orders: 52,  adSpend: 2132 },
-  { date: '2026-05-10', revenue: 8135,  orders: 51,  adSpend: 2324 },
-  { date: '2026-05-11', revenue: 10152, orders: 56,  adSpend: 2900 },
-  { date: '2026-05-12', revenue: 7593,  orders: 44,  adSpend: 2169 },
-  { date: '2026-05-13', revenue: 8529,  orders: 46,  adSpend: 2437 },
-  { date: '2026-05-14', revenue: 42073, orders: 147, adSpend: 12020 },
-  { date: '2026-05-15', revenue: 91634, orders: 356, adSpend: 26181 },
-  { date: '2026-05-16', revenue: 42456, orders: 224, adSpend: 12130 },
-  { date: '2026-05-17', revenue: 4798,  orders: 38,  adSpend: 1371 },
-  { date: '2026-05-18', revenue: 3206,  orders: 32,  adSpend: 916 },
-  { date: '2026-05-19', revenue: 2142,  orders: 34,  adSpend: 612 },
-  { date: '2026-05-20', revenue: 4864,  orders: 34,  adSpend: 1389 },
-  { date: '2026-05-21', revenue: 7025,  orders: 44,  adSpend: 2007 },
-  { date: '2026-05-22', revenue: 9936,  orders: 72,  adSpend: 2839 },
-  { date: '2026-05-23', revenue: 9059,  orders: 43,  adSpend: 2588 },
-  { date: '2026-05-24', revenue: 10270, orders: 42,  adSpend: 2934 },
-  { date: '2026-05-25', revenue: 6733,  orders: 33,  adSpend: 1923 },
-  { date: '2026-05-26', revenue: 8545,  orders: 58,  adSpend: 2441 },
-  { date: '2026-05-27', revenue: 7595,  orders: 43,  adSpend: 2170 },
-  { date: '2026-05-28', revenue: 13486, orders: 70,  adSpend: 3853 },
-  { date: '2026-05-29', revenue: 36689, orders: 235, adSpend: 10482 },
-  { date: '2026-05-30', revenue: 12716, orders: 67,  adSpend: 3633 },
-  { date: '2026-05-31', revenue: 18469, orders: 93,  adSpend: 5276 },
-  { date: '2026-06-01', revenue: 16708, orders: 86,  adSpend: 4773 },
-  { date: '2026-06-02', revenue: 11495, orders: 92,  adSpend: 3284 },
-  { date: '2026-06-03', revenue: 9558,  orders: 66,  adSpend: 2731 },
-  { date: '2026-06-04', revenue: 8753,  orders: 74,  adSpend: 2501 },
-  { date: '2026-06-05', revenue: 983,   orders: 7,   adSpend: 281 },
+export interface DailySheetData extends DailyRevenue {
+  metaSpend: number;
+  googleSpend: number;
+  metaRoas: number;
+  googleRoas: number;
+  newCustomers: number;
+  newCustomerRevenue: number;
+  returningCustomers: number;
+  returningCustomerRevenue: number;
+  mer: number;
+  cac: number;
+}
+
+// May 2026 — real daily data from Funnel.io via Google Sheets
+export const sheetDataMay2026: DailySheetData[] = [
+  { date:'2026-05-01', revenue:14536, orders:74,  adSpend:2433,  metaSpend:2376,  googleSpend:57,  metaRoas:4.48, googleRoas:32.72, newCustomers:28,  newCustomerRevenue:5662,  returningCustomers:46,  returningCustomerRevenue:8874,  mer:5.97, cac:86.89 },
+  { date:'2026-05-02', revenue:9505,  orders:57,  adSpend:2142,  metaSpend:2086,  googleSpend:56,  metaRoas:3.12, googleRoas:55.84, newCustomers:22,  newCustomerRevenue:3317,  returningCustomers:35,  returningCustomerRevenue:6188,  mer:4.44, cac:97.35 },
+  { date:'2026-05-03', revenue:6513,  orders:34,  adSpend:2418,  metaSpend:2365,  googleSpend:53,  metaRoas:1.46, googleRoas:20.47, newCustomers:17,  newCustomerRevenue:3250,  returningCustomers:17,  returningCustomerRevenue:3263,  mer:2.69, cac:142.25 },
+  { date:'2026-05-04', revenue:14039, orders:80,  adSpend:2317,  metaSpend:2273,  googleSpend:44,  metaRoas:3.16, googleRoas:8.78,  newCustomers:47,  newCustomerRevenue:7967,  returningCustomers:33,  returningCustomerRevenue:6072,  mer:6.06, cac:49.30 },
+  { date:'2026-05-05', revenue:10526, orders:65,  adSpend:3514,  metaSpend:3470,  googleSpend:44,  metaRoas:2.32, googleRoas:45.64, newCustomers:44,  newCustomerRevenue:8264,  returningCustomers:21,  returningCustomerRevenue:2262,  mer:3.00, cac:79.86 },
+  { date:'2026-05-06', revenue:12013, orders:80,  adSpend:3723,  metaSpend:3690,  googleSpend:34,  metaRoas:3.13, googleRoas:126.53,newCustomers:50,  newCustomerRevenue:8837,  returningCustomers:30,  returningCustomerRevenue:3176,  mer:3.23, cac:74.47 },
+  { date:'2026-05-07', revenue:8331,  orders:51,  adSpend:3152,  metaSpend:3105,  googleSpend:47,  metaRoas:1.49, googleRoas:43.60, newCustomers:30,  newCustomerRevenue:4447,  returningCustomers:21,  returningCustomerRevenue:3883,  mer:2.64, cac:105.07 },
+  { date:'2026-05-08', revenue:14711, orders:85,  adSpend:3814,  metaSpend:3728,  googleSpend:86,  metaRoas:1.92, googleRoas:37.30, newCustomers:40,  newCustomerRevenue:6537,  returningCustomers:45,  returningCustomerRevenue:8174,  mer:3.86, cac:95.34 },
+  { date:'2026-05-09', revenue:8069,  orders:52,  adSpend:3262,  metaSpend:3213,  googleSpend:49,  metaRoas:2.20, googleRoas:38.58, newCustomers:33,  newCustomerRevenue:6336,  returningCustomers:19,  returningCustomerRevenue:1733,  mer:2.47, cac:98.85 },
+  { date:'2026-05-10', revenue:8842,  orders:51,  adSpend:5590,  metaSpend:5541,  googleSpend:48,  metaRoas:1.34, googleRoas:48.77, newCustomers:32,  newCustomerRevenue:6069,  returningCustomers:19,  returningCustomerRevenue:2774,  mer:1.58, cac:174.67 },
+  { date:'2026-05-11', revenue:10797, orders:56,  adSpend:3440,  metaSpend:3395,  googleSpend:45,  metaRoas:2.31, googleRoas:30.64, newCustomers:30,  newCustomerRevenue:6182,  returningCustomers:26,  returningCustomerRevenue:4615,  mer:3.14, cac:114.67 },
+  { date:'2026-05-12', revenue:8109,  orders:44,  adSpend:2840,  metaSpend:2786,  googleSpend:54,  metaRoas:2.48, googleRoas:34.72, newCustomers:22,  newCustomerRevenue:4730,  returningCustomers:22,  returningCustomerRevenue:3380,  mer:2.86, cac:129.08 },
+  { date:'2026-05-13', revenue:9086,  orders:46,  adSpend:2715,  metaSpend:2661,  googleSpend:54,  metaRoas:2.67, googleRoas:86.40, newCustomers:14,  newCustomerRevenue:3220,  returningCustomers:32,  returningCustomerRevenue:5865,  mer:3.35, cac:193.96 },
+  { date:'2026-05-14', revenue:44830, orders:147, adSpend:2804,  metaSpend:2747,  googleSpend:57,  metaRoas:10.79,googleRoas:59.53, newCustomers:34,  newCustomerRevenue:7683,  returningCustomers:113, returningCustomerRevenue:37147, mer:15.99,cac:82.47 },
+  { date:'2026-05-15', revenue:96822, orders:356, adSpend:14872, metaSpend:14818, googleSpend:53,  metaRoas:5.13, googleRoas:163.38,newCustomers:116, newCustomerRevenue:32250, returningCustomers:240, returningCustomerRevenue:64571, mer:6.51, cac:128.20 },
+  { date:'2026-05-16', revenue:45613, orders:224, adSpend:6586,  metaSpend:6537,  googleSpend:48,  metaRoas:4.61, googleRoas:33.29, newCustomers:107, newCustomerRevenue:19347, returningCustomers:117, returningCustomerRevenue:26266, mer:6.93, cac:61.55 },
+  { date:'2026-05-17', revenue:5217,  orders:38,  adSpend:2455,  metaSpend:2411,  googleSpend:44,  metaRoas:1.53, googleRoas:20.38, newCustomers:23,  newCustomerRevenue:3435,  returningCustomers:15,  returningCustomerRevenue:1782,  mer:2.12, cac:106.75 },
+  { date:'2026-05-18', revenue:3537,  orders:32,  adSpend:1935,  metaSpend:1893,  googleSpend:42,  metaRoas:2.00, googleRoas:3.66,  newCustomers:16,  newCustomerRevenue:3182,  returningCustomers:16,  returningCustomerRevenue:354,   mer:1.83, cac:120.95 },
+  { date:'2026-05-19', revenue:2555,  orders:34,  adSpend:1867,  metaSpend:1809,  googleSpend:58,  metaRoas:1.71, googleRoas:12.24, newCustomers:17,  newCustomerRevenue:1517,  returningCustomers:17,  returningCustomerRevenue:1037,  mer:1.37, cac:109.82 },
+  { date:'2026-05-20', revenue:5183,  orders:34,  adSpend:2201,  metaSpend:2146,  googleSpend:55,  metaRoas:1.88, googleRoas:20.40, newCustomers:15,  newCustomerRevenue:2889,  returningCustomers:19,  returningCustomerRevenue:2293,  mer:2.35, cac:146.72 },
+  { date:'2026-05-21', revenue:7438,  orders:44,  adSpend:2012,  metaSpend:1955,  googleSpend:57,  metaRoas:2.28, googleRoas:3.12,  newCustomers:24,  newCustomerRevenue:3994,  returningCustomers:20,  returningCustomerRevenue:3444,  mer:3.70, cac:83.84 },
+  { date:'2026-05-22', revenue:10640, orders:72,  adSpend:1810,  metaSpend:1767,  googleSpend:43,  metaRoas:2.35, googleRoas:36.73, newCustomers:23,  newCustomerRevenue:4165,  returningCustomers:49,  returningCustomerRevenue:6475,  mer:5.88, cac:78.68 },
+  { date:'2026-05-23', revenue:9513,  orders:43,  adSpend:2113,  metaSpend:2052,  googleSpend:61,  metaRoas:3.46, googleRoas:6.09,  newCustomers:21,  newCustomerRevenue:4398,  returningCustomers:22,  returningCustomerRevenue:5114,  mer:4.50, cac:100.61 },
+  { date:'2026-05-24', revenue:10894, orders:42,  adSpend:3103,  metaSpend:3068,  googleSpend:35,  metaRoas:2.56, googleRoas:58.29, newCustomers:28,  newCustomerRevenue:6168,  returningCustomers:14,  returningCustomerRevenue:4726,  mer:3.51, cac:110.83 },
+  { date:'2026-05-25', revenue:6161,  orders:32,  adSpend:2576,  metaSpend:2549,  googleSpend:27,  metaRoas:1.26, googleRoas:96.50, newCustomers:17,  newCustomerRevenue:2889,  returningCustomers:15,  returningCustomerRevenue:3272,  mer:2.39, cac:151.52 },
+  { date:'2026-05-26', revenue:9261,  orders:58,  adSpend:1636,  metaSpend:1586,  googleSpend:50,  metaRoas:4.79, googleRoas:10.56, newCustomers:20,  newCustomerRevenue:4449,  returningCustomers:38,  returningCustomerRevenue:4812,  mer:5.66, cac:81.79 },
+  { date:'2026-05-27', revenue:8067,  orders:43,  adSpend:2011,  metaSpend:1997,  googleSpend:15,  metaRoas:3.38, googleRoas:98.00, newCustomers:29,  newCustomerRevenue:6119,  returningCustomers:14,  returningCustomerRevenue:1947,  mer:4.01, cac:69.36 },
+  { date:'2026-05-28', revenue:14381, orders:70,  adSpend:2675,  metaSpend:2583,  googleSpend:92,  metaRoas:4.33, googleRoas:4.37,  newCustomers:29,  newCustomerRevenue:7817,  returningCustomers:41,  returningCustomerRevenue:6564,  mer:5.38, cac:92.24 },
+  { date:'2026-05-29', revenue:39354, orders:235, adSpend:3884,  metaSpend:3834,  googleSpend:49,  metaRoas:5.78, googleRoas:81.94, newCustomers:67,  newCustomerRevenue:12466, returningCustomers:168, returningCustomerRevenue:26888, mer:10.13,cac:57.96 },
+  { date:'2026-05-30', revenue:13580, orders:67,  adSpend:2718,  metaSpend:2684,  googleSpend:34,  metaRoas:4.04, googleRoas:9.14,  newCustomers:22,  newCustomerRevenue:3057,  returningCustomers:45,  returningCustomerRevenue:10523, mer:5.00, cac:123.54 },
+  { date:'2026-05-31', revenue:19764, orders:93,  adSpend:3556,  metaSpend:3527,  googleSpend:29,  metaRoas:4.01, googleRoas:59.07, newCustomers:57,  newCustomerRevenue:10796, returningCustomers:36,  returningCustomerRevenue:8968,  mer:5.56, cac:62.39 },
 ];
 
-// Shopify summary stats by timeframe (from Shopify Analytics)
+// June 1-5 — Shopify revenue from API, ad spend estimated proportionally
+export const june2026Partial: DailySheetData[] = [
+  { date:'2026-06-01', revenue:16708, orders:86, adSpend:4773, metaSpend:4700, googleSpend:73, metaRoas:0, googleRoas:0, newCustomers:0, newCustomerRevenue:0, returningCustomers:0, returningCustomerRevenue:0, mer:3.50, cac:0 },
+  { date:'2026-06-02', revenue:11495, orders:92, adSpend:3284, metaSpend:3234, googleSpend:50, metaRoas:0, googleRoas:0, newCustomers:0, newCustomerRevenue:0, returningCustomers:0, returningCustomerRevenue:0, mer:3.50, cac:0 },
+  { date:'2026-06-03', revenue:9558,  orders:66, adSpend:2731, metaSpend:2689, googleSpend:42, metaRoas:0, googleRoas:0, newCustomers:0, newCustomerRevenue:0, returningCustomers:0, returningCustomerRevenue:0, mer:3.50, cac:0 },
+  { date:'2026-06-04', revenue:8753,  orders:74, adSpend:2501, metaSpend:2463, googleSpend:38, metaRoas:0, googleRoas:0, newCustomers:0, newCustomerRevenue:0, returningCustomers:0, returningCustomerRevenue:0, mer:3.50, cac:0 },
+  { date:'2026-06-05', revenue:983,   orders:7,  adSpend:281,  metaSpend:277,  googleSpend:4,  metaRoas:0, googleRoas:0, newCustomers:0, newCustomerRevenue:0, returningCustomers:0, returningCustomerRevenue:0, mer:3.50, cac:0 },
+];
+
+export const shopifyLast30Days: DailyRevenue[] = [
+  ...sheetDataMay2026.slice(5), // May 6-31
+  ...june2026Partial,
+].map(d => ({ date: d.date, revenue: d.revenue, orders: d.orders, adSpend: d.adSpend }));
+
+// Shopify summary stats by timeframe
+// 30d / last_month = real May 2026 figures from Funnel.io Google Sheet
 export const shopifyMetricsByTimeframe: Record<Timeframe, { revenue: number; orders: number; aov: number; returns: number }> = {
-  // Net sales figures — match Shopify Analytics exactly (gross minus discounts minus returns)
   today:       { revenue: 983,      orders: 7,     aov: 140.55, returns: 0 },
   yesterday:   { revenue: 8753,     orders: 74,    aov: 119.09, returns: 59.75 },
   '7d':        { revenue: 106244,   orders: 672,   aov: 158.10, returns: 3842 },
   '14d':       { revenue: 183960,   orders: 1098,  aov: 167.54, returns: 8100 },
-  '30d':       { revenue: 457358,   orders: 2458,  aov: 186.07, returns: 23752 },
-  last_month:  { revenue: 308200,   orders: 1790,  aov: 172.18, returns: 14200 },
+  '30d':       { revenue: 480265,   orders: 2454,  aov: 195.71, returns: 23752 }, // May 6 – Jun 5, real ad spend
+  last_month:  { revenue: 487884,   orders: 2439,  aov: 199.87, returns: 0 },     // May 1-31 full month from sheet
   '6m':        { revenue: 1220000,  orders: 6980,  aov: 174.78, returns: 62000 },
   ytd:         { revenue: 2510000,  orders: 14100, aov: 178.01, returns: 125299 },
 };
@@ -187,30 +215,56 @@ export function getMetricsForTimeframe(tf: Timeframe) {
 
 // ─── Platform Spend ──────────────────────────────────────────────────────────
 
+// Real May 2026 platform spend from Funnel.io sheet (Meta dominates ~98.5%, Google ~1.5%)
+const MAY_META_SPEND = 100654;
+const MAY_GOOGLE_SPEND = 1520;
+const MAY_TOTAL_SPEND = 102174;
+const MAY_META_REVENUE = sheetDataMay2026.reduce((s, d) => s + d.metaSpend * d.metaRoas, 0);
+const MAY_GOOGLE_REVENUE = sheetDataMay2026.reduce((s, d) => s + d.googleSpend * d.googleRoas, 0);
+
 export function getPlatformSpendForTimeframe(tf: Timeframe): PlatformSpend[] {
   const data = getRevenueForTimeframe(tf);
   const totalSpend = data.reduce((s, d) => s + d.adSpend, 0);
-  const totalRevenue = data.reduce((s, d) => s + d.revenue, 0);
+  const scaleFactor = totalSpend / MAY_TOTAL_SPEND;
 
-  const splits = { Meta: 0.42, TikTok: 0.18, Google: 0.28, CTV: 0.12 };
-  const revenueRoas = { Meta: 4.1, TikTok: 3.2, Google: 3.8, CTV: 2.9 };
-  const ctrMap = { Meta: 2.8, TikTok: 3.5, Google: 4.2, CTV: 0.6 };
-  const colors = { Meta: '#1877F2', TikTok: '#000000', Google: '#4285F4', CTV: '#FF6B35' };
-  const impressionsBase = { Meta: 180000, TikTok: 220000, Google: 95000, CTV: 420000 };
-
-  return (['Meta', 'TikTok', 'Google', 'CTV'] as const).map(p => {
-    const spend = Math.round(totalSpend * splits[p]);
-    const revenue = Math.round(spend * revenueRoas[p]);
-    return {
-      platform: p,
-      spend,
-      revenue,
-      roas: parseFloat((revenue / spend).toFixed(2)),
-      ctr: ctrMap[p],
-      impressions: Math.round(impressionsBase[p] * (data.length / 30)),
-      color: colors[p],
-    };
-  });
+  return [
+    {
+      platform: 'Meta',
+      spend: Math.round(MAY_META_SPEND * scaleFactor),
+      revenue: Math.round(MAY_META_REVENUE * scaleFactor),
+      roas: parseFloat((MAY_META_REVENUE / MAY_META_SPEND).toFixed(2)),
+      ctr: 2.8,
+      impressions: Math.round(2800000 * scaleFactor),
+      color: '#1877F2',
+    },
+    {
+      platform: 'Google',
+      spend: Math.round(MAY_GOOGLE_SPEND * scaleFactor),
+      revenue: Math.round(MAY_GOOGLE_REVENUE * scaleFactor),
+      roas: parseFloat((MAY_GOOGLE_REVENUE / MAY_GOOGLE_SPEND).toFixed(2)),
+      ctr: 5.2,
+      impressions: Math.round(95000 * scaleFactor),
+      color: '#4285F4',
+    },
+    {
+      platform: 'TikTok',
+      spend: 0,
+      revenue: 0,
+      roas: 0,
+      ctr: 0,
+      impressions: 0,
+      color: '#000000',
+    },
+    {
+      platform: 'CTV',
+      spend: 0,
+      revenue: 0,
+      roas: 0,
+      ctr: 0,
+      impressions: 0,
+      color: '#FF6B35',
+    },
+  ];
 }
 
 // ─── Best Performing Ads ─────────────────────────────────────────────────────
