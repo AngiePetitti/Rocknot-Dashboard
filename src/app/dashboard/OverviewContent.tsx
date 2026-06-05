@@ -48,45 +48,23 @@ export default function OverviewContent() {
     setRevenueData(staticRevenueData);
     setLiveSource('loading');
 
-    // Try Google Sheets API first (Funnel.io data), fall back to Shopify API
-    fetch(`/api/sheets?tf=${tf}`)
+    fetch(`/api/windsor?tf=${tf}`)
       .then(r => r.json())
-      .then(sheetsData => {
-        if (sheetsData.summary) {
-          setMetrics({ returns: 0, ...sheetsData.summary });
-        }
-        if (sheetsData.dailyData?.length) {
-          setRevenueData(sheetsData.dailyData.map((d: { date: string; revenue: number; orders: number; adSpend: number }) => ({
-            date: d.date,
-            revenue: d.revenue,
-            orders: d.orders,
-            adSpend: d.adSpend,
-          })));
-        }
-        setLiveSource(sheetsData.source === 'google_sheets_live' ? 'sheets_live' : 'sheets_static');
+      .then(data => {
+        if (data.metrics) setMetrics({ returns: 0, ...data.metrics });
+        if (data.revenueData?.length) setRevenueData(data.revenueData);
+        setLiveSource(data.source || 'unknown');
         setLastUpdated(new Date().toLocaleTimeString());
       })
       .catch(() => {
-        // Fall back to Shopify API
-        fetch(`/api/shopify?tf=${tf}`)
-          .then(r => r.json())
-          .then(data => {
-            if (data.metrics) setMetrics({ returns: 0, ...data.metrics });
-            if (data.revenueData?.length) setRevenueData(data.revenueData);
-            setLiveSource(data.source || 'unknown');
-            setLastUpdated(new Date().toLocaleTimeString());
-          })
-          .catch(() => {
-            setLiveSource('mock_fallback');
-            setLastUpdated(new Date().toLocaleTimeString());
-          });
+        setLiveSource('mock_fallback');
+        setLastUpdated(new Date().toLocaleTimeString());
       });
   }, [tf]);
 
   const merColor = metrics.mer >= MER_GOAL ? '#22c55e' : '#ef4444';
   const merLabel = metrics.mer >= MER_GOAL ? '✓ Above Goal' : '✗ Below Goal';
-  const isLive = liveSource === 'shopify_live' || liveSource === 'sheets_live';
-  const isSheets = liveSource === 'sheets_live' || liveSource === 'sheets_static';
+  const isLive = liveSource === 'windsor_live';
 
   return (
     <div>
@@ -104,26 +82,20 @@ export default function OverviewContent() {
         />
         <span className="text-xs text-gray-400">
           {liveSource === 'loading'
-            ? 'Loading data...'
-            : liveSource === 'sheets_live'
-            ? `Live · Funnel.io via Google Sheets · Updated ${lastUpdated}`
-            : liveSource === 'sheets_static'
-            ? `Funnel.io data (May 2026) · ${lastUpdated}`
+            ? 'Loading Windsor data...'
             : isLive
-            ? `Live Shopify data · Updated ${lastUpdated}`
+            ? `Live · Windsor.ai · Updated ${lastUpdated}`
             : `Estimated data · ${lastUpdated}`}
         </span>
         <button
           onClick={() => {
             setLiveSource('loading');
-            fetch(`/api/sheets?tf=${tf}`)
+            fetch(`/api/windsor?tf=${tf}`)
               .then(r => r.json())
               .then(data => {
-                if (data.summary) setMetrics({ returns: 0, ...data.summary });
-                if (data.dailyData?.length) setRevenueData(data.dailyData.map((d: { date: string; revenue: number; orders: number; adSpend: number }) => ({
-                  date: d.date, revenue: d.revenue, orders: d.orders, adSpend: d.adSpend,
-                })));
-                setLiveSource(data.source === 'google_sheets_live' ? 'sheets_live' : 'sheets_static');
+                if (data.metrics) setMetrics({ returns: 0, ...data.metrics });
+                if (data.revenueData?.length) setRevenueData(data.revenueData);
+                setLiveSource(data.source || 'unknown');
                 setLastUpdated(new Date().toLocaleTimeString());
               })
               .catch(() => setLiveSource('mock_fallback'));
