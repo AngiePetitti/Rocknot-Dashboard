@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getMetricsForTimeframe, getRevenueForTimeframe } from '@/src/lib/mockData';
 import { Timeframe } from '@/src/lib/mockData';
 
+export const dynamic = 'force-dynamic';
+
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 
 // Windsor date presets — format: last_Xd (excludes today), last_XdT (includes today)
@@ -144,11 +146,14 @@ function aggregateRows(rows: WindsorRow[]) {
   return { metrics, revenueData };
 }
 
-async function fetchWindsor(params: Record<string, string>): Promise<WindsorRow[]> {
+async function fetchWindsor(params: Record<string, string>, revalidate = 3600): Promise<WindsorRow[]> {
   const fields = 'date,source,spend,revenue,conversion_value,roas,impressions,clicks,conversions,purchases';
   const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
   const url = `https://connectors.windsor.ai/all?${qs}`;
-  const res = await fetch(url, { next: { revalidate: 3600 } });
+  const fetchOpts = revalidate === 0
+    ? { cache: 'no-store' as const }
+    : { next: { revalidate } };
+  const res = await fetch(url, fetchOpts);
   const json = await res.json();
   if (json.error) throw new Error(json.error);
   return json.data || [];
@@ -201,19 +206,21 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ debug: true, url: `https://connectors.windsor.ai/all?${qs}`, sources, raw: raw.slice(0, 20) });
     }
 
-    // Fetch current period
-    let currentRows = await fetchWindsor(currentParams);
+    // today/yesterday: never cache — Windsor syncs hourly, we want the freshest data
+    const isShortTf = tf === 'today' || tf === 'yesterday';
+    const cacheSeconds = isShortTf ? 0 : 3600;
 
-    // If today/yesterday returns no data, Windsor's sync hasn't caught up yet.
-    // Automatically fall back to the most recent available day (last 7 days).
+    // Fetch current period
+    let currentRows = await fetchWindsor(currentParams, cacheSeconds);
+
+    // If today/yesterday still returns no data, Windsor's current sync cycle hasn't
+    // included today yet — fall back to the most recent available day.
     let latestAvailableDate: string | null = null;
-    if (currentRows.length === 0 && (tf === 'today' || tf === 'yesterday')) {
-      const recentRows = await fetchWindsor({ date_preset: 'last_7dT' });
+    if (currentRows.length === 0 && isShortTf) {
+      const recentRows = await fetchWindsor({ date_preset: 'last_7dT' }, 0);
       if (recentRows.length > 0) {
-        // Find the most recent date in the data
         const dates = recentRows.map(r => String(r.date || '').split('T')[0]).filter(Boolean).sort();
         latestAvailableDate = dates[dates.length - 1];
-        // Filter to just that one day
         currentRows = recentRows.filter(r => String(r.date || '').split('T')[0] === latestAvailableDate);
       }
     }
