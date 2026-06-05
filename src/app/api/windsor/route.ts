@@ -202,9 +202,24 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch current period
-    const currentRows = await fetchWindsor(currentParams);
+    let currentRows = await fetchWindsor(currentParams);
+
+    // If today/yesterday returns no data, Windsor's sync hasn't caught up yet.
+    // Automatically fall back to the most recent available day (last 7 days).
+    let latestAvailableDate: string | null = null;
+    if (currentRows.length === 0 && (tf === 'today' || tf === 'yesterday')) {
+      const recentRows = await fetchWindsor({ date_preset: 'last_7dT' });
+      if (recentRows.length > 0) {
+        // Find the most recent date in the data
+        const dates = recentRows.map(r => String(r.date || '').split('T')[0]).filter(Boolean).sort();
+        latestAvailableDate = dates[dates.length - 1];
+        // Filter to just that one day
+        currentRows = recentRows.filter(r => String(r.date || '').split('T')[0] === latestAvailableDate);
+      }
+    }
+
     const current = aggregateRows(currentRows);
-    const hasDataLag = currentRows.length === 0 && (tf === 'today' || tf === 'yesterday');
+    const hasDataLag = latestAvailableDate !== null;
 
     // Fetch comparison period if requested
     let priorPeriod = null;
@@ -261,7 +276,7 @@ export async function GET(request: NextRequest) {
       dateTo: dateTo || null,
       metrics: current.metrics,
       revenueData: current.revenueData,
-      ...(hasDataLag ? { dataLag: true } : {}),
+      ...(hasDataLag ? { dataLag: true, latestAvailableDate } : {}),
       ...(priorPeriod ? { priorPeriod, priorLabel } : {}),
     });
 
