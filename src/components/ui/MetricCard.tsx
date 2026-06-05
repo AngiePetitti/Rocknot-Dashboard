@@ -6,8 +6,15 @@ interface MetricCardProps {
   subtitle?: string;
   accentColor: string;
   trend?: { value: string; positive: boolean };
+  comparison?: { current: number; prior: number; label?: string };
   large?: boolean;
   valueColor?: string;
+}
+
+function calcDelta(current: number, prior: number): { pct: number; positive: boolean } | null {
+  if (!prior || prior === 0) return null;
+  const pct = Math.round(((current - prior) / prior) * 1000) / 10;
+  return { pct, positive: pct >= 0 };
 }
 
 export default function MetricCard({
@@ -16,9 +23,12 @@ export default function MetricCard({
   subtitle,
   accentColor,
   trend,
+  comparison,
   large = false,
   valueColor,
 }: MetricCardProps) {
+  const delta = comparison ? calcDelta(comparison.current, comparison.prior) : null;
+
   return (
     <div
       className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col gap-1"
@@ -32,10 +42,17 @@ export default function MetricCard({
         {value}
       </p>
       {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
-      {trend && (
-        <span
-          className={`text-xs font-semibold mt-1 ${trend.positive ? 'text-green-500' : 'text-red-500'}`}
-        >
+
+      {/* Comparison delta — shown when compare mode is on */}
+      {delta !== null && (
+        <span className={`text-xs font-semibold mt-1 ${delta.positive ? 'text-green-500' : 'text-red-500'}`}>
+          {delta.positive ? '▲' : '▼'} {Math.abs(delta.pct)}% vs prior period
+        </span>
+      )}
+
+      {/* Static trend — shown when comparison is off */}
+      {!delta && trend && (
+        <span className={`text-xs font-semibold mt-1 ${trend.positive ? 'text-green-500' : 'text-red-500'}`}>
           {trend.positive ? '▲' : '▼'} {trend.value}
         </span>
       )}

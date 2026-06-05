@@ -30,29 +30,54 @@ interface LiveMetrics {
   pctReturning?: number;
 }
 
+interface PriorPeriod {
+  totalRevenue: number;
+  totalAdSpend: number;
+  totalOrders: number;
+  aov: number;
+  mer: number;
+  metaSpend: number;
+  googleSpend: number;
+}
+
 export default function OverviewContent() {
   const searchParams = useSearchParams();
-  const tf = (searchParams.get('tf') || '30d') as Timeframe;
+  const tfRaw = searchParams.get('tf') || '30d';
+  const isCustom = tfRaw === 'custom';
+  const tf = (isCustom ? '30d' : tfRaw) as Timeframe;
+  const dateFrom = searchParams.get('date_from') || '';
+  const dateTo = searchParams.get('date_to') || '';
+  const compareOn = searchParams.get('compare') === 'true';
 
-  const staticMetrics = getMetricsForTimeframe(tf);
-  const staticRevenueData = getRevenueForTimeframe(tf);
-  const platformSpend = getPlatformSpendForTimeframe(tf);
+  const staticTf = tf;
+  const staticMetrics = getMetricsForTimeframe(staticTf);
+  const staticRevenueData = getRevenueForTimeframe(staticTf);
+  const platformSpend = getPlatformSpendForTimeframe(staticTf);
 
   const [metrics, setMetrics] = useState<LiveMetrics>({ ...staticMetrics, returns: 0 });
   const [revenueData, setRevenueData] = useState<DailyRevenue[]>(staticRevenueData);
+  const [priorPeriod, setPriorPeriod] = useState<PriorPeriod | null>(null);
+  const [priorLabel, setPriorLabel] = useState<string>('');
   const [liveSource, setLiveSource] = useState<string>('loading');
   const [lastUpdated, setLastUpdated] = useState<string>('');
 
   useEffect(() => {
     setMetrics({ returns: 0, ...staticMetrics });
     setRevenueData(staticRevenueData);
+    setPriorPeriod(null);
     setLiveSource('loading');
 
-    fetch(`/api/windsor?tf=${tf}`)
+    const params = new URLSearchParams({ tf: tfRaw });
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    if (compareOn) params.set('compare', 'true');
+
+    fetch(`/api/windsor?${params}`)
       .then(r => r.json())
       .then(data => {
         if (data.metrics) setMetrics({ returns: 0, ...data.metrics });
         if (data.revenueData?.length) setRevenueData(data.revenueData);
+        if (data.priorPeriod) { setPriorPeriod(data.priorPeriod); setPriorLabel(data.priorLabel || ''); }
         setLiveSource(data.source || 'unknown');
         setLastUpdated(new Date().toLocaleTimeString());
       })
@@ -60,7 +85,7 @@ export default function OverviewContent() {
         setLiveSource('mock_fallback');
         setLastUpdated(new Date().toLocaleTimeString());
       });
-  }, [tf]);
+  }, [tfRaw, dateFrom, dateTo, compareOn]);
 
   const merColor = metrics.mer >= MER_GOAL ? '#22c55e' : '#ef4444';
   const merLabel = metrics.mer >= MER_GOAL ? '✓ Above Goal' : '✗ Below Goal';
@@ -70,7 +95,9 @@ export default function OverviewContent() {
     <div>
       <Header
         title="MER Dashboard"
-        subtitle={`Overview · ${TIMEFRAME_LABELS[tf] || tf}`}
+        subtitle={isCustom && dateFrom && dateTo
+          ? `Overview · ${dateFrom} → ${dateTo}${compareOn && priorLabel ? ` vs ${priorLabel}` : ''}`
+          : `Overview · ${TIMEFRAME_LABELS[tf] || tf}${compareOn && priorLabel ? ` vs prior period` : ''}`}
       >
         <TimeframeSelector />
       </Header>
@@ -90,11 +117,16 @@ export default function OverviewContent() {
         <button
           onClick={() => {
             setLiveSource('loading');
-            fetch(`/api/windsor?tf=${tf}`)
+            const p = new URLSearchParams({ tf: tfRaw });
+            if (dateFrom) p.set('date_from', dateFrom);
+            if (dateTo) p.set('date_to', dateTo);
+            if (compareOn) p.set('compare', 'true');
+            fetch(`/api/windsor?${p}`)
               .then(r => r.json())
               .then(data => {
                 if (data.metrics) setMetrics({ returns: 0, ...data.metrics });
                 if (data.revenueData?.length) setRevenueData(data.revenueData);
+                if (data.priorPeriod) { setPriorPeriod(data.priorPeriod); setPriorLabel(data.priorLabel || ''); }
                 setLiveSource(data.source || 'unknown');
                 setLastUpdated(new Date().toLocaleTimeString());
               })
@@ -169,21 +201,22 @@ export default function OverviewContent() {
           value={formatCurrency(metrics.totalRevenue)}
           subtitle={`${metrics.totalOrders} orders`}
           accentColor="#c4b5fd"
-          trend={{ value: '12.4% vs prior period', positive: true }}
+          comparison={priorPeriod ? { current: metrics.totalRevenue, prior: priorPeriod.totalRevenue } : undefined}
+          trend={!priorPeriod ? { value: 'vs prior period', positive: true } : undefined}
         />
         <MetricCard
           title="Total Ad Spend"
           value={formatCurrency(metrics.totalAdSpend)}
           subtitle={metrics.metaSpend ? `Meta ${formatCurrency(metrics.metaSpend)} · Google ${formatCurrency(metrics.googleSpend ?? 0)}` : 'Meta + Google'}
           accentColor="#f9a8d4"
-          trend={{ value: '8.1% vs prior period', positive: false }}
+          comparison={priorPeriod ? { current: metrics.totalAdSpend, prior: priorPeriod.totalAdSpend } : undefined}
         />
         <MetricCard
           title="Avg Order Value"
           value={formatCurrency(metrics.aov)}
           subtitle="Per transaction"
           accentColor="#fde68a"
-          trend={{ value: '3.2% vs prior period', positive: true }}
+          comparison={priorPeriod ? { current: metrics.aov, prior: priorPeriod.aov } : undefined}
         />
         <MetricCard
           title="Blended MER"
@@ -191,10 +224,11 @@ export default function OverviewContent() {
           subtitle="Across all platforms"
           accentColor={metrics.mer >= MER_GOAL ? '#86efac' : '#fca5a5'}
           valueColor={merColor}
-          trend={{
+          comparison={priorPeriod ? { current: metrics.mer, prior: priorPeriod.mer } : undefined}
+          trend={!priorPeriod ? {
             value: metrics.mer >= MER_GOAL ? 'Above 3.5x goal' : 'Below 3.5x goal',
             positive: metrics.mer >= MER_GOAL,
-          }}
+          } : undefined}
         />
       </div>
 
