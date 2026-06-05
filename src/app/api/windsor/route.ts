@@ -4,15 +4,16 @@ import { Timeframe } from '@/src/lib/mockData';
 
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 
-// Windsor.ai date presets (Windsor uses underscores with full words)
+// Windsor.ai date presets — format: last_Xd (excludes today), last_XdT (includes today)
+// No "today" or "yesterday" presets — use last_1dT and last_1d respectively
 const DATE_PRESETS: Record<Timeframe, string> = {
-  today:      'today',
-  yesterday:  'yesterday',
-  '7d':       'last_7_days',
-  '14d':      'last_14_days',
-  '30d':      'last_30_days',
-  last_month: 'last_month',
-  '6m':       'last_180_days',
+  today:      'last_1dT',   // last 1 day including today
+  yesterday:  'last_1d',    // last 1 day excluding today
+  '7d':       'last_7d',
+  '14d':      'last_14d',
+  '30d':      'last_30d',
+  last_month: 'this_month',
+  '6m':       'last_180d',
   ytd:        'this_year',
 };
 
