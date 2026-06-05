@@ -61,6 +61,7 @@ export default function OverviewContent() {
   const [livePlatformSpend, setLivePlatformSpend] = useState<PlatformSpend[] | null>(null);
   const [liveSource, setLiveSource] = useState<string>('loading');
   const [lastUpdated, setLastUpdated] = useState<string>('');
+  const [dataLag, setDataLag] = useState<boolean>(false);
 
   function buildLivePlatformSpend(m: LiveMetrics): PlatformSpend[] | null {
     if (!m.metaSpend && !m.googleSpend) return null;
@@ -79,6 +80,7 @@ export default function OverviewContent() {
     setRevenueData(staticRevenueData);
     setPriorPeriod(null);
     setLivePlatformSpend(null);
+    setDataLag(false);
     setLiveSource('loading');
 
     const params = new URLSearchParams({ tf: tfRaw });
@@ -94,11 +96,13 @@ export default function OverviewContent() {
         if (data.revenueData?.length) setRevenueData(data.revenueData);
         if (data.priorPeriod) { setPriorPeriod(data.priorPeriod); setPriorLabel(data.priorLabel || ''); }
         setLivePlatformSpend(buildLivePlatformSpend(m));
+        setDataLag(!!data.dataLag);
         setLiveSource(data.source || 'unknown');
         setLastUpdated(new Date().toLocaleTimeString());
       })
       .catch(() => {
         setLivePlatformSpend(null);
+        setDataLag(false);
         setLiveSource('mock_fallback');
         setLastUpdated(new Date().toLocaleTimeString());
       });
@@ -156,6 +160,14 @@ export default function OverviewContent() {
           ↻ Refresh
         </button>
       </div>
+
+      {/* Data lag warning */}
+      {dataLag && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-amber-700">
+          <span>⚠️</span>
+          <span>Windsor.ai has a 2–4 day data lag for ad platforms. No data available yet for this date — try <strong>Last 7 Days</strong> to see recent spend.</span>
+        </div>
+      )}
 
       {/* MER Hero */}
       <div className="mb-6">

@@ -176,11 +176,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ source: 'mock', timeframe: tf, metrics, revenueData });
   }
 
+  // For today/yesterday use explicit dates to avoid preset issues + handle data lag
+  const todayStr = new Date().toISOString().split('T')[0];
+  const yesterdayStr = addDays(todayStr, -1);
+
   try {
     // Build query params for current period
-    const currentParams: Record<string, string> = isCustom && dateFrom && dateTo
-      ? { date_from: dateFrom, date_to: dateTo }
-      : { date_preset: DATE_PRESETS[tf] || 'last_30dT' };
+    let currentParams: Record<string, string>;
+    if (isCustom && dateFrom && dateTo) {
+      currentParams = { date_from: dateFrom, date_to: dateTo };
+    } else if (tf === 'today') {
+      currentParams = { date_from: todayStr, date_to: todayStr };
+    } else if (tf === 'yesterday') {
+      currentParams = { date_from: yesterdayStr, date_to: yesterdayStr };
+    } else {
+      currentParams = { date_preset: DATE_PRESETS[tf] || 'last_30dT' };
+    }
 
     if (debug) {
       const fields = 'date,source,spend,revenue,conversion_value,roas,impressions,clicks,conversions,purchases';
@@ -193,6 +204,7 @@ export async function GET(request: NextRequest) {
     // Fetch current period
     const currentRows = await fetchWindsor(currentParams);
     const current = aggregateRows(currentRows);
+    const hasDataLag = currentRows.length === 0 && (tf === 'today' || tf === 'yesterday');
 
     // Fetch comparison period if requested
     let priorPeriod = null;
@@ -214,16 +226,8 @@ export async function GET(request: NextRequest) {
         priorLabel = COMPARE_PRESETS[tf] || '';
       }
 
-<<<<<<< HEAD
       const priorRows = await fetchWindsor(priorParams);
       const priorAgg = aggregateRows(priorRows);
-=======
-      byDate[date].adSpend += spend;
-      byDate[date].revenue += revenue;
-      byDate[date].orders += Math.round(Number(row.orders || row.purchases || 0));
-      byDate[date].newCustomers += Number(row.new_customers || 0);
-      byDate[date].returningCustomers += Number(row.returning_customers || 0);
->>>>>>> 207e5e3 (Fix decimal orders and use live Windsor spend in platform table)
 
       // For preset comparison, prior period data includes current + prior rows together
       // so we subtract current to isolate the prior window
@@ -253,35 +257,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       source: 'windsor_live',
       timeframe: tf,
-<<<<<<< HEAD
       dateFrom: dateFrom || null,
       dateTo: dateTo || null,
       metrics: current.metrics,
       revenueData: current.revenueData,
+      ...(hasDataLag ? { dataLag: true } : {}),
       ...(priorPeriod ? { priorPeriod, priorLabel } : {}),
-=======
-      revenueData: dailyData.map(d => ({
-        date: d.date,
-        revenue: Math.round(d.revenue),
-        orders: Math.round(d.orders),
-        adSpend: Math.round(d.adSpend),
-      })),
-      metrics: {
-        totalRevenue: Math.round(totalRevenue),
-        totalOrders: Math.round(totalOrders),
-        totalAdSpend: Math.round(totalAdSpend),
-        aov: totalOrders > 0 ? Math.round((totalRevenue / totalOrders) * 100) / 100 : 0,
-        mer: totalAdSpend > 0 ? Math.round((totalRevenue / totalAdSpend) * 100) / 100 : 0,
-        returns: 0,
-        metaSpend: Math.round(totalMetaSpend),
-        googleSpend: Math.round(totalGoogleSpend),
-        tiktokSpend: Math.round(totalTikTokSpend),
-        newCustomers: totalNewCustomers,
-        returningCustomers: totalReturningCustomers,
-        pctNew: totalOrders > 0 ? Math.round((totalNewCustomers / totalOrders) * 1000) / 10 : 0,
-        pctReturning: totalOrders > 0 ? Math.round((totalReturningCustomers / totalOrders) * 1000) / 10 : 0,
-      },
->>>>>>> 207e5e3 (Fix decimal orders and use live Windsor spend in platform table)
     });
 
   } catch (err) {
