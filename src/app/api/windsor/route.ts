@@ -85,11 +85,15 @@ function aggregateRows(rows: WindsorRow[]) {
     const rowConvValue = Number(row.conversion_value || 0);
     const src = String(row.source || '').toLowerCase();
 
+    const isShopify = src.includes('shopify');
     byDate[date].adSpend += spend;
     byDate[date].revenue += rowRevenue || rowConvValue;
-    byDate[date].orders += Math.round(Number(row.conversions || row.purchases || row.orders || 0));
-    byDate[date].newCustomers += Math.round(Number(row.new_customers || 0));
-    byDate[date].returningCustomers += Math.round(Number(row.returning_customers || 0));
+    // Only count orders/purchases from Shopify rows; Google/Meta conversions ≠ orders
+    if (isShopify) {
+      byDate[date].orders += Math.round(Number(row.orders || row.purchases || row.conversions || 0));
+      byDate[date].newCustomers += Math.round(Number(row.new_customers || 0));
+      byDate[date].returningCustomers += Math.round(Number(row.returning_customers || 0));
+    }
 
     if (src.includes('facebook') || src.includes('meta') || src.includes('instagram')) {
       byDate[date].metaSpend += spend;
