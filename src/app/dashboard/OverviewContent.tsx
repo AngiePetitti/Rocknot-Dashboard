@@ -2,7 +2,7 @@
 
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Timeframe, getMetricsForTimeframe, getRevenueForTimeframe, getPlatformSpendForTimeframe, DailyRevenue } from '@/src/lib/mockData';
+import { Timeframe, getMetricsForTimeframe, getRevenueForTimeframe, getPlatformSpendForTimeframe, PlatformSpend, DailyRevenue } from '@/src/lib/mockData';
 import { formatCurrency, formatROAS, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import MetricCard from '@/src/components/ui/MetricCard';
@@ -58,13 +58,27 @@ export default function OverviewContent() {
   const [revenueData, setRevenueData] = useState<DailyRevenue[]>(staticRevenueData);
   const [priorPeriod, setPriorPeriod] = useState<PriorPeriod | null>(null);
   const [priorLabel, setPriorLabel] = useState<string>('');
+  const [livePlatformSpend, setLivePlatformSpend] = useState<PlatformSpend[] | null>(null);
   const [liveSource, setLiveSource] = useState<string>('loading');
   const [lastUpdated, setLastUpdated] = useState<string>('');
+
+  function buildLivePlatformSpend(m: LiveMetrics): PlatformSpend[] | null {
+    if (!m.metaSpend && !m.googleSpend) return null;
+    const platforms: PlatformSpend[] = [];
+    if ((m.metaSpend ?? 0) > 0) {
+      platforms.push({ platform: 'Meta', spend: m.metaSpend ?? 0, revenue: 0, roas: 0, ctr: 0, impressions: 0, color: '#818cf8' });
+    }
+    if ((m.googleSpend ?? 0) > 0) {
+      platforms.push({ platform: 'Google', spend: m.googleSpend ?? 0, revenue: 0, roas: 0, ctr: 0, impressions: 0, color: '#34d399' });
+    }
+    return platforms.length > 0 ? platforms : null;
+  }
 
   useEffect(() => {
     setMetrics({ returns: 0, ...staticMetrics });
     setRevenueData(staticRevenueData);
     setPriorPeriod(null);
+    setLivePlatformSpend(null);
     setLiveSource('loading');
 
     const params = new URLSearchParams({ tf: tfRaw });
@@ -75,13 +89,16 @@ export default function OverviewContent() {
     fetch(`/api/windsor?${params}`)
       .then(r => r.json())
       .then(data => {
-        if (data.metrics) setMetrics({ returns: 0, ...data.metrics });
+        const m = data.metrics ? { returns: 0, ...data.metrics } : { returns: 0, ...staticMetrics };
+        if (data.metrics) setMetrics(m);
         if (data.revenueData?.length) setRevenueData(data.revenueData);
         if (data.priorPeriod) { setPriorPeriod(data.priorPeriod); setPriorLabel(data.priorLabel || ''); }
+        setLivePlatformSpend(buildLivePlatformSpend(m));
         setLiveSource(data.source || 'unknown');
         setLastUpdated(new Date().toLocaleTimeString());
       })
       .catch(() => {
+        setLivePlatformSpend(null);
         setLiveSource('mock_fallback');
         setLastUpdated(new Date().toLocaleTimeString());
       });
@@ -281,7 +298,7 @@ export default function OverviewContent() {
           <p className="text-xs text-gray-400 mb-3">
             Total: {formatCurrency(metrics.totalAdSpend)}
           </p>
-          <SpendDonut data={platformSpend} />
+          <SpendDonut data={livePlatformSpend ?? platformSpend} />
         </Card>
       </div>
 
@@ -301,7 +318,7 @@ export default function OverviewContent() {
               </tr>
             </thead>
             <tbody>
-              {platformSpend.map((p) => (
+              {(livePlatformSpend ?? platformSpend).map((p) => (
                 <tr key={p.platform} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                   <td className="py-3 pr-4">
                     <div className="flex items-center gap-2">
