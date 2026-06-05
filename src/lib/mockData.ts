@@ -101,7 +101,6 @@ export interface AttributionData {
 
 // All revenue figures use NET SALES (after discounts and returns) to match Shopify Analytics exactly
 export const shopifyLast30Days: DailyRevenue[] = [
-  { date: '2026-05-05', revenue: 10019, orders: 65,  adSpend: 2862 },
   { date: '2026-05-06', revenue: 11160, orders: 80,  adSpend: 3188 },
   { date: '2026-05-07', revenue: 7731,  orders: 51,  adSpend: 2209 },
   { date: '2026-05-08', revenue: 13593, orders: 85,  adSpend: 3883 },
@@ -131,17 +130,18 @@ export const shopifyLast30Days: DailyRevenue[] = [
   { date: '2026-06-01', revenue: 16708, orders: 86,  adSpend: 4773 },
   { date: '2026-06-02', revenue: 11495, orders: 92,  adSpend: 3284 },
   { date: '2026-06-03', revenue: 9558,  orders: 66,  adSpend: 2731 },
-  { date: '2026-06-04', revenue: 7469,  orders: 66,  adSpend: 2134 },
+  { date: '2026-06-04', revenue: 8753,  orders: 74,  adSpend: 2501 },
+  { date: '2026-06-05', revenue: 983,   orders: 7,   adSpend: 281 },
 ];
 
 // Shopify summary stats by timeframe (from Shopify Analytics)
 export const shopifyMetricsByTimeframe: Record<Timeframe, { revenue: number; orders: number; aov: number; returns: number }> = {
   // Net sales figures — match Shopify Analytics exactly (gross minus discounts minus returns)
-  today:       { revenue: 7469,     orders: 66,    aov: 114.09, returns: 59.75 },
-  yesterday:   { revenue: 9558,     orders: 66,    aov: 144.82, returns: 35 },
-  '7d':        { revenue: 121973,   orders: 749,   aov: 162.85, returns: 6251 },
-  '14d':       { revenue: 194091,   orders: 1147,  aov: 169.22, returns: 9800 },
-  '30d':       { revenue: 457375,   orders: 2465,  aov: 185.54, returns: 23752 },
+  today:       { revenue: 983,      orders: 7,     aov: 140.55, returns: 0 },
+  yesterday:   { revenue: 8753,     orders: 74,    aov: 119.09, returns: 59.75 },
+  '7d':        { revenue: 106244,   orders: 672,   aov: 158.10, returns: 3842 },
+  '14d':       { revenue: 183960,   orders: 1098,  aov: 167.54, returns: 8100 },
+  '30d':       { revenue: 457358,   orders: 2458,  aov: 186.07, returns: 23752 },
   last_month:  { revenue: 308200,   orders: 1790,  aov: 172.18, returns: 14200 },
   '6m':        { revenue: 1220000,  orders: 6980,  aov: 174.78, returns: 62000 },
   ytd:         { revenue: 2510000,  orders: 14100, aov: 178.01, returns: 125299 },
