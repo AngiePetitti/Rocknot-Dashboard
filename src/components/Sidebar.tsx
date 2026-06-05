@@ -13,7 +13,12 @@ const navItems = [
   { href: '/dashboard/attribution', label: 'Attribution', icon: '🔗' },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tf = searchParams.get('tf') || '30d';
@@ -23,9 +28,16 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="w-60 shrink-0 bg-white border-r border-gray-100 min-h-screen flex flex-col">
+    <aside
+      className={`
+        fixed md:static inset-y-0 left-0 z-30
+        w-60 shrink-0 bg-white border-r border-gray-100 min-h-screen flex flex-col
+        transition-transform duration-200 ease-in-out
+        ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+      `}
+    >
       {/* Logo */}
-      <div className="px-6 py-5 border-b border-gray-100">
+      <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-400 to-pink-400 flex items-center justify-center">
             <span className="text-white font-bold text-sm">R</span>
@@ -35,6 +47,18 @@ export default function Sidebar() {
             <p className="text-[10px] text-gray-400 leading-none mt-0.5">Dashboard</p>
           </div>
         </div>
+        {/* Close button — mobile only */}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="md:hidden p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"
+            aria-label="Close menu"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M2 2L14 14M14 2L2 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Nav */}
@@ -45,6 +69,7 @@ export default function Sidebar() {
             <Link
               key={item.href}
               href={buildHref(item.href)}
+              onClick={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 isActive
                   ? 'bg-violet-50 text-violet-700'
@@ -66,7 +91,7 @@ export default function Sidebar() {
         <p className="text-[10px] text-gray-300 leading-relaxed">
           Rocknot Analytics v1.0
           <br />
-          Mock data — connect APIs to go live
+          Powered by Windsor.ai
         </p>
       </div>
     </aside>

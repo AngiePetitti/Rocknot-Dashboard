@@ -173,22 +173,22 @@ export default function OverviewContent() {
             </p>
           </div>
           <div className="hidden sm:block w-px h-20 bg-gray-100" />
-          <div className="flex flex-wrap gap-6 sm:gap-8">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-4 sm:gap-8">
             <div>
               <p className="text-xs text-gray-400 uppercase tracking-wider">Revenue</p>
-              <p className="text-2xl font-bold text-gray-800">{formatCurrency(metrics.totalRevenue)}</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-800">{formatCurrency(metrics.totalRevenue)}</p>
             </div>
             <div>
               <p className="text-xs text-gray-400 uppercase tracking-wider">Ad Spend</p>
-              <p className="text-2xl font-bold text-gray-800">{formatCurrency(metrics.totalAdSpend)}</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-800">{formatCurrency(metrics.totalAdSpend)}</p>
             </div>
             <div>
               <p className="text-xs text-gray-400 uppercase tracking-wider">Orders</p>
-              <p className="text-2xl font-bold text-gray-800">{metrics.totalOrders.toLocaleString()}</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-800">{metrics.totalOrders.toLocaleString()}</p>
             </div>
             <div>
               <p className="text-xs text-gray-400 uppercase tracking-wider">AOV</p>
-              <p className="text-2xl font-bold text-gray-800">{formatCurrency(metrics.aov)}</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-800">{formatCurrency(metrics.aov)}</p>
             </div>
           </div>
         </Card>

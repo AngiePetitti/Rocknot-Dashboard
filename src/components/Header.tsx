@@ -8,12 +8,12 @@ interface HeaderProps {
 
 export default function Header({ title, subtitle, children }: HeaderProps) {
   return (
-    <div className="flex items-start justify-between gap-4 mb-6">
+    <div className="flex flex-col gap-3 mb-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
-        {subtitle && <p className="text-sm text-gray-400 mt-0.5">{subtitle}</p>}
+        <h1 className="text-xl md:text-2xl font-bold text-gray-900">{title}</h1>
+        {subtitle && <p className="text-xs md:text-sm text-gray-400 mt-0.5">{subtitle}</p>}
       </div>
-      {children && <div className="shrink-0">{children}</div>}
+      {children && <div className="w-full">{children}</div>}
     </div>
   );
 }

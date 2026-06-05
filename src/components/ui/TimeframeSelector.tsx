@@ -78,12 +78,13 @@ export default function TimeframeSelector() {
 
   return (
     <div className="flex flex-col gap-2 items-end">
-      <div className="flex flex-wrap gap-1.5 items-center">
+      {/* Horizontally scrollable on mobile, wraps on desktop */}
+      <div className="flex gap-1.5 items-center overflow-x-auto pb-1 md:flex-wrap md:pb-0 scrollbar-hide">
         {TIMEFRAMES.map(tf => (
           <button
             key={tf.value}
             onClick={() => handlePreset(tf.value)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
               current === tf.value && !showCustom
                 ? 'bg-violet-400 text-white shadow-sm'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -94,13 +95,13 @@ export default function TimeframeSelector() {
         ))}
         <button
           onClick={() => setShowCustom(v => !v)}
-          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+          className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
             current === 'custom' || showCustom
               ? 'bg-violet-400 text-white shadow-sm'
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
           }`}
         >
-          Custom Range
+          Custom
         </button>
       </div>
 
@@ -121,7 +122,7 @@ export default function TimeframeSelector() {
 
       {/* Custom date range panel */}
       {showCustom && (
-        <div ref={panelRef} className="flex items-end gap-3 bg-white border border-gray-200 rounded-xl p-3 shadow-md">
+        <div ref={panelRef} className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2 sm:gap-3 bg-white border border-gray-200 rounded-xl p-3 shadow-md w-full sm:w-auto">
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-400 font-medium">From</label>
             <input
