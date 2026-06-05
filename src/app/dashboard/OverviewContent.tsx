@@ -1,7 +1,8 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { Timeframe, getMetricsForTimeframe, getRevenueForTimeframe, getPlatformSpendForTimeframe } from '@/src/lib/mockData';
+import { useEffect, useState } from 'react';
+import { Timeframe, getMetricsForTimeframe, getRevenueForTimeframe, getPlatformSpendForTimeframe, DailyRevenue } from '@/src/lib/mockData';
 import { formatCurrency, formatROAS, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import MetricCard from '@/src/components/ui/MetricCard';
@@ -12,16 +13,50 @@ import SpendDonut from '@/src/components/charts/SpendDonut';
 
 const MER_GOAL = 3.5;
 
+interface LiveMetrics {
+  totalRevenue: number;
+  totalOrders: number;
+  totalAdSpend: number;
+  aov: number;
+  mer: number;
+  returns: number;
+}
+
 export default function OverviewContent() {
   const searchParams = useSearchParams();
   const tf = (searchParams.get('tf') || '30d') as Timeframe;
 
-  const metrics = getMetricsForTimeframe(tf);
-  const revenueData = getRevenueForTimeframe(tf);
+  const staticMetrics = getMetricsForTimeframe(tf);
+  const staticRevenueData = getRevenueForTimeframe(tf);
   const platformSpend = getPlatformSpendForTimeframe(tf);
+
+  const [metrics, setMetrics] = useState<LiveMetrics>({ ...staticMetrics, returns: 0 });
+  const [revenueData, setRevenueData] = useState<DailyRevenue[]>(staticRevenueData);
+  const [liveSource, setLiveSource] = useState<string>('loading');
+  const [lastUpdated, setLastUpdated] = useState<string>('');
+
+  useEffect(() => {
+    setMetrics({ returns: 0, ...staticMetrics });
+    setRevenueData(staticRevenueData);
+    setLiveSource('loading');
+
+    fetch(`/api/shopify?tf=${tf}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.metrics) setMetrics({ returns: 0, ...data.metrics });
+        if (data.revenueData?.length) setRevenueData(data.revenueData);
+        setLiveSource(data.source || 'unknown');
+        setLastUpdated(new Date().toLocaleTimeString());
+      })
+      .catch(() => {
+        setLiveSource('mock_fallback');
+        setLastUpdated(new Date().toLocaleTimeString());
+      });
+  }, [tf]);
 
   const merColor = metrics.mer >= MER_GOAL ? '#22c55e' : '#ef4444';
   const merLabel = metrics.mer >= MER_GOAL ? '✓ Above Goal' : '✗ Below Goal';
+  const isLive = liveSource === 'shopify_live';
 
   return (
     <div>
@@ -31,6 +66,37 @@ export default function OverviewContent() {
       >
         <TimeframeSelector />
       </Header>
+
+      {/* Live indicator */}
+      <div className="flex items-center gap-2 mb-4">
+        <span
+          className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-400' : liveSource === 'loading' ? 'bg-yellow-400' : 'bg-gray-300'}`}
+        />
+        <span className="text-xs text-gray-400">
+          {liveSource === 'loading'
+            ? 'Loading live Shopify data...'
+            : isLive
+            ? `Live Shopify data · Updated ${lastUpdated}`
+            : `Estimated data · ${lastUpdated}`}
+        </span>
+        <button
+          onClick={() => {
+            setLiveSource('loading');
+            fetch(`/api/shopify?tf=${tf}`)
+              .then(r => r.json())
+              .then(data => {
+                if (data.metrics) setMetrics({ returns: 0, ...data.metrics });
+                if (data.revenueData?.length) setRevenueData(data.revenueData);
+                setLiveSource(data.source || 'unknown');
+                setLastUpdated(new Date().toLocaleTimeString());
+              })
+              .catch(() => setLiveSource('mock_fallback'));
+          }}
+          className="text-xs text-purple-500 hover:text-purple-700 font-medium ml-1"
+        >
+          ↻ Refresh
+        </button>
+      </div>
 
       {/* MER Hero */}
       <div className="mb-6">
@@ -126,7 +192,6 @@ export default function OverviewContent() {
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
-        {/* Revenue Chart */}
         <Card accentColor="#c4b5fd" className="lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -137,7 +202,6 @@ export default function OverviewContent() {
           <RevenueChart data={revenueData} />
         </Card>
 
-        {/* Spend Donut */}
         <Card accentColor="#f9a8d4">
           <h2 className="text-sm font-bold text-gray-700 mb-1">Ad Spend by Platform</h2>
           <p className="text-xs text-gray-400 mb-3">
