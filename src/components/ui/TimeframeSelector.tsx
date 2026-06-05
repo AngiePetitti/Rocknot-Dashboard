@@ -78,24 +78,24 @@ export default function TimeframeSelector() {
 
   return (
     <div className="flex flex-col gap-2 items-start w-full">
-      {/* Horizontally scrollable on mobile, wraps on desktop */}
-      <div className="flex gap-1.5 items-center overflow-x-auto pb-1 md:flex-wrap md:pb-0 scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
+      <div className="flex flex-wrap gap-1.5 items-center">
         {TIMEFRAMES.map(tf => (
           <button
             key={tf.value}
             onClick={() => handlePreset(tf.value)}
-            className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all ${
               current === tf.value && !showCustom
                 ? 'bg-violet-400 text-white shadow-sm'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
-            {tf.label}
+            <span className="sm:hidden">{tf.shortLabel}</span>
+            <span className="hidden sm:inline">{tf.label}</span>
           </button>
         ))}
         <button
           onClick={() => setShowCustom(v => !v)}
-          className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+          className={`px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all ${
             current === 'custom' || showCustom
               ? 'bg-violet-400 text-white shadow-sm'
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'

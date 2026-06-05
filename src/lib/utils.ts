@@ -37,9 +37,22 @@ export const TIMEFRAME_LABELS: Record<string, string> = {
   ytd: 'Year to Date',
 };
 
+// Shorter labels for mobile buttons
+export const TIMEFRAME_SHORT_LABELS: Record<string, string> = {
+  today: 'Today',
+  yesterday: 'Yesterday',
+  '7d': '7 Days',
+  '14d': '14 Days',
+  '30d': '30 Days',
+  last_month: 'Last Mo.',
+  '6m': '6 Months',
+  ytd: 'YTD',
+};
+
 export const TIMEFRAMES = Object.entries(TIMEFRAME_LABELS).map(([value, label]) => ({
   value,
   label,
+  shortLabel: TIMEFRAME_SHORT_LABELS[value] || label,
 }));
 
 export function getStockStatus(daysRemaining: number): 'critical' | 'warning' | 'ok' {
