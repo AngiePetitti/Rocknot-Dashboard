@@ -42,9 +42,14 @@ interface WindsorRow {
   conversions?: number | string;
   purchases?: number | string;
   orders?: number | string;
+  // Shopify-specific fields
+  order_count?: number | string;
+  order_current_total_price?: number | string;
+  order_subtotal_price?: number | string;
+  customer_is_returning?: number | string | boolean;
   new_customers?: number | string;
   returning_customers?: number | string;
-  [key: string]: string | number | undefined;
+  [key: string]: string | number | boolean | undefined;
 }
 
 interface AggregatedMetrics {
@@ -89,12 +94,18 @@ function aggregateRows(rows: WindsorRow[]) {
 
     const isShopify = src.includes('shopify');
     byDate[date].adSpend += spend;
-    byDate[date].revenue += rowRevenue || rowConvValue;
-    // Only count orders/purchases from Shopify rows; Google/Meta conversions ≠ orders
+
     if (isShopify) {
-      byDate[date].orders += Math.round(Number(row.orders || row.purchases || row.conversions || 0));
+      // Shopify: use order_current_total_price (net revenue) or fallback to revenue
+      const shopifyRevenue = Number(row.order_current_total_price || row.order_subtotal_price || rowRevenue || 0);
+      byDate[date].revenue += shopifyRevenue;
+      // order_count is the number of orders for that day from Shopify
+      byDate[date].orders += Math.round(Number(row.order_count || row.orders || row.purchases || 0));
       byDate[date].newCustomers += Math.round(Number(row.new_customers || 0));
       byDate[date].returningCustomers += Math.round(Number(row.returning_customers || 0));
+    } else {
+      // Ad platforms: use conversion_value as revenue attribution
+      byDate[date].revenue += rowRevenue || rowConvValue;
     }
 
     if (src.includes('facebook') || src.includes('meta') || src.includes('instagram')) {
@@ -107,11 +118,13 @@ function aggregateRows(rows: WindsorRow[]) {
   }
 
   const dailyData = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
-  const shopifyRevenue = rows
-    .filter(r => String(r.source || '').toLowerCase().includes('shopify'))
-    .reduce((s, r) => s + Number(r.revenue || 0), 0);
+  const hasShopify = rows.some(r => String(r.source || '').toLowerCase().includes('shopify'));
 
-  const totalRevenue = shopifyRevenue || dailyData.reduce((s, d) => s + d.revenue, 0);
+  // If Shopify is connected, revenue is already correctly summed per day from Shopify rows only.
+  // If not connected yet, fall back to ad platform conversion_value as a proxy.
+  const totalRevenue = hasShopify
+    ? dailyData.reduce((s, d) => s + d.revenue, 0)
+    : 0;
   const totalAdSpend = dailyData.reduce((s, d) => s + d.adSpend, 0);
   const totalOrders = Math.round(dailyData.reduce((s, d) => s + d.orders, 0));
   const totalMetaSpend = dailyData.reduce((s, d) => s + d.metaSpend, 0);
@@ -147,7 +160,13 @@ function aggregateRows(rows: WindsorRow[]) {
 }
 
 async function fetchWindsor(params: Record<string, string>, revalidate = 3600): Promise<WindsorRow[]> {
-  const fields = 'date,source,spend,revenue,conversion_value,roas,impressions,clicks,conversions,purchases';
+  // Include both ad platform fields and Shopify-specific revenue/order fields
+  const fields = [
+    'date', 'source', 'spend', 'revenue', 'conversion_value',
+    'roas', 'impressions', 'clicks', 'conversions', 'purchases',
+    'order_count', 'order_current_total_price', 'order_subtotal_price',
+    'customer_is_returning', 'new_customers', 'returning_customers',
+  ].join(',');
   const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
   const url = `https://connectors.windsor.ai/all?${qs}`;
   const fetchOpts = revalidate === 0
