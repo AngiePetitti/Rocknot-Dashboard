@@ -63,6 +63,8 @@ export default function OverviewContent() {
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [dataLag, setDataLag] = useState<boolean>(false);
   const [latestAvailableDate, setLatestAvailableDate] = useState<string | null>(null);
+  const [shopifyDataLag, setShopifyDataLag] = useState<boolean>(false);
+  const [shopifyLatestDate, setShopifyLatestDate] = useState<string | null>(null);
 
   function buildLivePlatformSpend(m: LiveMetrics): PlatformSpend[] | null {
     if (!m.metaSpend && !m.googleSpend) return null;
@@ -83,6 +85,8 @@ export default function OverviewContent() {
     setLivePlatformSpend(null);
     setDataLag(false);
     setLatestAvailableDate(null);
+    setShopifyDataLag(false);
+    setShopifyLatestDate(null);
     setLiveSource('loading');
 
     const params = new URLSearchParams({ tf: tfRaw });
@@ -100,6 +104,8 @@ export default function OverviewContent() {
         setLivePlatformSpend(buildLivePlatformSpend(m));
         setDataLag(!!data.dataLag);
         setLatestAvailableDate(data.latestAvailableDate || null);
+        setShopifyDataLag(!!data.shopifyDataLag);
+        setShopifyLatestDate(data.shopifyLatestDate || null);
         setLiveSource(data.source || 'unknown');
         setLastUpdated(new Date().toLocaleTimeString());
       })
@@ -171,6 +177,16 @@ export default function OverviewContent() {
           <span>
             Windsor hasn&apos;t synced {tf === 'today' ? "today's" : "yesterday's"} data yet — showing most recent available:{' '}
             <strong>{latestAvailableDate}</strong>. Windsor typically syncs ad platform data within 24–48 hours.
+          </span>
+        </div>
+      )}
+
+      {shopifyDataLag && shopifyLatestDate && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-amber-700">
+          <span>⚠️</span>
+          <span>
+            Shopify data hasn&apos;t synced for {tf === 'today' ? "today" : "yesterday"} yet — showing revenue/orders from the most recent available day:{' '}
+            <strong>{shopifyLatestDate}</strong>. Ad spend above reflects the actual selected period.
           </span>
         </div>
       )}

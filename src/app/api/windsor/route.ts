@@ -244,6 +244,25 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Shopify often syncs on a slower cadence than ad platforms — if ad spend rows
+    // landed for this period but Shopify hasn't synced yet, revenue/orders show as $0.
+    // Fall back to the most recent day Shopify *does* have data for, and merge it in.
+    let shopifyDataLag = false;
+    let shopifyLatestDate: string | null = null;
+    if (isShortTf && !currentRows.some(r => String(r.source || '').toLowerCase().includes('shopify'))) {
+      const recentRows = await fetchWindsor({ date_preset: 'last_7dT' }, 0);
+      const shopifyRows = recentRows.filter(r => String(r.source || '').toLowerCase().includes('shopify'));
+      if (shopifyRows.length > 0) {
+        const dates = shopifyRows.map(r => String(r.date || '').split('T')[0]).filter(Boolean).sort();
+        shopifyLatestDate = dates[dates.length - 1];
+        shopifyDataLag = true;
+        currentRows = [
+          ...currentRows,
+          ...shopifyRows.filter(r => String(r.date || '').split('T')[0] === shopifyLatestDate),
+        ];
+      }
+    }
+
     const current = aggregateRows(currentRows);
     const hasDataLag = latestAvailableDate !== null;
 
@@ -303,6 +322,7 @@ export async function GET(request: NextRequest) {
       metrics: current.metrics,
       revenueData: current.revenueData,
       ...(hasDataLag ? { dataLag: true, latestAvailableDate } : {}),
+      ...(shopifyDataLag ? { shopifyDataLag: true, shopifyLatestDate } : {}),
       ...(priorPeriod ? { priorPeriod, priorLabel } : {}),
     });
 
