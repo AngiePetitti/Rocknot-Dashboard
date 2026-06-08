@@ -169,9 +169,8 @@ async function fetchWindsor(params: Record<string, string>, revalidate = 3600): 
   ].join(',');
   const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
   const url = `https://connectors.windsor.ai/all?${qs}`;
-  const fetchOpts = revalidate === 0
-    ? { cache: 'no-store' as const }
-    : { next: { revalidate } };
+  // Always bypass Next.js fetch cache — Windsor has its own caching layer
+  const fetchOpts = { cache: 'no-store' as const };
   const res = await fetch(url, fetchOpts);
   const json = await res.json();
   if (json.error) throw new Error(json.error);
