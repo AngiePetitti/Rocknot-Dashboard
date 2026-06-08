@@ -47,7 +47,7 @@ export interface CreativePerformance {
   clicks: number;
 }
 
-async function fetchCreatives(source: 'facebook' | 'tiktok', params: Record<string, string>): Promise<CreativeRow[]> {
+async function fetchCreatives(source: 'facebook' | 'tiktok', params: Record<string, string>): Promise<{ rows: CreativeRow[]; raw?: unknown }> {
   const fields = [
     'source', 'ad_name', 'ad_id', 'creative_name',
     'creative_thumb_url', 'thumbnail_url', 'image_url', 'video_thumbnail_url',
@@ -57,8 +57,7 @@ async function fetchCreatives(source: 'facebook' | 'tiktok', params: Record<stri
   const url = `https://connectors.windsor.ai/${source}?${qs}`;
   const res = await fetch(url, { cache: 'no-store' });
   const json = await res.json();
-  if (json.error) return [];
-  return json.data || [];
+  return { rows: json.data || [], raw: json };
 }
 
 function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): CreativePerformance[] {
@@ -110,7 +109,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [metaRows, tiktokRows] = await Promise.all([
+    const [metaResult, tiktokResult] = await Promise.all([
       fetchCreatives('facebook', { date_preset: datePreset }),
       fetchCreatives('tiktok', { date_preset: datePreset }),
     ]);
@@ -118,21 +117,21 @@ export async function GET(request: NextRequest) {
     if (debug) {
       return NextResponse.json({
         debug: true,
-        metaSample: metaRows.slice(0, 5),
-        tiktokSample: tiktokRows.slice(0, 5),
+        metaRaw: metaResult.raw,
+        tiktokRaw: tiktokResult.raw,
       });
     }
 
     const creatives = [
-      ...aggregateCreatives(metaRows, 'Meta'),
-      ...aggregateCreatives(tiktokRows, 'TikTok'),
+      ...aggregateCreatives(metaResult.rows, 'Meta'),
+      ...aggregateCreatives(tiktokResult.rows, 'TikTok'),
     ].sort((a, b) => b.spend - a.spend);
 
     return NextResponse.json({ source: 'windsor_live', creatives });
   } catch (err) {
     return NextResponse.json({
       source: 'error',
-      error: err instanceof Error ? err.message : 'Unknown error',
+      error: String(err),
       creatives: [],
     });
   }
