@@ -68,7 +68,7 @@ interface AggregatedMetrics {
   pctReturning: number;
 }
 
-function aggregateRows(rows: WindsorRow[]) {
+function aggregateRows(adRows: WindsorRow[], shopifyRows: ShopifyDailyRow[]) {
   const byDate: Record<string, {
     date: string;
     shopifyRevenue: number;
@@ -82,7 +82,17 @@ function aggregateRows(rows: WindsorRow[]) {
     returningCustomers: number;
   }> = {};
 
-  for (const row of rows) {
+  // Seed from Shopify direct data first (accurate revenue + orders)
+  for (const row of shopifyRows) {
+    if (!byDate[row.date]) {
+      byDate[row.date] = { date: row.date, shopifyRevenue: 0, adRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, newCustomers: 0, returningCustomers: 0 };
+    }
+    byDate[row.date].shopifyRevenue += row.revenue;
+    byDate[row.date].orders += row.orders;
+  }
+
+  // Layer in ad platform spend + attributed revenue
+  for (const row of adRows) {
     const date = String(row.date || '').split('T')[0];
     if (!date) continue;
     if (!byDate[date]) {
@@ -93,18 +103,9 @@ function aggregateRows(rows: WindsorRow[]) {
     const rowConvValue = Number(row.conversion_value || 0);
     const src = String(row.source || '').toLowerCase();
 
-    const isShopify = src.includes('shopify');
     byDate[date].adSpend += spend;
 
-    if (isShopify) {
-      // Shopify: use order_current_total_price (net revenue) or fallback to revenue
-      const shopifyRevenue = Number(row.order_current_total_price || row.order_subtotal_price || rowRevenue || 0);
-      byDate[date].shopifyRevenue += shopifyRevenue;
-      // order_count is the number of orders for that day from Shopify
-      byDate[date].orders += Math.round(Number(row.order_count || row.orders || row.purchases || 0));
-      byDate[date].newCustomers += Math.round(Number(row.new_customers || 0));
-      byDate[date].returningCustomers += Math.round(Number(row.returning_customers || 0));
-    } else if (src.includes('facebook') || src.includes('meta')) {
+    if (src.includes('facebook') || src.includes('meta')) {
       // Meta: purchase_roas is [{action_type, value}] — back-calculate revenue from ROAS × spend
       const roasArr = Array.isArray((row as Record<string, unknown>).purchase_roas)
         ? (row as Record<string, unknown>).purchase_roas as Array<{ value?: string }>
@@ -126,12 +127,12 @@ function aggregateRows(rows: WindsorRow[]) {
   }
 
   const dailyData = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
-  const hasShopify = rows.some(r => String(r.source || '').toLowerCase().includes('shopify'));
-  const shopifyRevenueTotal = dailyData.reduce((s, d) => s + d.shopifyRevenue, 0);
-  const hasUsableShopifyRevenue = hasShopify && shopifyRevenueTotal > 0;
+  const shopifyRevenueTotal = shopifyRows.length > 0
+    ? dailyData.reduce((s, d) => s + d.shopifyRevenue, 0)
+    : 0;
+  const hasUsableShopifyRevenue = shopifyRevenueTotal > 0;
 
-  // Use Shopify order revenue when available (accurate). Fall back to ad attribution
-  // revenue (ROAS back-calc) only when Shopify data hasn't synced for this period.
+  // Always prefer direct Shopify revenue. Fall back to ad attribution only when Shopify API unavailable.
   const totalRevenue = hasUsableShopifyRevenue
     ? shopifyRevenueTotal
     : dailyData.reduce((s, d) => s + d.adRevenue, 0);
@@ -179,14 +180,8 @@ const GOOGLE_FIELDS = [
   'conversions', 'conversion_value',
 ].join(',');
 
-const SHOPIFY_FIELDS = [
-  'date', 'source',
-  'order_id', 'order_count', 'order_current_total_price', 'order_subtotal_price',
-  'customer_is_returning',
-].join(',');
-
-async function fetchSource(source: 'facebook' | 'google_ads' | 'shopify', params: Record<string, string>): Promise<WindsorRow[]> {
-  const fields = source === 'shopify' ? SHOPIFY_FIELDS : source === 'facebook' ? META_FIELDS : GOOGLE_FIELDS;
+async function fetchSource(source: 'facebook' | 'google_ads', params: Record<string, string>): Promise<WindsorRow[]> {
+  const fields = source === 'facebook' ? META_FIELDS : GOOGLE_FIELDS;
   const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
   const url = `https://connectors.windsor.ai/${source}?${qs}`;
   const res = await fetch(url, { cache: 'no-store' });
@@ -195,29 +190,89 @@ async function fetchSource(source: 'facebook' | 'google_ads' | 'shopify', params
   return (json.data as WindsorRow[]).map(r => ({ ...r, source: source === 'facebook' ? 'facebook' : source }));
 }
 
-const ALL_SHOPIFY_FIELDS = [
-  'date', 'source',
-  'order_count', 'order_current_total_price', 'order_subtotal_price',
-  'customer_is_returning',
-].join(',');
+const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
+const SHOPIFY_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com';
 
-async function fetchShopifyViaAll(params: Record<string, string>): Promise<WindsorRow[]> {
-  // /shopify endpoint returns all nulls for order fields — use /all filtered to shopify source instead
-  const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields: ALL_SHOPIFY_FIELDS, _renderer: 'json', ...params });
-  const url = `https://connectors.windsor.ai/all?${qs}`;
-  const res = await fetch(url, { cache: 'no-store' });
-  const json = await res.json();
-  if (json.error || !json.data) return [];
-  return (json.data as WindsorRow[]).filter(r => String(r.source || '').toLowerCase().includes('shopify'));
+interface ShopifyDailyRow {
+  date: string;
+  revenue: number;
+  orders: number;
 }
 
-async function fetchWindsor(params: Record<string, string>): Promise<WindsorRow[]> {
+async function fetchShopifyDirect(params: Record<string, string>): Promise<ShopifyDailyRow[]> {
+  if (!SHOPIFY_TOKEN) return [];
+
+  // Convert Windsor-style params to ShopifyQL date syntax
+  let since = '';
+  let until = 'today';
+
+  if (params.date_from && params.date_to) {
+    since = params.date_from;
+    until = params.date_to;
+  } else {
+    // Map Windsor date_presets to ShopifyQL relative dates
+    const presetMap: Record<string, { since: string; until: string }> = {
+      last_1dT:   { since: 'today', until: 'today' },
+      last_1d:    { since: 'yesterday', until: 'yesterday' },
+      last_7dT:   { since: '-7d', until: 'today' },
+      last_14dT:  { since: '-14d', until: 'today' },
+      last_30dT:  { since: '-30d', until: 'today' },
+      last_1m:    { since: '-60d', until: '-30d' },
+      last_180d:  { since: '-180d', until: 'today' },
+      this_year:  { since: '-365d', until: 'today' },
+    };
+    const mapped = presetMap[params.date_preset || ''] || { since: '-30d', until: 'today' };
+    since = mapped.since;
+    until = mapped.until;
+  }
+
+  const qlQuery = `FROM sales SHOW net_sales, orders TIMESERIES day SINCE ${since} UNTIL ${until}`;
+
+  try {
+    const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/graphql.json`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': SHOPIFY_TOKEN,
+      },
+      body: JSON.stringify({
+        query: `{ shopifyqlQuery(query: ${JSON.stringify(qlQuery)}) {
+          tableData { rowData columns { name dataType } }
+          parseErrors { code message }
+        }}`,
+      }),
+      cache: 'no-store',
+    });
+
+    const json = await res.json();
+    const result = json?.data?.shopifyqlQuery;
+    if (!result || result.parseErrors?.length) return [];
+
+    const cols: Array<{ name: string }> = result.tableData?.columns || [];
+    const rows: string[][] = result.tableData?.rowData || [];
+    const dayIdx = cols.findIndex(c => c.name === 'day');
+    const revIdx = cols.findIndex(c => c.name === 'net_sales');
+    const ordIdx = cols.findIndex(c => c.name === 'orders');
+
+    return rows
+      .map(r => ({
+        date: String(r[dayIdx] || '').split('T')[0],
+        revenue: parseFloat(r[revIdx] || '0') || 0,
+        orders: parseInt(r[ordIdx] || '0') || 0,
+      }))
+      .filter(r => r.date);
+  } catch {
+    return [];
+  }
+}
+
+async function fetchWindsor(params: Record<string, string>): Promise<{ adRows: WindsorRow[]; shopifyRows: ShopifyDailyRow[] }> {
   const [metaRows, googleRows, shopifyRows] = await Promise.all([
     fetchSource('facebook', params),
     fetchSource('google_ads', params),
-    fetchShopifyViaAll(params),
+    fetchShopifyDirect(params),
   ]);
-  return [...metaRows, ...googleRows, ...shopifyRows];
+  return { adRows: [...metaRows, ...googleRows], shopifyRows };
 }
 
 function addDays(dateStr: string, days: number): string {
@@ -260,9 +315,9 @@ export async function GET(request: NextRequest) {
     }
 
     if (debug) {
-      const debugFetch = async (source: 'facebook' | 'google_ads' | 'shopify') => {
+      const debugFetch = async (source: 'facebook' | 'google_ads') => {
         try {
-          const fields = source === 'shopify' ? SHOPIFY_FIELDS : source === 'facebook' ? META_FIELDS : GOOGLE_FIELDS;
+          const fields = source === 'facebook' ? META_FIELDS : GOOGLE_FIELDS;
           const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...currentParams });
           const url = `https://connectors.windsor.ai/${source}?${qs}`;
           const res = await fetch(url, { cache: 'no-store' });
@@ -272,48 +327,34 @@ export async function GET(request: NextRequest) {
           return { error: String(e), rowCount: 0, sample: [] };
         }
       };
-      const [meta, google, shopify] = await Promise.all([
+      const [meta, google, shopifyDirect] = await Promise.all([
         debugFetch('facebook'),
         debugFetch('google_ads'),
-        debugFetch('shopify'),
+        fetchShopifyDirect(currentParams),
       ]);
-      return NextResponse.json({ debug: true, hasApiKey: !!WINDSOR_API_KEY, params: currentParams, meta, google, shopify });
+      return NextResponse.json({ debug: true, hasApiKey: !!WINDSOR_API_KEY, params: currentParams, meta, google, shopifyDirect: { rowCount: shopifyDirect.length, sample: shopifyDirect.slice(0, 3) } });
     }
 
     const isShortTf = tf === 'today' || tf === 'yesterday';
 
-    // Fetch current period
-    let currentRows = await fetchWindsor(currentParams);
+    // Fetch current period — ad spend from Windsor, revenue/orders direct from Shopify
+    let { adRows: currentAdRows, shopifyRows: currentShopifyRows } = await fetchWindsor(currentParams);
 
-    // If today/yesterday still returns no data, fall back to the most recent available day.
+    // If today/yesterday still returns no ad data, fall back to the most recent available day.
     let latestAvailableDate: string | null = null;
-    if (currentRows.length === 0 && isShortTf) {
-      const recentRows = await fetchWindsor({ date_preset: 'last_7dT' });
-      if (recentRows.length > 0) {
-        const dates = recentRows.map(r => String(r.date || '').split('T')[0]).filter(Boolean).sort();
+    if (currentAdRows.length === 0 && isShortTf) {
+      const recent = await fetchWindsor({ date_preset: 'last_7dT' });
+      if (recent.adRows.length > 0) {
+        const dates = recent.adRows.map(r => String(r.date || '').split('T')[0]).filter(Boolean).sort();
         latestAvailableDate = dates[dates.length - 1];
-        currentRows = recentRows.filter(r => String(r.date || '').split('T')[0] === latestAvailableDate);
+        currentAdRows = recent.adRows.filter(r => String(r.date || '').split('T')[0] === latestAvailableDate);
       }
     }
 
-    // If Shopify hasn't synced for this period, fall back to most recent Shopify data.
-    let shopifyDataLag = false;
-    let shopifyLatestDate: string | null = null;
-    if (isShortTf && !currentRows.some(r => String(r.source || '').toLowerCase().includes('shopify'))) {
-      const recentRows = await fetchWindsor({ date_preset: 'last_7dT' });
-      const shopifyRows = recentRows.filter(r => String(r.source || '').toLowerCase().includes('shopify'));
-      if (shopifyRows.length > 0) {
-        const dates = shopifyRows.map(r => String(r.date || '').split('T')[0]).filter(Boolean).sort();
-        shopifyLatestDate = dates[dates.length - 1];
-        shopifyDataLag = true;
-        currentRows = [
-          ...currentRows,
-          ...shopifyRows.filter(r => String(r.date || '').split('T')[0] === shopifyLatestDate),
-        ];
-      }
-    }
+    const shopifyDataLag = false;
+    const shopifyLatestDate: string | null = null;
 
-    const current = aggregateRows(currentRows);
+    const current = aggregateRows(currentAdRows, currentShopifyRows);
     const hasDataLag = latestAvailableDate !== null;
 
     // Fetch comparison period if requested
@@ -336,8 +377,8 @@ export async function GET(request: NextRequest) {
         priorLabel = COMPARE_PRESETS[tf] || '';
       }
 
-      const priorRows = await fetchWindsor(priorParams);
-      const priorAgg = aggregateRows(priorRows);
+      const { adRows: priorAdRows, shopifyRows: priorShopifyRows } = await fetchWindsor(priorParams);
+      const priorAgg = aggregateRows(priorAdRows, priorShopifyRows);
 
       // For preset comparison, prior period data includes current + prior rows together
       // so we subtract current to isolate the prior window
