@@ -28,7 +28,7 @@ interface CreativeRow {
   impressions?: number | string;
   clicks?: number | string;
   ctr?: number | string;
-  purchase_roas?: number | string;
+  purchase_roas?: Array<{ action_type: string; value: string }> | number | string;
   [key: string]: string | number | boolean | undefined;
 }
 
@@ -75,6 +75,7 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
   for (const row of rows) {
     const id = String(row.ad_id || row.ad_name || row.creative_name || '');
     if (!id) continue;
+    if (!row.spend && !row.impressions) continue; // skip rows with no data yet
     if (!byAd[id]) {
       byAd[id] = {
         id,
@@ -93,8 +94,15 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
     }
     const entry = byAd[id];
     entry.spend += Number(row.spend || 0);
-    // Meta uses conversion_values, TikTok uses conversion_value/revenue
-    entry.revenue += Number(row.conversion_values || row.conversion_value || row.revenue || 0);
+    // Meta purchase_roas is [{action_type, value}] — extract the ROAS value and back-calculate revenue
+    const roasArr = Array.isArray(row.purchase_roas) ? row.purchase_roas : null;
+    const roasVal = roasArr ? Number((roasArr[0] as { value?: string })?.value || 0) : 0;
+    const adSpend = Number(row.spend || 0);
+    if (roasVal > 0 && adSpend > 0) {
+      entry.revenue += roasVal * adSpend;
+    } else {
+      entry.revenue += Number(row.conversion_values || row.conversion_value || row.revenue || 0);
+    }
     entry.impressions += Number(row.impressions || 0);
     entry.clicks += Number(row.clicks || 0);
   }
