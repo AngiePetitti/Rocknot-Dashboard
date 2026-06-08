@@ -28,7 +28,6 @@ interface CreativeRow {
   impressions?: number | string;
   clicks?: number | string;
   ctr?: number | string;
-  purchase_roas?: Array<{ action_type: string; value: string }> | number | string;
   [key: string]: string | number | boolean | undefined;
 }
 
@@ -95,8 +94,9 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
     const entry = byAd[id];
     entry.spend += Number(row.spend || 0);
     // Meta purchase_roas is [{action_type, value}] — extract the ROAS value and back-calculate revenue
-    const roasArr = Array.isArray(row.purchase_roas) ? row.purchase_roas : null;
-    const roasVal = roasArr ? Number((roasArr[0] as { value?: string })?.value || 0) : 0;
+    const rawRow = row as Record<string, unknown>;
+    const roasArr = Array.isArray(rawRow.purchase_roas) ? rawRow.purchase_roas as Array<{ value?: string }> : null;
+    const roasVal = roasArr ? Number(roasArr[0]?.value || 0) : 0;
     const adSpend = Number(row.spend || 0);
     if (roasVal > 0 && adSpend > 0) {
       entry.revenue += roasVal * adSpend;
