@@ -103,9 +103,16 @@ function aggregateRows(rows: WindsorRow[]) {
       byDate[date].orders += Math.round(Number(row.order_count || row.orders || row.purchases || 0));
       byDate[date].newCustomers += Math.round(Number(row.new_customers || 0));
       byDate[date].returningCustomers += Math.round(Number(row.returning_customers || 0));
+    } else if (src.includes('facebook') || src.includes('meta')) {
+      // Meta: purchase_roas is [{action_type, value}] — back-calculate revenue from ROAS × spend
+      const roasArr = Array.isArray((row as Record<string, unknown>).purchase_roas)
+        ? (row as Record<string, unknown>).purchase_roas as Array<{ value?: string }>
+        : null;
+      const roasVal = roasArr ? Number(roasArr[0]?.value || 0) : 0;
+      byDate[date].revenue += roasVal > 0 ? roasVal * spend : 0;
     } else {
-      // Ad platforms: use conversion_value as revenue attribution
-      byDate[date].revenue += rowRevenue || rowConvValue;
+      // Google and other ad platforms: use conversion_value
+      byDate[date].revenue += rowConvValue || rowRevenue;
     }
 
     if (src.includes('facebook') || src.includes('meta') || src.includes('instagram')) {
@@ -159,19 +166,24 @@ function aggregateRows(rows: WindsorRow[]) {
   return { metrics, revenueData };
 }
 
-const AD_FIELDS = [
-  'date', 'source', 'spend', 'revenue', 'conversion_value',
-  'roas', 'impressions', 'clicks', 'conversions', 'purchases',
+const META_FIELDS = [
+  'date', 'source', 'spend', 'impressions', 'clicks', 'ctr',
+  'purchase_roas', 'conversions',
+].join(',');
+
+const GOOGLE_FIELDS = [
+  'date', 'source', 'spend', 'impressions', 'clicks',
+  'conversions', 'conversion_value',
 ].join(',');
 
 const SHOPIFY_FIELDS = [
   'date', 'source',
   'order_count', 'order_current_total_price', 'order_subtotal_price',
-  'customer_is_returning', 'new_customers', 'returning_customers',
+  'customer_is_returning',
 ].join(',');
 
-async function fetchSource(source: 'facebook' | 'google' | 'shopify', params: Record<string, string>): Promise<WindsorRow[]> {
-  const fields = source === 'shopify' ? SHOPIFY_FIELDS : AD_FIELDS;
+async function fetchSource(source: 'facebook' | 'google_ads' | 'shopify', params: Record<string, string>): Promise<WindsorRow[]> {
+  const fields = source === 'shopify' ? SHOPIFY_FIELDS : source === 'facebook' ? META_FIELDS : GOOGLE_FIELDS;
   const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
   const url = `https://connectors.windsor.ai/${source}?${qs}`;
   const res = await fetch(url, { cache: 'no-store' });
@@ -181,10 +193,9 @@ async function fetchSource(source: 'facebook' | 'google' | 'shopify', params: Re
 }
 
 async function fetchWindsor(params: Record<string, string>): Promise<WindsorRow[]> {
-  // Query each source separately — the /all blended endpoint returns stale cached data
   const [metaRows, googleRows, shopifyRows] = await Promise.all([
     fetchSource('facebook', params),
-    fetchSource('google', params),
+    fetchSource('google_ads', params),
     fetchSource('shopify', params),
   ]);
   return [...metaRows, ...googleRows, ...shopifyRows];
@@ -230,9 +241,9 @@ export async function GET(request: NextRequest) {
     }
 
     if (debug) {
-      const debugFetch = async (source: 'facebook' | 'google' | 'shopify') => {
+      const debugFetch = async (source: 'facebook' | 'google_ads' | 'shopify') => {
         try {
-          const fields = source === 'shopify' ? SHOPIFY_FIELDS : AD_FIELDS;
+          const fields = source === 'shopify' ? SHOPIFY_FIELDS : source === 'facebook' ? META_FIELDS : GOOGLE_FIELDS;
           const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...currentParams });
           const url = `https://connectors.windsor.ai/${source}?${qs}`;
           const res = await fetch(url, { cache: 'no-store' });
@@ -244,7 +255,7 @@ export async function GET(request: NextRequest) {
       };
       const [meta, google, shopify] = await Promise.all([
         debugFetch('facebook'),
-        debugFetch('google'),
+        debugFetch('google_ads'),
         debugFetch('shopify'),
       ]);
       return NextResponse.json({ debug: true, hasApiKey: !!WINDSOR_API_KEY, params: currentParams, meta, google, shopify });
