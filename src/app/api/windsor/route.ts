@@ -231,12 +231,34 @@ export async function GET(request: NextRequest) {
     }
 
     if (debug) {
+      // Try a wide variety of potential revenue/price field names to find which ones Windsor populates
+      const DISCOVERY_FIELDS = [
+        'date', 'source',
+        'order_count', 'order_current_total_price', 'order_subtotal_price',
+        'total_price', 'subtotal_price', 'price', 'revenue',
+        'line_item_price', 'line_item_total_price', 'line_items_price',
+        'order_total', 'order_total_price', 'gross_sales', 'net_sales',
+        'sale_amount', 'total_sales', 'order_value',
+        'customer_is_returning', 'order_id',
+      ].join(',');
+
       const [meta, google, shopifyAll] = await Promise.all([
         fetchFromWindsor('facebook', META_FIELDS, currentParams),
         fetchFromWindsor('google_ads', GOOGLE_FIELDS, currentParams),
-        fetchFromWindsor('all', SHOPIFY_FIELDS, currentParams),
+        fetchFromWindsor('all', DISCOVERY_FIELDS, currentParams),
       ]);
       const shopifyRows = shopifyAll.rows.filter(r => String(r.source || '').toLowerCase().includes('shopify'));
+
+      // Find which fields have non-null values in the Shopify rows
+      const nonNullFields: Record<string, number> = {};
+      for (const row of shopifyRows.slice(0, 100)) {
+        for (const [k, v] of Object.entries(row)) {
+          if (v !== null && v !== undefined && v !== '' && v !== false && k !== 'source' && k !== 'date' && k !== 'customer_is_returning') {
+            nonNullFields[k] = (nonNullFields[k] || 0) + 1;
+          }
+        }
+      }
+
       return NextResponse.json({
         debug: true,
         params: currentParams,
@@ -246,9 +268,8 @@ export async function GET(request: NextRequest) {
           allRowCount: shopifyAll.rowCount,
           shopifySourceRows: shopifyRows.length,
           error: shopifyAll.error,
+          nonNullFields,
           sample: shopifyRows.slice(0, 3),
-          // Show all unique sources from /all to understand what's in there
-          sources: Array.from(new Set(shopifyAll.rows.map(r => r.source))).slice(0, 20),
         },
       });
     }
