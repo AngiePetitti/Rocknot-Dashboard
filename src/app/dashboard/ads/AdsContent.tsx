@@ -1,7 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Timeframe, getPlatformSpendForTimeframe, topAds, aiRecommendations } from '@/src/lib/mockData';
+import { Timeframe } from '@/src/lib/mockData';
 import { formatCurrency, formatROAS, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
@@ -10,228 +11,319 @@ import TimeframeSelector from '@/src/components/ui/TimeframeSelector';
 import PlatformBadge from '@/src/components/ui/PlatformBadge';
 import ROASChart from '@/src/components/charts/ROASChart';
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+  LineChart, Line, Legend,
 } from 'recharts';
 
-const TAG_COLORS: Record<string, string> = {
-  'Strong creative': '#c4b5fd',
-  'High CTR': '#86efac',
-  'Low CPM': '#93c5fd',
-  'UGC': '#fde68a',
-  'Trending audio': '#f9a8d4',
-  'Brand intent': '#fdba74',
-  'Retargeting': '#c4b5fd',
-  'High ROAS': '#86efac',
-  'Warm audience': '#93c5fd',
-  'Product demo': '#fde68a',
-  'Broad audience': '#e2e8f0',
-  'Brand awareness': '#f9a8d4',
-  'Upper funnel': '#fdba74',
-  'Shopping intent': '#86efac',
-  'Lookalike': '#c4b5fd',
-  'New audience': '#93c5fd',
-  'Scaling': '#fde68a',
-};
+interface PlatformData {
+  platform: string;
+  spend: number;
+  revenue: number;
+  roas: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  color: string;
+}
+
+interface DaySpend {
+  date: string;
+  meta: number;
+  google: number;
+  tiktok: number;
+}
+
+interface CreativeRow {
+  id: string;
+  name: string;
+  platform: 'Meta' | 'TikTok';
+  adUrl: string | null;
+  campaign: string;
+  adset: string;
+  spend: number;
+  revenue: number;
+  roas: number;
+  ctr: number;
+  impressions: number;
+  clicks: number;
+}
+
+function formatDate(dateStr: string) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
 export default function AdsContent() {
   const searchParams = useSearchParams();
-  const tf = (searchParams.get('tf') || '30d') as Timeframe;
+  const tfRaw = searchParams.get('tf') || '30d';
+  const tf = (tfRaw === 'custom' ? '30d' : tfRaw) as Timeframe;
+  const dateFrom = searchParams.get('date_from') || '';
+  const dateTo = searchParams.get('date_to') || '';
 
-  const platformSpend = getPlatformSpendForTimeframe(tf);
-  const totalSpend = platformSpend.reduce((s, p) => s + p.spend, 0);
-  const totalRevenue = platformSpend.reduce((s, p) => s + p.revenue, 0);
-  const avgROAS = totalRevenue / totalSpend;
+  const [platforms, setPlatforms] = useState<PlatformData[]>([]);
+  const [dailySpend, setDailySpend] = useState<DaySpend[]>([]);
+  const [creatives, setCreatives] = useState<CreativeRow[]>([]);
+  const [status, setStatus] = useState<'loading' | 'live' | 'error'>('loading');
 
-  const spendChartData = platformSpend.map(p => ({
-    platform: p.platform,
-    spend: p.spend,
-    color: p.color,
+  useEffect(() => {
+    setStatus('loading');
+    const adsParams = new URLSearchParams({ tf: tfRaw });
+    if (dateFrom) adsParams.set('date_from', dateFrom);
+    if (dateTo) adsParams.set('date_to', dateTo);
+
+    Promise.all([
+      fetch(`/api/windsor/ads?${adsParams}`).then(r => r.json()),
+      fetch(`/api/windsor/creatives?tf=${tfRaw}`).then(r => r.json()),
+    ])
+      .then(([adsData, creativesData]) => {
+        setPlatforms(adsData.platforms || []);
+        setDailySpend(adsData.dailySpend || []);
+        setCreatives((creativesData.creatives || []).slice(0, 20));
+        setStatus('live');
+      })
+      .catch(() => setStatus('error'));
+  }, [tfRaw, dateFrom, dateTo]);
+
+  const totalSpend = platforms.reduce((s, p) => s + p.spend, 0);
+  const totalRevenue = platforms.reduce((s, p) => s + p.revenue, 0);
+  const blendedROAS = totalSpend > 0 ? totalRevenue / totalSpend : 0;
+  const bestPlatform = platforms.length > 0 ? platforms.reduce((b, p) => p.roas > b.roas ? p : b) : null;
+
+  const subtitle = tfRaw === 'custom' && dateFrom && dateTo
+    ? `Ad Performance · ${dateFrom} → ${dateTo}`
+    : `Ad Performance · ${TIMEFRAME_LABELS[tf] || tf}`;
+
+  // Simple dynamic recommendations based on live ROAS
+  const recommendations = platforms
+    .filter(p => p.spend > 0)
+    .map(p => {
+      if (p.roas >= 4) return { platform: p, msg: `Scale budget — ROAS of ${formatROAS(p.roas)} is well above the 3.5x goal.`, type: 'scale' };
+      if (p.roas >= 3.5) return { platform: p, msg: `Maintain current spend — ROAS is at ${formatROAS(p.roas)}, right at goal.`, type: 'maintain' };
+      if (p.roas >= 2) return { platform: p, msg: `Optimize creatives — ROAS of ${formatROAS(p.roas)} is below goal. Test new ad formats.`, type: 'optimize' };
+      return { platform: p, msg: `Review campaigns — ROAS of ${formatROAS(p.roas)} needs immediate attention. Pause low performers.`, type: 'pause' };
+    });
+
+  const recColors: Record<string, string> = { scale: '#86efac', maintain: '#93c5fd', optimize: '#fde68a', pause: '#fca5a5' };
+
+  // Compact daily spend chart — show last N days depending on timeframe
+  const chartData = dailySpend.map(d => ({
+    date: formatDate(d.date),
+    Meta: d.meta,
+    Google: d.google,
+    TikTok: d.tiktok,
   }));
+
+  const hasSpend = dailySpend.some(d => d.meta > 0 || d.google > 0 || d.tiktok > 0);
 
   return (
     <div>
-      <Header title="Ad Performance" subtitle={`Spend & ROAS · ${TIMEFRAME_LABELS[tf] || tf}`}>
+      <Header title="Ad Performance" subtitle={subtitle}>
         <TimeframeSelector />
       </Header>
 
-      {/* Top Metrics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <MetricCard
-          title="Total Ad Spend"
-          value={formatCurrency(totalSpend)}
-          subtitle="All platforms combined"
-          accentColor="#f9a8d4"
-        />
-        <MetricCard
-          title="Total Revenue (Ads)"
-          value={formatCurrency(totalRevenue)}
-          subtitle="Attributed to paid"
-          accentColor="#c4b5fd"
-        />
-        <MetricCard
-          title="Blended ROAS"
-          value={formatROAS(avgROAS)}
-          subtitle="Revenue / Spend"
-          accentColor="#86efac"
-          valueColor={avgROAS >= 3.5 ? '#22c55e' : '#ef4444'}
-        />
-        <MetricCard
-          title="Best Platform ROAS"
-          value={formatROAS(Math.max(...platformSpend.map(p => p.roas)))}
-          subtitle={platformSpend.reduce((best, p) => p.roas > best.roas ? p : best).platform}
-          accentColor="#fde68a"
-        />
-      </div>
+      {status === 'loading' && (
+        <Card><p className="text-sm text-gray-400 text-center py-12">Loading ad performance data…</p></Card>
+      )}
 
-      {/* ROAS + Spend Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
-        <Card accentColor="#c4b5fd">
-          <h2 className="text-sm font-bold text-gray-700 mb-1">ROAS by Platform</h2>
-          <p className="text-xs text-gray-400 mb-4">Red dashed line = 3.5x goal</p>
-          <ROASChart data={platformSpend} goalLine={3.5} />
+      {status === 'error' && (
+        <Card accentColor="#fca5a5">
+          <p className="text-sm text-center text-gray-500 py-8">Couldn't load ad data. Try refreshing.</p>
         </Card>
+      )}
 
-        <Card accentColor="#f9a8d4">
-          <h2 className="text-sm font-bold text-gray-700 mb-1">Spend by Platform</h2>
-          <p className="text-xs text-gray-400 mb-4">Total: {formatCurrency(totalSpend)}</p>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={spendChartData} barSize={48}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-              <XAxis
-                dataKey="platform"
-                tick={{ fontSize: 11, fill: '#94a3b8', fontWeight: 600 }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: '#94a3b8' }}
-                axisLine={false}
-                tickLine={false}
-                tickFormatter={(v) => '$' + (v / 1000).toFixed(0) + 'k'}
-                width={40}
-              />
-              <Tooltip
-                formatter={(v: unknown) => [formatCurrency(Number(v)), 'Spend']}
-                contentStyle={{ borderRadius: 12, border: '1px solid #f1f5f9', fontSize: 12 }}
-                cursor={{ fill: '#f8fafc' }}
-              />
-              <Bar dataKey="spend" radius={[6, 6, 0, 0]}>
-                {spendChartData.map((entry, i) => (
-                  <Cell key={i} fill={entry.color} opacity={0.85} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
-      </div>
+      {status === 'live' && (
+        <>
+          {/* Top Metrics */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <MetricCard
+              title="Total Ad Spend"
+              value={formatCurrency(totalSpend)}
+              subtitle="All platforms combined"
+              accentColor="#f9a8d4"
+            />
+            <MetricCard
+              title="Ad-Attributed Revenue"
+              value={formatCurrency(totalRevenue)}
+              subtitle="ROAS × Spend (Meta) + Conv. Value (Google)"
+              accentColor="#c4b5fd"
+            />
+            <MetricCard
+              title="Blended ROAS"
+              value={formatROAS(blendedROAS)}
+              subtitle="Revenue / Spend"
+              accentColor="#86efac"
+              valueColor={blendedROAS >= 3.5 ? '#22c55e' : '#ef4444'}
+            />
+            <MetricCard
+              title="Best Platform"
+              value={bestPlatform ? formatROAS(bestPlatform.roas) : '—'}
+              subtitle={bestPlatform?.platform || 'No data'}
+              accentColor="#fde68a"
+            />
+          </div>
 
-      {/* AI Recommendations */}
-      <Card accentColor="#fde68a" className="mb-6">
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-lg">🤖</span>
-          <h2 className="text-sm font-bold text-gray-700">AI-Powered Spend Recommendations</h2>
-          <span className="text-xs bg-yellow-100 text-yellow-700 font-semibold px-2 py-0.5 rounded-full">
-            Based on last 30 days
-          </span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {aiRecommendations.map((rec) => (
-            <div
-              key={rec.platform}
-              className="rounded-xl p-4 border"
-              style={{ borderColor: rec.color + '33', backgroundColor: rec.color + '08' }}
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <span
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: rec.color }}
-                />
-                <span className="text-xs font-bold text-gray-700">{rec.platform}</span>
+          {/* Platform cards */}
+          <div className={`grid gap-4 mb-6 ${platforms.length === 1 ? 'grid-cols-1 max-w-sm' : platforms.length === 2 ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'}`}>
+            {platforms.map(p => (
+              <Card key={p.platform} accentColor={p.color}>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
+                  <span className="font-bold text-gray-800 text-sm">{p.platform}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Spend</p>
+                    <p className="font-bold text-gray-800">{formatCurrency(p.spend)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400 uppercase font-semibold mb-0.5">ROAS</p>
+                    <p className="font-bold" style={{ color: p.roas >= 3.5 ? '#22c55e' : '#ef4444' }}>{formatROAS(p.roas)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400 uppercase font-semibold mb-0.5">CTR</p>
+                    <p className="font-bold text-gray-800">{formatPercent(p.ctr)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Impressions</p>
+                    <p className="font-bold text-gray-800">{(p.impressions / 1000).toFixed(0)}k</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Clicks</p>
+                    <p className="font-bold text-gray-800">{p.clicks.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Revenue</p>
+                    <p className="font-bold text-gray-800">{formatCurrency(p.revenue)}</p>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          {/* Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+            <Card accentColor="#c4b5fd">
+              <h2 className="text-sm font-bold text-gray-700 mb-1">ROAS by Platform</h2>
+              <p className="text-xs text-gray-400 mb-4">Red dashed line = 3.5x goal</p>
+              <ROASChart data={platforms} goalLine={3.5} />
+            </Card>
+
+            <Card accentColor="#f9a8d4">
+              <h2 className="text-sm font-bold text-gray-700 mb-1">Spend by Platform</h2>
+              <p className="text-xs text-gray-400 mb-4">Total: {formatCurrency(totalSpend)}</p>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={platforms.map(p => ({ platform: p.platform, spend: p.spend, color: p.color }))} barSize={48}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis dataKey="platform" tick={{ fontSize: 11, fill: '#94a3b8', fontWeight: 600 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={v => '$' + (v / 1000).toFixed(0) + 'k'} width={40} />
+                  <Tooltip formatter={(v: unknown) => [formatCurrency(Number(v)), 'Spend']} contentStyle={{ borderRadius: 12, border: '1px solid #f1f5f9', fontSize: 12 }} cursor={{ fill: '#f8fafc' }} />
+                  <Bar dataKey="spend" radius={[6, 6, 0, 0]}>
+                    {platforms.map((p, i) => <Cell key={i} fill={p.color} opacity={0.85} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+          </div>
+
+          {/* Daily Spend Trend */}
+          {hasSpend && chartData.length > 1 && (
+            <Card accentColor="#93c5fd" className="mb-6">
+              <h2 className="text-sm font-bold text-gray-700 mb-1">Daily Spend Trend</h2>
+              <p className="text-xs text-gray-400 mb-4">Spend per platform over the selected period</p>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                  <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={v => '$' + (v / 1000).toFixed(0) + 'k'} width={40} />
+                  <Tooltip formatter={(v: unknown) => [formatCurrency(Number(v)), '']} contentStyle={{ borderRadius: 12, border: '1px solid #f1f5f9', fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  {platforms.some(p => p.platform === 'Meta') && <Line type="monotone" dataKey="Meta" stroke="#818cf8" strokeWidth={2} dot={false} />}
+                  {platforms.some(p => p.platform === 'Google') && <Line type="monotone" dataKey="Google" stroke="#34d399" strokeWidth={2} dot={false} />}
+                  {platforms.some(p => p.platform === 'TikTok') && <Line type="monotone" dataKey="TikTok" stroke="#f472b6" strokeWidth={2} dot={false} />}
+                </LineChart>
+              </ResponsiveContainer>
+            </Card>
+          )}
+
+          {/* Recommendations */}
+          {recommendations.length > 0 && (
+            <Card accentColor="#fde68a" className="mb-6">
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-lg">💡</span>
+                <h2 className="text-sm font-bold text-gray-700">Spend Recommendations</h2>
+                <span className="text-xs bg-yellow-100 text-yellow-700 font-semibold px-2 py-0.5 rounded-full">Based on live ROAS</span>
               </div>
-              <p className="text-sm font-bold text-gray-800 mb-1">💡 {rec.recommendation}</p>
-              <p className="text-xs text-gray-500 mb-2">{rec.reason}</p>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-                  {rec.impact}
-                </span>
-                <span
-                  className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                    rec.confidence === 'High'
-                      ? 'bg-green-100 text-green-700'
-                      : 'bg-yellow-100 text-yellow-700'
-                  }`}
-                >
-                  {rec.confidence} confidence
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* Best Performing Ads Table */}
-      <Card accentColor="#86efac">
-        <h2 className="text-sm font-bold text-gray-700 mb-4">Best Performing Ads</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[800px]">
-            <thead>
-              <tr className="border-b border-gray-100">
-                {['Ad Name', 'Platform', 'Spend', 'Revenue', 'ROAS', 'CTR', 'Impressions', "Why it's working"].map(h => (
-                  <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4 whitespace-nowrap">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {topAds.map((ad) => (
-                <tr key={ad.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                  <td className="py-3 pr-4">
-                    <span className="font-medium text-gray-800">{ad.name}</span>
-                  </td>
-                  <td className="py-3 pr-4">
-                    <PlatformBadge platform={ad.platform} />
-                  </td>
-                  <td className="py-3 pr-4 text-gray-600">{formatCurrency(ad.spend)}</td>
-                  <td className="py-3 pr-4 text-gray-600">{formatCurrency(ad.revenue)}</td>
-                  <td className="py-3 pr-4">
-                    <span
-                      className="font-bold"
-                      style={{ color: ad.roas >= 3.5 ? '#22c55e' : '#ef4444' }}
-                    >
-                      {formatROAS(ad.roas)}
-                    </span>
-                  </td>
-                  <td className="py-3 pr-4 text-gray-600">{formatPercent(ad.ctr)}</td>
-                  <td className="py-3 pr-4 text-gray-600">
-                    {(ad.impressions / 1000).toFixed(0)}k
-                  </td>
-                  <td className="py-3 pr-4">
-                    <div className="flex flex-wrap gap-1">
-                      {ad.tags.map(tag => (
-                        <span
-                          key={tag}
-                          className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full text-gray-700"
-                          style={{ backgroundColor: TAG_COLORS[tag] || '#e2e8f0' }}
-                        >
-                          {tag}
-                        </span>
-                      ))}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {recommendations.map(rec => (
+                  <div key={rec.platform.platform} className="rounded-xl p-4 border" style={{ borderColor: rec.platform.color + '33', backgroundColor: rec.platform.color + '08' }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: rec.platform.color }} />
+                      <span className="text-xs font-bold text-gray-700">{rec.platform.platform}</span>
+                      <span className="ml-auto text-xs font-semibold px-2 py-0.5 rounded-full text-gray-700" style={{ backgroundColor: recColors[rec.type] }}>
+                        {rec.type === 'scale' ? '🚀 Scale' : rec.type === 'maintain' ? '✅ On track' : rec.type === 'optimize' ? '⚠️ Optimize' : '🛑 Review'}
+                      </span>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+                    <p className="text-sm text-gray-700">{rec.msg}</p>
+                    <p className="text-xs text-gray-400 mt-1">Spend: {formatCurrency(rec.platform.spend)} · ROAS: {formatROAS(rec.platform.roas)}</p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* Top Ads Table */}
+          {creatives.length > 0 && (
+            <Card accentColor="#86efac">
+              <h2 className="text-sm font-bold text-gray-700 mb-4">Top Performing Ads</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[700px]">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      {['Ad Name', 'Platform', 'Spend', 'ROAS', 'CTR', 'Impressions', 'Clicks', ''].map(h => (
+                        <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4 whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {creatives.map(ad => (
+                      <tr key={`${ad.platform}-${ad.id}`} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                        <td className="py-3 pr-4 max-w-[220px]">
+                          <span className="font-medium text-gray-800 line-clamp-1 block">{ad.name}</span>
+                          {ad.campaign && <span className="text-[10px] text-gray-400 line-clamp-1 block">{ad.campaign}</span>}
+                        </td>
+                        <td className="py-3 pr-4"><PlatformBadge platform={ad.platform} /></td>
+                        <td className="py-3 pr-4 text-gray-600">{formatCurrency(ad.spend)}</td>
+                        <td className="py-3 pr-4">
+                          <span className="font-bold" style={{ color: ad.roas >= 3.5 ? '#22c55e' : '#ef4444' }}>
+                            {formatROAS(ad.roas)}
+                          </span>
+                        </td>
+                        <td className="py-3 pr-4 text-gray-600">{formatPercent(ad.ctr)}</td>
+                        <td className="py-3 pr-4 text-gray-600">{(ad.impressions / 1000).toFixed(0)}k</td>
+                        <td className="py-3 pr-4 text-gray-600">{ad.clicks.toLocaleString()}</td>
+                        <td className="py-3">
+                          {ad.adUrl && (
+                            <a href={ad.adUrl} target="_blank" rel="noopener noreferrer"
+                              className="text-xs font-semibold text-purple-500 hover:text-purple-700">
+                              View ↗
+                            </a>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
+          {creatives.length === 0 && (
+            <Card accentColor="#fde68a">
+              <p className="text-sm text-center text-gray-500 py-6">No ad-level creative data available for this period yet.</p>
+            </Card>
+          )}
+        </>
+      )}
     </div>
   );
 }
