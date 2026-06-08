@@ -19,18 +19,16 @@ interface CreativeRow {
   source?: string;
   ad_name?: string;
   ad_id?: string;
-  creative_name?: string;
-  creative_thumb_url?: string;
-  thumbnail_url?: string;
-  image_url?: string;
-  video_thumbnail_url?: string;
+  adset_name?: string;
+  campaign?: string;
   spend?: number | string;
   conversion_value?: number | string;
+  conversion_values?: number | string;
   revenue?: number | string;
   impressions?: number | string;
   clicks?: number | string;
   ctr?: number | string;
-  roas?: number | string;
+  purchase_roas?: number | string;
   [key: string]: string | number | boolean | undefined;
 }
 
@@ -47,12 +45,23 @@ export interface CreativePerformance {
   clicks: number;
 }
 
+const FIELDS_BY_SOURCE: Record<'facebook' | 'tiktok', string> = {
+  // Meta valid Insights API fields only
+  facebook: [
+    'source', 'ad_name', 'ad_id', 'adset_name', 'campaign',
+    'spend', 'impressions', 'clicks', 'ctr',
+    'purchase_roas', 'conversion_values',
+  ].join(','),
+  // TikTok — exclude image_url to avoid permissions error
+  tiktok: [
+    'source', 'ad_name', 'ad_id',
+    'spend', 'impressions', 'clicks', 'ctr',
+    'conversion_value', 'revenue',
+  ].join(','),
+};
+
 async function fetchCreatives(source: 'facebook' | 'tiktok', params: Record<string, string>): Promise<{ rows: CreativeRow[]; raw?: unknown }> {
-  const fields = [
-    'source', 'ad_name', 'ad_id', 'creative_name',
-    'creative_thumb_url', 'thumbnail_url', 'image_url', 'video_thumbnail_url',
-    'spend', 'conversion_value', 'revenue', 'impressions', 'clicks', 'ctr', 'roas',
-  ].join(',');
+  const fields = FIELDS_BY_SOURCE[source];
   const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
   const url = `https://connectors.windsor.ai/${source}?${qs}`;
   const res = await fetch(url, { cache: 'no-store' });
@@ -84,7 +93,8 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
     }
     const entry = byAd[id];
     entry.spend += Number(row.spend || 0);
-    entry.revenue += Number(row.revenue || row.conversion_value || 0);
+    // Meta uses conversion_values, TikTok uses conversion_value/revenue
+    entry.revenue += Number(row.conversion_values || row.conversion_value || row.revenue || 0);
     entry.impressions += Number(row.impressions || 0);
     entry.clicks += Number(row.clicks || 0);
   }
