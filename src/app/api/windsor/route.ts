@@ -71,7 +71,8 @@ interface AggregatedMetrics {
 function aggregateRows(rows: WindsorRow[]) {
   const byDate: Record<string, {
     date: string;
-    revenue: number;
+    shopifyRevenue: number;
+    adRevenue: number;
     orders: number;
     adSpend: number;
     metaSpend: number;
@@ -85,7 +86,7 @@ function aggregateRows(rows: WindsorRow[]) {
     const date = String(row.date || '').split('T')[0];
     if (!date) continue;
     if (!byDate[date]) {
-      byDate[date] = { date, revenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, newCustomers: 0, returningCustomers: 0 };
+      byDate[date] = { date, shopifyRevenue: 0, adRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, newCustomers: 0, returningCustomers: 0 };
     }
     const spend = Number(row.spend || 0);
     const rowRevenue = Number(row.revenue || 0);
@@ -98,7 +99,7 @@ function aggregateRows(rows: WindsorRow[]) {
     if (isShopify) {
       // Shopify: use order_current_total_price (net revenue) or fallback to revenue
       const shopifyRevenue = Number(row.order_current_total_price || row.order_subtotal_price || rowRevenue || 0);
-      byDate[date].revenue += shopifyRevenue;
+      byDate[date].shopifyRevenue += shopifyRevenue;
       // order_count is the number of orders for that day from Shopify
       byDate[date].orders += Math.round(Number(row.order_count || row.orders || row.purchases || 0));
       byDate[date].newCustomers += Math.round(Number(row.new_customers || 0));
@@ -109,10 +110,10 @@ function aggregateRows(rows: WindsorRow[]) {
         ? (row as Record<string, unknown>).purchase_roas as Array<{ value?: string }>
         : null;
       const roasVal = roasArr ? Number(roasArr[0]?.value || 0) : 0;
-      byDate[date].revenue += roasVal > 0 ? roasVal * spend : 0;
+      byDate[date].adRevenue += roasVal > 0 ? roasVal * spend : 0;
     } else {
       // Google and other ad platforms: use conversion_value
-      byDate[date].revenue += rowConvValue || rowRevenue;
+      byDate[date].adRevenue += rowConvValue || rowRevenue;
     }
 
     if (src.includes('facebook') || src.includes('meta') || src.includes('instagram')) {
@@ -127,10 +128,10 @@ function aggregateRows(rows: WindsorRow[]) {
   const dailyData = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
   const hasShopify = rows.some(r => String(r.source || '').toLowerCase().includes('shopify'));
 
-  // If Shopify is connected, revenue is already correctly summed per day from Shopify rows only.
-  // If not connected yet, fall back to ad platform conversion_value as a proxy.
+  // When Shopify is connected, use only Shopify order revenue (not ad platform ROAS back-calc).
+  // When Shopify is not connected, fall back to ad attribution revenue as a proxy.
   const totalRevenue = hasShopify
-    ? dailyData.reduce((s, d) => s + d.revenue, 0)
+    ? dailyData.reduce((s, d) => s + d.shopifyRevenue, 0)
     : 0;
   const totalAdSpend = dailyData.reduce((s, d) => s + d.adSpend, 0);
   const totalOrders = Math.round(dailyData.reduce((s, d) => s + d.orders, 0));
@@ -158,7 +159,7 @@ function aggregateRows(rows: WindsorRow[]) {
 
   const revenueData = dailyData.map(d => ({
     date: d.date,
-    revenue: Math.round(d.revenue),
+    revenue: Math.round(hasShopify ? d.shopifyRevenue : d.adRevenue),
     orders: Math.round(d.orders),
     adSpend: Math.round(d.adSpend),
   }));
