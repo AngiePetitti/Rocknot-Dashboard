@@ -230,9 +230,17 @@ export async function GET(request: NextRequest) {
     }
 
     if (debug) {
-      const raw = await fetchWindsor(currentParams);
-      const sources = Array.from(new Set(raw.map(r => r.source)));
-      return NextResponse.json({ debug: true, sources, rowCount: raw.length, sample: raw.slice(0, 10) });
+      const [metaRaw, googleRaw, shopifyRaw] = await Promise.all([
+        fetchSource('facebook', currentParams),
+        fetchSource('google', currentParams),
+        fetchSource('shopify', currentParams),
+      ]);
+      return NextResponse.json({
+        debug: true,
+        meta: { rowCount: metaRaw.length, sample: metaRaw.slice(0, 3) },
+        google: { rowCount: googleRaw.length, sample: googleRaw.slice(0, 3) },
+        shopify: { rowCount: shopifyRaw.length, sample: shopifyRaw.slice(0, 3) },
+      });
     }
 
     const isShortTf = tf === 'today' || tf === 'yesterday';
