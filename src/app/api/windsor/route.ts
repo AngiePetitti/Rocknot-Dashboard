@@ -192,11 +192,27 @@ async function fetchSource(source: 'facebook' | 'google_ads' | 'shopify', params
   return (json.data as WindsorRow[]).map(r => ({ ...r, source: source === 'facebook' ? 'facebook' : source }));
 }
 
+const ALL_SHOPIFY_FIELDS = [
+  'date', 'source',
+  'order_count', 'order_current_total_price', 'order_subtotal_price',
+  'customer_is_returning',
+].join(',');
+
+async function fetchShopifyViaAll(params: Record<string, string>): Promise<WindsorRow[]> {
+  // /shopify endpoint returns all nulls for order fields — use /all filtered to shopify source instead
+  const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields: ALL_SHOPIFY_FIELDS, _renderer: 'json', ...params });
+  const url = `https://connectors.windsor.ai/all?${qs}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  const json = await res.json();
+  if (json.error || !json.data) return [];
+  return (json.data as WindsorRow[]).filter(r => String(r.source || '').toLowerCase().includes('shopify'));
+}
+
 async function fetchWindsor(params: Record<string, string>): Promise<WindsorRow[]> {
   const [metaRows, googleRows, shopifyRows] = await Promise.all([
     fetchSource('facebook', params),
     fetchSource('google_ads', params),
-    fetchSource('shopify', params),
+    fetchShopifyViaAll(params),
   ]);
   return [...metaRows, ...googleRows, ...shopifyRows];
 }
