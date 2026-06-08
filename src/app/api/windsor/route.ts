@@ -199,8 +199,15 @@ interface ShopifyDailyRow {
   orders: number;
 }
 
-async function fetchShopifyDirect(params: Record<string, string>): Promise<ShopifyDailyRow[]> {
-  if (!SHOPIFY_TOKEN) return [];
+interface ShopifyFetchResult {
+  rows: ShopifyDailyRow[];
+  error?: string;
+  httpStatus?: number;
+  parseErrors?: unknown[];
+}
+
+async function fetchShopifyDirect(params: Record<string, string>): Promise<ShopifyFetchResult> {
+  if (!SHOPIFY_TOKEN) return { rows: [], error: 'no_token' };
 
   // Convert Windsor-style params to ShopifyQL date syntax
   let since = '';
@@ -210,7 +217,6 @@ async function fetchShopifyDirect(params: Record<string, string>): Promise<Shopi
     since = params.date_from;
     until = params.date_to;
   } else {
-    // Map Windsor date_presets to ShopifyQL relative dates
     const presetMap: Record<string, { since: string; until: string }> = {
       last_1dT:   { since: 'today', until: 'today' },
       last_1d:    { since: 'yesterday', until: 'yesterday' },
@@ -244,9 +250,15 @@ async function fetchShopifyDirect(params: Record<string, string>): Promise<Shopi
       cache: 'no-store',
     });
 
+    if (!res.ok) {
+      const text = await res.text();
+      return { rows: [], error: `http_${res.status}: ${text.slice(0, 200)}`, httpStatus: res.status };
+    }
+
     const json = await res.json();
     const result = json?.data?.shopifyqlQuery;
-    if (!result || result.parseErrors?.length) return [];
+    if (!result) return { rows: [], error: 'null_result', parseErrors: json?.errors };
+    if (result.parseErrors?.length) return { rows: [], error: 'parse_error', parseErrors: result.parseErrors };
 
     const cols: Array<{ name: string }> = result.tableData?.columns || [];
     const rows: string[][] = result.tableData?.rowData || [];
@@ -254,25 +266,27 @@ async function fetchShopifyDirect(params: Record<string, string>): Promise<Shopi
     const revIdx = cols.findIndex(c => c.name === 'net_sales');
     const ordIdx = cols.findIndex(c => c.name === 'orders');
 
-    return rows
-      .map(r => ({
-        date: String(r[dayIdx] || '').split('T')[0],
-        revenue: parseFloat(r[revIdx] || '0') || 0,
-        orders: parseInt(r[ordIdx] || '0') || 0,
-      }))
-      .filter(r => r.date);
-  } catch {
-    return [];
+    return {
+      rows: rows
+        .map(r => ({
+          date: String(r[dayIdx] || '').split('T')[0],
+          revenue: parseFloat(r[revIdx] || '0') || 0,
+          orders: parseInt(r[ordIdx] || '0') || 0,
+        }))
+        .filter(r => r.date),
+    };
+  } catch (e) {
+    return { rows: [], error: `exception: ${String(e)}` };
   }
 }
 
-async function fetchWindsor(params: Record<string, string>): Promise<{ adRows: WindsorRow[]; shopifyRows: ShopifyDailyRow[] }> {
-  const [metaRows, googleRows, shopifyRows] = await Promise.all([
+async function fetchWindsor(params: Record<string, string>): Promise<{ adRows: WindsorRow[]; shopifyRows: ShopifyDailyRow[]; shopifyError?: string }> {
+  const [metaRows, googleRows, shopifyResult] = await Promise.all([
     fetchSource('facebook', params),
     fetchSource('google_ads', params),
     fetchShopifyDirect(params),
   ]);
-  return { adRows: [...metaRows, ...googleRows], shopifyRows };
+  return { adRows: [...metaRows, ...googleRows], shopifyRows: shopifyResult.rows, shopifyError: shopifyResult.error };
 }
 
 function addDays(dateStr: string, days: number): string {
@@ -327,18 +341,18 @@ export async function GET(request: NextRequest) {
           return { error: String(e), rowCount: 0, sample: [] };
         }
       };
-      const [meta, google, shopifyDirect] = await Promise.all([
+      const [meta, google, shopifyResult] = await Promise.all([
         debugFetch('facebook'),
         debugFetch('google_ads'),
         fetchShopifyDirect(currentParams),
       ]);
-      return NextResponse.json({ debug: true, hasApiKey: !!WINDSOR_API_KEY, params: currentParams, meta, google, shopifyDirect: { rowCount: shopifyDirect.length, sample: shopifyDirect.slice(0, 3) } });
+      return NextResponse.json({ debug: true, hasApiKey: !!WINDSOR_API_KEY, hasShopifyToken: !!SHOPIFY_TOKEN, params: currentParams, meta, google, shopifyDirect: { rowCount: shopifyResult.rows.length, error: shopifyResult.error, parseErrors: shopifyResult.parseErrors, sample: shopifyResult.rows.slice(0, 3) } });
     }
 
     const isShortTf = tf === 'today' || tf === 'yesterday';
 
     // Fetch current period — ad spend from Windsor, revenue/orders direct from Shopify
-    let { adRows: currentAdRows, shopifyRows: currentShopifyRows } = await fetchWindsor(currentParams);
+    let { adRows: currentAdRows, shopifyRows: currentShopifyRows, shopifyError: currentShopifyError } = await fetchWindsor(currentParams);
 
     // If today/yesterday still returns no ad data, fall back to the most recent available day.
     let latestAvailableDate: string | null = null;
@@ -411,6 +425,7 @@ export async function GET(request: NextRequest) {
       dateFrom: dateFrom || null,
       dateTo: dateTo || null,
       revenueSource: current.revenueSource,
+      ...(currentShopifyError ? { shopifyError: currentShopifyError } : {}),
       metrics: current.metrics,
       revenueData: current.revenueData,
       ...(hasDataLag ? { dataLag: true, latestAvailableDate } : {}),
