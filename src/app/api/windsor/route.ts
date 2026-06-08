@@ -247,7 +247,7 @@ export async function GET(request: NextRequest) {
         debugFetch('google'),
         debugFetch('shopify'),
       ]);
-      return NextResponse.json({ debug: true, meta, google, shopify });
+      return NextResponse.json({ debug: true, hasApiKey: !!WINDSOR_API_KEY, params: currentParams, meta, google, shopify });
     }
 
     const isShortTf = tf === 'today' || tf === 'yesterday';
