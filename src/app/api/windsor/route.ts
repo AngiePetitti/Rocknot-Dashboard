@@ -230,17 +230,24 @@ export async function GET(request: NextRequest) {
     }
 
     if (debug) {
-      const [metaRaw, googleRaw, shopifyRaw] = await Promise.all([
-        fetchSource('facebook', currentParams),
-        fetchSource('google', currentParams),
-        fetchSource('shopify', currentParams),
+      const debugFetch = async (source: 'facebook' | 'google' | 'shopify') => {
+        try {
+          const fields = source === 'shopify' ? SHOPIFY_FIELDS : AD_FIELDS;
+          const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...currentParams });
+          const url = `https://connectors.windsor.ai/${source}?${qs}`;
+          const res = await fetch(url, { cache: 'no-store' });
+          const json = await res.json();
+          return { url: url.replace(WINDSOR_API_KEY!, '[KEY]'), rowCount: json.data?.length ?? 0, error: json.error ?? null, sample: (json.data || []).slice(0, 2) };
+        } catch (e) {
+          return { error: String(e), rowCount: 0, sample: [] };
+        }
+      };
+      const [meta, google, shopify] = await Promise.all([
+        debugFetch('facebook'),
+        debugFetch('google'),
+        debugFetch('shopify'),
       ]);
-      return NextResponse.json({
-        debug: true,
-        meta: { rowCount: metaRaw.length, sample: metaRaw.slice(0, 3) },
-        google: { rowCount: googleRaw.length, sample: googleRaw.slice(0, 3) },
-        shopify: { rowCount: shopifyRaw.length, sample: shopifyRaw.slice(0, 3) },
-      });
+      return NextResponse.json({ debug: true, meta, google, shopify });
     }
 
     const isShortTf = tf === 'today' || tf === 'yesterday';
