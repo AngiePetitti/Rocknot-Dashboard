@@ -221,7 +221,7 @@ export async function GET(request: NextRequest) {
       const fields = 'date,source,spend,revenue,conversion_value,roas,impressions,clicks,conversions,purchases';
       const qs = new URLSearchParams({ api_key: '[KEY]', fields, _renderer: 'json', ...currentParams });
       const raw = await fetchWindsor(currentParams);
-      const sources = [...new Set(raw.map(r => r.source))];
+      const sources = Array.from(new Set(raw.map(r => r.source)));
       return NextResponse.json({ debug: true, url: `https://connectors.windsor.ai/all?${qs}`, sources, raw: raw.slice(0, 20) });
     }
 
