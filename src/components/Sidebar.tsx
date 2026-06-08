@@ -6,6 +6,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 const navItems = [
   { href: '/dashboard', label: 'Overview', icon: '📊' },
   { href: '/dashboard/ads', label: 'Ad Performance', icon: '🎯' },
+  { href: '/dashboard/creatives', label: 'Creative Analysis', icon: '🎨' },
   { href: '/dashboard/products', label: 'Top Products', icon: '📦' },
   { href: '/dashboard/customers', label: 'Customer Intel', icon: '👥' },
   { href: '/dashboard/inventory', label: 'Inventory', icon: '🏭' },
