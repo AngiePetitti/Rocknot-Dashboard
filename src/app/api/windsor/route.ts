@@ -127,12 +127,14 @@ function aggregateRows(rows: WindsorRow[]) {
 
   const dailyData = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
   const hasShopify = rows.some(r => String(r.source || '').toLowerCase().includes('shopify'));
+  const shopifyRevenueTotal = dailyData.reduce((s, d) => s + d.shopifyRevenue, 0);
+  const hasUsableShopifyRevenue = hasShopify && shopifyRevenueTotal > 0;
 
-  // When Shopify is connected, use only Shopify order revenue (not ad platform ROAS back-calc).
-  // When Shopify is not connected, fall back to ad attribution revenue as a proxy.
-  const totalRevenue = hasShopify
-    ? dailyData.reduce((s, d) => s + d.shopifyRevenue, 0)
-    : 0;
+  // Use Shopify order revenue when available (accurate). Fall back to ad attribution
+  // revenue (ROAS back-calc) only when Shopify data hasn't synced for this period.
+  const totalRevenue = hasUsableShopifyRevenue
+    ? shopifyRevenueTotal
+    : dailyData.reduce((s, d) => s + d.adRevenue, 0);
   const totalAdSpend = dailyData.reduce((s, d) => s + d.adSpend, 0);
   const totalOrders = Math.round(dailyData.reduce((s, d) => s + d.orders, 0));
   const totalMetaSpend = dailyData.reduce((s, d) => s + d.metaSpend, 0);
@@ -159,12 +161,12 @@ function aggregateRows(rows: WindsorRow[]) {
 
   const revenueData = dailyData.map(d => ({
     date: d.date,
-    revenue: Math.round(hasShopify ? d.shopifyRevenue : d.adRevenue),
+    revenue: Math.round(hasUsableShopifyRevenue ? d.shopifyRevenue : d.adRevenue),
     orders: Math.round(d.orders),
     adSpend: Math.round(d.adSpend),
   }));
 
-  return { metrics, revenueData };
+  return { metrics, revenueData, revenueSource: hasUsableShopifyRevenue ? 'shopify' : 'ad_attribution' };
 }
 
 const META_FIELDS = [
@@ -367,6 +369,7 @@ export async function GET(request: NextRequest) {
       timeframe: tf,
       dateFrom: dateFrom || null,
       dateTo: dateTo || null,
+      revenueSource: current.revenueSource,
       metrics: current.metrics,
       revenueData: current.revenueData,
       ...(hasDataLag ? { dataLag: true, latestAvailableDate } : {}),

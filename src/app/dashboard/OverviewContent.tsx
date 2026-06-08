@@ -66,6 +66,7 @@ export default function OverviewContent() {
   const [latestAvailableDate, setLatestAvailableDate] = useState<string | null>(null);
   const [shopifyDataLag, setShopifyDataLag] = useState<boolean>(false);
   const [shopifyLatestDate, setShopifyLatestDate] = useState<string | null>(null);
+  const [revenueSource, setRevenueSource] = useState<'shopify' | 'ad_attribution' | null>(null);
 
   function buildLivePlatformSpend(m: LiveMetrics): PlatformSpend[] | null {
     if (!m.metaSpend && !m.googleSpend && !m.tiktokSpend) return null;
@@ -91,6 +92,7 @@ export default function OverviewContent() {
     setLatestAvailableDate(null);
     setShopifyDataLag(false);
     setShopifyLatestDate(null);
+    setRevenueSource(null);
     setLiveSource('loading');
 
     const params = new URLSearchParams({ tf: tfRaw });
@@ -110,6 +112,7 @@ export default function OverviewContent() {
         setLatestAvailableDate(data.latestAvailableDate || null);
         setShopifyDataLag(!!data.shopifyDataLag);
         setShopifyLatestDate(data.shopifyLatestDate || null);
+        setRevenueSource(data.revenueSource || null);
         setLiveSource(data.source || 'unknown');
         setLastUpdated(new Date().toLocaleTimeString());
       })
@@ -163,6 +166,7 @@ export default function OverviewContent() {
                 if (data.revenueData?.length) setRevenueData(data.revenueData);
                 if (data.priorPeriod) { setPriorPeriod(data.priorPeriod); setPriorLabel(data.priorLabel || ''); }
                 setLivePlatformSpend(buildLivePlatformSpend(m));
+                setRevenueSource(data.revenueSource || null);
                 setLiveSource(data.source || 'unknown');
                 setLastUpdated(new Date().toLocaleTimeString());
               })
@@ -191,6 +195,15 @@ export default function OverviewContent() {
           <span>
             Shopify data hasn&apos;t synced for {tf === 'today' ? "today" : "yesterday"} yet — showing revenue/orders from the most recent available day:{' '}
             <strong>{shopifyLatestDate}</strong>. Ad spend above reflects the actual selected period.
+          </span>
+        </div>
+      )}
+
+      {revenueSource === 'ad_attribution' && isLive && (
+        <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-blue-700">
+          <span>ℹ️</span>
+          <span>
+            Shopify hasn&apos;t synced revenue for this period yet — showing Meta/Google attributed revenue as an estimate. Orders will show as 0 until Shopify syncs.
           </span>
         </div>
       )}
