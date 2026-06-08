@@ -19,6 +19,7 @@ interface CreativeRow {
   source?: string;
   ad_name?: string;
   ad_id?: string;
+  account_id?: string;
   adset_name?: string;
   campaign?: string;
   spend?: number | string;
@@ -36,6 +37,10 @@ export interface CreativePerformance {
   name: string;
   platform: 'Meta' | 'TikTok';
   thumbnailUrl: string | null;
+  adUrl: string | null;
+  campaign: string;
+  adset: string;
+  accountId: string;
   spend: number;
   revenue: number;
   roas: number;
@@ -45,15 +50,13 @@ export interface CreativePerformance {
 }
 
 const FIELDS_BY_SOURCE: Record<'facebook' | 'tiktok', string> = {
-  // Meta valid Insights API fields only
   facebook: [
-    'source', 'ad_name', 'ad_id', 'adset_name', 'campaign',
+    'source', 'ad_name', 'ad_id', 'account_id', 'adset_name', 'campaign',
     'spend', 'impressions', 'clicks', 'ctr',
     'purchase_roas', 'conversion_values',
   ].join(','),
-  // TikTok — exclude image_url to avoid permissions error
   tiktok: [
-    'source', 'ad_name', 'ad_id',
+    'source', 'ad_name', 'ad_id', 'account_id', 'adset_name', 'campaign',
     'spend', 'impressions', 'clicks', 'ctr',
     'conversion_value', 'revenue',
   ].join(','),
@@ -68,21 +71,39 @@ async function fetchCreatives(source: 'facebook' | 'tiktok', params: Record<stri
   return { rows: json.data || [], raw: json };
 }
 
+function buildAdUrl(platform: 'Meta' | 'TikTok', adId: string, accountId: string): string | null {
+  if (platform === 'Meta' && adId) {
+    const act = accountId ? `act_${accountId.replace('act_', '')}` : '';
+    return act
+      ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${act}&selected_ad_ids=${adId}`
+      : `https://adsmanager.facebook.com/adsmanager/manage/ads?selected_ad_ids=${adId}`;
+  }
+  if (platform === 'TikTok' && accountId) {
+    return `https://ads.tiktok.com/i18n/perf/campaign?aadvid=${accountId}`;
+  }
+  return null;
+}
+
 function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): CreativePerformance[] {
   const byAd: Record<string, CreativePerformance> = {};
 
   for (const row of rows) {
-    const id = String(row.ad_id || row.ad_name || row.creative_name || '');
+    const id = String(row.ad_id || row.ad_name || '');
     if (!id) continue;
-    if (!row.spend && !row.impressions) continue; // skip rows with no data yet
+    if (!row.spend && !row.impressions) continue;
+
+    const accountId = String(row.account_id || '');
+
     if (!byAd[id]) {
       byAd[id] = {
         id,
-        name: String(row.ad_name || row.creative_name || 'Untitled creative'),
+        name: String(row.ad_name || 'Untitled creative'),
         platform,
-        thumbnailUrl: String(
-          row.creative_thumb_url || row.thumbnail_url || row.image_url || row.video_thumbnail_url || ''
-        ) || null,
+        thumbnailUrl: null,
+        adUrl: buildAdUrl(platform, id, accountId),
+        campaign: String(row.campaign || ''),
+        adset: String(row.adset_name || ''),
+        accountId,
         spend: 0,
         revenue: 0,
         roas: 0,
@@ -91,9 +112,10 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
         clicks: 0,
       };
     }
+
     const entry = byAd[id];
     entry.spend += Number(row.spend || 0);
-    // Meta purchase_roas is [{action_type, value}] — extract the ROAS value and back-calculate revenue
+
     const rawRow = row as Record<string, unknown>;
     const roasArr = Array.isArray(rawRow.purchase_roas) ? rawRow.purchase_roas as Array<{ value?: string }> : null;
     const roasVal = roasArr ? Number(roasArr[0]?.value || 0) : 0;
@@ -103,6 +125,7 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
     } else {
       entry.revenue += Number(row.conversion_values || row.conversion_value || row.revenue || 0);
     }
+
     entry.impressions += Number(row.impressions || 0);
     entry.clicks += Number(row.clicks || 0);
   }

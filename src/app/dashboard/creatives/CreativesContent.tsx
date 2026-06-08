@@ -14,6 +14,9 @@ interface CreativePerformance {
   name: string;
   platform: 'Meta' | 'TikTok';
   thumbnailUrl: string | null;
+  adUrl: string | null;
+  campaign: string;
+  adset: string;
   spend: number;
   revenue: number;
   roas: number;
@@ -150,7 +153,8 @@ export default function CreativesContent() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {filtered.map(creative => (
             <Card key={`${creative.platform}-${creative.id}`} className="overflow-hidden !p-0">
-              <div className="aspect-video bg-gray-100 flex items-center justify-center overflow-hidden">
+              {/* Thumbnail / placeholder */}
+              <div className="aspect-video bg-gray-100 flex items-center justify-center overflow-hidden relative">
                 {creative.thumbnailUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -168,14 +172,42 @@ export default function CreativesContent() {
                   className="w-full h-full items-center justify-center text-gray-300 text-3xl"
                   style={{ display: creative.thumbnailUrl ? 'none' : 'flex' }}
                 >
-                  🖼️
+                  🎨
                 </div>
-              </div>
-              <div className="p-4">
-                <div className="flex items-start justify-between gap-2 mb-3">
-                  <p className="text-sm font-bold text-gray-800 leading-snug line-clamp-2">{creative.name}</p>
+                {/* Platform badge overlay */}
+                <div className="absolute top-2 left-2">
                   <PlatformBadge platform={creative.platform} />
                 </div>
+                {/* Link to ad manager */}
+                {creative.adUrl && (
+                  <a
+                    href={creative.adUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="absolute top-2 right-2 bg-white/90 hover:bg-white text-gray-600 hover:text-gray-900 rounded-lg px-2 py-1 text-xs font-semibold shadow-sm transition-colors flex items-center gap-1"
+                  >
+                    View ↗
+                  </a>
+                )}
+              </div>
+
+              <div className="p-4">
+                {/* Ad name */}
+                <p className="text-sm font-bold text-gray-800 leading-snug line-clamp-2 mb-1">{creative.name}</p>
+
+                {/* Campaign / adset */}
+                {creative.campaign && (
+                  <p className="text-xs text-gray-400 line-clamp-1 mb-0.5">
+                    <span className="font-semibold text-gray-500">Campaign:</span> {creative.campaign}
+                  </p>
+                )}
+                {creative.adset && (
+                  <p className="text-xs text-gray-400 line-clamp-1 mb-3">
+                    <span className="font-semibold text-gray-500">Ad Set:</span> {creative.adset}
+                  </p>
+                )}
+
+                {/* Metrics grid */}
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                   <div>
                     <p className="text-gray-400 uppercase font-semibold mb-0.5">Spend</p>
@@ -195,9 +227,13 @@ export default function CreativesContent() {
                     <p className="text-gray-400 uppercase font-semibold mb-0.5">CTR</p>
                     <p className="text-gray-700 font-bold">{formatPercent(creative.ctr)}</p>
                   </div>
-                  <div className="col-span-2">
+                  <div>
                     <p className="text-gray-400 uppercase font-semibold mb-0.5">Impressions</p>
                     <p className="text-gray-700 font-bold">{creative.impressions.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Clicks</p>
+                    <p className="text-gray-700 font-bold">{creative.clicks.toLocaleString()}</p>
                   </div>
                 </div>
               </div>
