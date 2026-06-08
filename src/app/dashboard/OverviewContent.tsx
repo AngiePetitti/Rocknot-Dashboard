@@ -22,6 +22,7 @@ interface LiveMetrics {
   returns: number;
   metaSpend?: number;
   googleSpend?: number;
+  tiktokSpend?: number;
   newCustomers?: number;
   returningCustomers?: number;
   newCustomerRevenue?: number;
@@ -67,13 +68,16 @@ export default function OverviewContent() {
   const [shopifyLatestDate, setShopifyLatestDate] = useState<string | null>(null);
 
   function buildLivePlatformSpend(m: LiveMetrics): PlatformSpend[] | null {
-    if (!m.metaSpend && !m.googleSpend) return null;
+    if (!m.metaSpend && !m.googleSpend && !m.tiktokSpend) return null;
     const platforms: PlatformSpend[] = [];
     if ((m.metaSpend ?? 0) > 0) {
       platforms.push({ platform: 'Meta', spend: m.metaSpend ?? 0, revenue: 0, roas: 0, ctr: 0, impressions: 0, color: '#818cf8' });
     }
     if ((m.googleSpend ?? 0) > 0) {
       platforms.push({ platform: 'Google', spend: m.googleSpend ?? 0, revenue: 0, roas: 0, ctr: 0, impressions: 0, color: '#34d399' });
+    }
+    if ((m.tiktokSpend ?? 0) > 0) {
+      platforms.push({ platform: 'TikTok', spend: m.tiktokSpend ?? 0, revenue: 0, roas: 0, ctr: 0, impressions: 0, color: '#f472b6' });
     }
     return platforms.length > 0 ? platforms : null;
   }
