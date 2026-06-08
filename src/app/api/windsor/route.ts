@@ -159,22 +159,35 @@ function aggregateRows(rows: WindsorRow[]) {
   return { metrics, revenueData };
 }
 
-async function fetchWindsor(params: Record<string, string>, revalidate = 3600): Promise<WindsorRow[]> {
-  // Include both ad platform fields and Shopify-specific revenue/order fields
-  const fields = [
-    'date', 'source', 'spend', 'revenue', 'conversion_value',
-    'roas', 'impressions', 'clicks', 'conversions', 'purchases',
-    'order_count', 'order_current_total_price', 'order_subtotal_price',
-    'customer_is_returning', 'new_customers', 'returning_customers',
-  ].join(',');
+const AD_FIELDS = [
+  'date', 'source', 'spend', 'revenue', 'conversion_value',
+  'roas', 'impressions', 'clicks', 'conversions', 'purchases',
+].join(',');
+
+const SHOPIFY_FIELDS = [
+  'date', 'source',
+  'order_count', 'order_current_total_price', 'order_subtotal_price',
+  'customer_is_returning', 'new_customers', 'returning_customers',
+].join(',');
+
+async function fetchSource(source: 'facebook' | 'google' | 'shopify', params: Record<string, string>): Promise<WindsorRow[]> {
+  const fields = source === 'shopify' ? SHOPIFY_FIELDS : AD_FIELDS;
   const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
-  const url = `https://connectors.windsor.ai/all?${qs}`;
-  // Always bypass Next.js fetch cache — Windsor has its own caching layer
-  const fetchOpts = { cache: 'no-store' as const };
-  const res = await fetch(url, fetchOpts);
+  const url = `https://connectors.windsor.ai/${source}?${qs}`;
+  const res = await fetch(url, { cache: 'no-store' });
   const json = await res.json();
-  if (json.error) throw new Error(json.error);
-  return json.data || [];
+  if (json.error || !json.data) return [];
+  return (json.data as WindsorRow[]).map(r => ({ ...r, source: source === 'facebook' ? 'facebook' : source }));
+}
+
+async function fetchWindsor(params: Record<string, string>): Promise<WindsorRow[]> {
+  // Query each source separately — the /all blended endpoint returns stale cached data
+  const [metaRows, googleRows, shopifyRows] = await Promise.all([
+    fetchSource('facebook', params),
+    fetchSource('google', params),
+    fetchSource('shopify', params),
+  ]);
+  return [...metaRows, ...googleRows, ...shopifyRows];
 }
 
 function addDays(dateStr: string, days: number): string {
@@ -217,25 +230,20 @@ export async function GET(request: NextRequest) {
     }
 
     if (debug) {
-      const fields = 'date,source,spend,revenue,conversion_value,roas,impressions,clicks,conversions,purchases';
-      const qs = new URLSearchParams({ api_key: '[KEY]', fields, _renderer: 'json', ...currentParams });
       const raw = await fetchWindsor(currentParams);
       const sources = Array.from(new Set(raw.map(r => r.source)));
-      return NextResponse.json({ debug: true, url: `https://connectors.windsor.ai/all?${qs}`, sources, raw: raw.slice(0, 20) });
+      return NextResponse.json({ debug: true, sources, rowCount: raw.length, sample: raw.slice(0, 10) });
     }
 
-    // today/yesterday: never cache — Windsor syncs hourly, we want the freshest data
     const isShortTf = tf === 'today' || tf === 'yesterday';
-    const cacheSeconds = isShortTf ? 0 : 3600;
 
     // Fetch current period
-    let currentRows = await fetchWindsor(currentParams, cacheSeconds);
+    let currentRows = await fetchWindsor(currentParams);
 
-    // If today/yesterday still returns no data, Windsor's current sync cycle hasn't
-    // included today yet — fall back to the most recent available day.
+    // If today/yesterday still returns no data, fall back to the most recent available day.
     let latestAvailableDate: string | null = null;
     if (currentRows.length === 0 && isShortTf) {
-      const recentRows = await fetchWindsor({ date_preset: 'last_7dT' }, 0);
+      const recentRows = await fetchWindsor({ date_preset: 'last_7dT' });
       if (recentRows.length > 0) {
         const dates = recentRows.map(r => String(r.date || '').split('T')[0]).filter(Boolean).sort();
         latestAvailableDate = dates[dates.length - 1];
@@ -243,13 +251,11 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Shopify often syncs on a slower cadence than ad platforms — if ad spend rows
-    // landed for this period but Shopify hasn't synced yet, revenue/orders show as $0.
-    // Fall back to the most recent day Shopify *does* have data for, and merge it in.
+    // If Shopify hasn't synced for this period, fall back to most recent Shopify data.
     let shopifyDataLag = false;
     let shopifyLatestDate: string | null = null;
     if (isShortTf && !currentRows.some(r => String(r.source || '').toLowerCase().includes('shopify'))) {
-      const recentRows = await fetchWindsor({ date_preset: 'last_7dT' }, 0);
+      const recentRows = await fetchWindsor({ date_preset: 'last_7dT' });
       const shopifyRows = recentRows.filter(r => String(r.source || '').toLowerCase().includes('shopify'));
       if (shopifyRows.length > 0) {
         const dates = shopifyRows.map(r => String(r.date || '').split('T')[0]).filter(Boolean).sort();
