@@ -6,7 +6,6 @@ export const dynamic = 'force-dynamic';
 
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 
-// Windsor date presets — format: last_Xd (excludes today), last_XdT (includes today)
 const DATE_PRESETS: Record<Timeframe, string> = {
   today:      'last_1dT',
   yesterday:  'last_1d',
@@ -18,7 +17,6 @@ const DATE_PRESETS: Record<Timeframe, string> = {
   ytd:        'this_year',
 };
 
-// Prior period presets for comparison
 const COMPARE_PRESETS: Record<Timeframe, string> = {
   today:      'last_1d',
   yesterday:  'last_2d',
@@ -36,19 +34,13 @@ interface WindsorRow {
   spend?: number | string;
   revenue?: number | string;
   conversion_value?: number | string;
-  roas?: number | string;
   impressions?: number | string;
   clicks?: number | string;
   conversions?: number | string;
-  purchases?: number | string;
-  orders?: number | string;
-  // Shopify-specific fields
   order_count?: number | string;
   order_current_total_price?: number | string;
   order_subtotal_price?: number | string;
   customer_is_returning?: number | string | boolean;
-  new_customers?: number | string;
-  returning_customers?: number | string;
   [key: string]: string | number | boolean | undefined;
 }
 
@@ -68,81 +60,74 @@ interface AggregatedMetrics {
   pctReturning: number;
 }
 
-function aggregateRows(adRows: WindsorRow[], shopifyRows: ShopifyDailyRow[]) {
-  const byDate: Record<string, {
-    date: string;
-    shopifyRevenue: number;
-    adRevenue: number;
-    orders: number;
-    adSpend: number;
-    metaSpend: number;
-    googleSpend: number;
-    tiktokSpend: number;
-    newCustomers: number;
-    returningCustomers: number;
-  }> = {};
+interface DayBucket {
+  date: string;
+  shopifyRevenue: number;
+  adRevenue: number;
+  orders: number;
+  adSpend: number;
+  metaSpend: number;
+  googleSpend: number;
+  tiktokSpend: number;
+  newCustomers: number;
+  returningCustomers: number;
+}
 
-  // Seed from Shopify direct data first (accurate revenue + orders)
-  for (const row of shopifyRows) {
-    if (!byDate[row.date]) {
-      byDate[row.date] = { date: row.date, shopifyRevenue: 0, adRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, newCustomers: 0, returningCustomers: 0 };
-    }
-    byDate[row.date].shopifyRevenue += row.revenue;
-    byDate[row.date].orders += row.orders;
-  }
+function emptyBucket(date: string): DayBucket {
+  return { date, shopifyRevenue: 0, adRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, newCustomers: 0, returningCustomers: 0 };
+}
 
-  // Layer in ad platform spend + attributed revenue
-  for (const row of adRows) {
+function aggregateRows(rows: WindsorRow[]) {
+  const byDate: Record<string, DayBucket> = {};
+
+  for (const row of rows) {
     const date = String(row.date || '').split('T')[0];
     if (!date) continue;
-    if (!byDate[date]) {
-      byDate[date] = { date, shopifyRevenue: 0, adRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, newCustomers: 0, returningCustomers: 0 };
-    }
+    if (!byDate[date]) byDate[date] = emptyBucket(date);
+
     const spend = Number(row.spend || 0);
-    const rowRevenue = Number(row.revenue || 0);
-    const rowConvValue = Number(row.conversion_value || 0);
     const src = String(row.source || '').toLowerCase();
+    const isShopify = src.includes('shopify');
 
-    byDate[date].adSpend += spend;
-
-    if (src.includes('facebook') || src.includes('meta')) {
-      // Meta: purchase_roas is [{action_type, value}] — back-calculate revenue from ROAS × spend
-      const roasArr = Array.isArray((row as Record<string, unknown>).purchase_roas)
-        ? (row as Record<string, unknown>).purchase_roas as Array<{ value?: string }>
-        : null;
-      const roasVal = roasArr ? Number(roasArr[0]?.value || 0) : 0;
-      byDate[date].adRevenue += roasVal > 0 ? roasVal * spend : 0;
+    if (isShopify) {
+      const rev = Number(row.order_current_total_price || row.order_subtotal_price || row.revenue || 0);
+      byDate[date].shopifyRevenue += rev;
+      byDate[date].orders += Math.round(Number(row.order_count || 0));
     } else {
-      // Google and other ad platforms: use conversion_value
-      byDate[date].adRevenue += rowConvValue || rowRevenue;
-    }
+      byDate[date].adSpend += spend;
 
-    if (src.includes('facebook') || src.includes('meta') || src.includes('instagram')) {
-      byDate[date].metaSpend += spend;
-    } else if (src.includes('google') || src.includes('youtube') || src.includes('adwords') || src.includes('gads') || src.includes('pmax')) {
-      byDate[date].googleSpend += spend;
-    } else if (src.includes('tiktok')) {
-      byDate[date].tiktokSpend += spend;
+      if (src.includes('facebook') || src.includes('meta')) {
+        const roasArr = Array.isArray((row as Record<string, unknown>).purchase_roas)
+          ? (row as Record<string, unknown>).purchase_roas as Array<{ value?: string }>
+          : null;
+        const roasVal = roasArr ? Number(roasArr[0]?.value || 0) : 0;
+        byDate[date].adRevenue += roasVal > 0 ? roasVal * spend : 0;
+        byDate[date].metaSpend += spend;
+      } else if (src.includes('google')) {
+        byDate[date].adRevenue += Number(row.conversion_value || row.revenue || 0);
+        byDate[date].googleSpend += spend;
+      } else if (src.includes('tiktok')) {
+        byDate[date].adRevenue += Number(row.conversion_value || row.revenue || 0);
+        byDate[date].tiktokSpend += spend;
+      }
     }
   }
 
   const dailyData = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
-  const shopifyRevenueTotal = shopifyRows.length > 0
-    ? dailyData.reduce((s, d) => s + d.shopifyRevenue, 0)
-    : 0;
-  const hasUsableShopifyRevenue = shopifyRevenueTotal > 0;
+  const shopifyRevenueTotal = dailyData.reduce((s, d) => s + d.shopifyRevenue, 0);
+  const hasShopifyRevenue = shopifyRevenueTotal > 0;
 
-  // Always prefer direct Shopify revenue. Fall back to ad attribution only when Shopify API unavailable.
-  const totalRevenue = hasUsableShopifyRevenue
+  const totalRevenue = hasShopifyRevenue
     ? shopifyRevenueTotal
     : dailyData.reduce((s, d) => s + d.adRevenue, 0);
-  const totalAdSpend = dailyData.reduce((s, d) => s + d.adSpend, 0);
-  const totalOrders = Math.round(dailyData.reduce((s, d) => s + d.orders, 0));
-  const totalMetaSpend = dailyData.reduce((s, d) => s + d.metaSpend, 0);
+
+  const totalAdSpend    = dailyData.reduce((s, d) => s + d.adSpend, 0);
+  const totalOrders     = Math.round(dailyData.reduce((s, d) => s + d.orders, 0));
+  const totalMetaSpend  = dailyData.reduce((s, d) => s + d.metaSpend, 0);
   const totalGoogleSpend = dailyData.reduce((s, d) => s + d.googleSpend, 0);
   const totalTikTokSpend = dailyData.reduce((s, d) => s + d.tiktokSpend, 0);
-  const totalNewCustomers = dailyData.reduce((s, d) => s + d.newCustomers, 0);
-  const totalReturningCustomers = dailyData.reduce((s, d) => s + d.returningCustomers, 0);
+  const totalNewCust    = dailyData.reduce((s, d) => s + d.newCustomers, 0);
+  const totalRetCust    = dailyData.reduce((s, d) => s + d.returningCustomers, 0);
 
   const metrics: AggregatedMetrics = {
     totalRevenue: Math.round(totalRevenue),
@@ -154,139 +139,60 @@ function aggregateRows(adRows: WindsorRow[], shopifyRows: ShopifyDailyRow[]) {
     metaSpend: Math.round(totalMetaSpend),
     googleSpend: Math.round(totalGoogleSpend),
     tiktokSpend: Math.round(totalTikTokSpend),
-    newCustomers: totalNewCustomers,
-    returningCustomers: totalReturningCustomers,
-    pctNew: totalOrders > 0 ? Math.round((totalNewCustomers / totalOrders) * 1000) / 10 : 0,
-    pctReturning: totalOrders > 0 ? Math.round((totalReturningCustomers / totalOrders) * 1000) / 10 : 0,
+    newCustomers: totalNewCust,
+    returningCustomers: totalRetCust,
+    pctNew: totalOrders > 0 ? Math.round((totalNewCust / totalOrders) * 1000) / 10 : 0,
+    pctReturning: totalOrders > 0 ? Math.round((totalRetCust / totalOrders) * 1000) / 10 : 0,
   };
 
   const revenueData = dailyData.map(d => ({
     date: d.date,
-    revenue: Math.round(hasUsableShopifyRevenue ? d.shopifyRevenue : d.adRevenue),
+    revenue: Math.round(hasShopifyRevenue ? d.shopifyRevenue : d.adRevenue),
     orders: Math.round(d.orders),
     adSpend: Math.round(d.adSpend),
   }));
 
-  return { metrics, revenueData, revenueSource: hasUsableShopifyRevenue ? 'shopify' : 'ad_attribution' };
+  return { metrics, revenueData, revenueSource: hasShopifyRevenue ? 'shopify' : 'ad_attribution' };
 }
 
-const META_FIELDS = [
-  'date', 'source', 'spend', 'impressions', 'clicks', 'ctr',
-  'purchase_roas', 'conversions',
-].join(',');
+// Ad platform fields
+const META_FIELDS = ['date', 'source', 'spend', 'impressions', 'clicks', 'ctr', 'purchase_roas', 'conversions'].join(',');
+const GOOGLE_FIELDS = ['date', 'source', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value'].join(',');
+// Shopify fields via Windsor /all endpoint
+const SHOPIFY_FIELDS = ['date', 'source', 'order_count', 'order_current_total_price', 'order_subtotal_price', 'customer_is_returning'].join(',');
 
-const GOOGLE_FIELDS = [
-  'date', 'source', 'spend', 'impressions', 'clicks',
-  'conversions', 'conversion_value',
-].join(',');
-
-async function fetchSource(source: 'facebook' | 'google_ads', params: Record<string, string>): Promise<WindsorRow[]> {
-  const fields = source === 'facebook' ? META_FIELDS : GOOGLE_FIELDS;
-  const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
-  const url = `https://connectors.windsor.ai/${source}?${qs}`;
-  const res = await fetch(url, { cache: 'no-store' });
-  const json = await res.json();
-  if (json.error || !json.data) return [];
-  return (json.data as WindsorRow[]).map(r => ({ ...r, source: source === 'facebook' ? 'facebook' : source }));
-}
-
-const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
-const SHOPIFY_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com';
-
-interface ShopifyDailyRow {
-  date: string;
-  revenue: number;
-  orders: number;
-}
-
-interface ShopifyFetchResult {
-  rows: ShopifyDailyRow[];
-  error?: string;
-  httpStatus?: number;
-  parseErrors?: unknown[];
-}
-
-async function fetchShopifyDirect(params: Record<string, string>): Promise<ShopifyFetchResult> {
-  if (!SHOPIFY_TOKEN) return { rows: [], error: 'no_token' };
-
-  // Convert Windsor-style params to ShopifyQL date syntax
-  let since = '';
-  let until = 'today';
-
-  if (params.date_from && params.date_to) {
-    since = params.date_from;
-    until = params.date_to;
-  } else {
-    const presetMap: Record<string, { since: string; until: string }> = {
-      last_1dT:   { since: 'today', until: 'today' },
-      last_1d:    { since: 'yesterday', until: 'yesterday' },
-      last_7dT:   { since: '-7d', until: 'today' },
-      last_14dT:  { since: '-14d', until: 'today' },
-      last_30dT:  { since: '-30d', until: 'today' },
-      last_1m:    { since: '-60d', until: '-30d' },
-      last_180d:  { since: '-180d', until: 'today' },
-      this_year:  { since: '-365d', until: 'today' },
-    };
-    const mapped = presetMap[params.date_preset || ''] || { since: '-30d', until: 'today' };
-    since = mapped.since;
-    until = mapped.until;
-  }
-
-  const qlQuery = `FROM sales SHOW net_sales, orders TIMESERIES day SINCE ${since} UNTIL ${until}`;
-
+async function fetchFromWindsor(endpoint: string, fields: string, params: Record<string, string>): Promise<{ rows: WindsorRow[]; error?: string; rowCount: number }> {
   try {
-    const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/graphql.json`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': SHOPIFY_TOKEN,
-      },
-      body: JSON.stringify({
-        query: `{ shopifyqlQuery(query: ${JSON.stringify(qlQuery)}) {
-          tableData { rowData columns { name dataType } }
-          parseErrors { code message }
-        }}`,
-      }),
-      cache: 'no-store',
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      return { rows: [], error: `http_${res.status}: ${text.slice(0, 200)}`, httpStatus: res.status };
-    }
-
+    const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
+    const url = `https://connectors.windsor.ai/${endpoint}?${qs}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return { rows: [], error: `http_${res.status}`, rowCount: 0 };
     const json = await res.json();
-    const result = json?.data?.shopifyqlQuery;
-    if (!result) return { rows: [], error: 'null_result', parseErrors: json?.errors };
-    if (result.parseErrors?.length) return { rows: [], error: 'parse_error', parseErrors: result.parseErrors };
-
-    const cols: Array<{ name: string }> = result.tableData?.columns || [];
-    const rows: string[][] = result.tableData?.rowData || [];
-    const dayIdx = cols.findIndex(c => c.name === 'day');
-    const revIdx = cols.findIndex(c => c.name === 'net_sales');
-    const ordIdx = cols.findIndex(c => c.name === 'orders');
-
-    return {
-      rows: rows
-        .map(r => ({
-          date: String(r[dayIdx] || '').split('T')[0],
-          revenue: parseFloat(r[revIdx] || '0') || 0,
-          orders: parseInt(r[ordIdx] || '0') || 0,
-        }))
-        .filter(r => r.date),
-    };
+    if (json.error) return { rows: [], error: json.error, rowCount: 0 };
+    const data = (json.data || []) as WindsorRow[];
+    return { rows: data, rowCount: data.length };
   } catch (e) {
-    return { rows: [], error: `exception: ${String(e)}` };
+    return { rows: [], error: String(e), rowCount: 0 };
   }
 }
 
-async function fetchWindsor(params: Record<string, string>): Promise<{ adRows: WindsorRow[]; shopifyRows: ShopifyDailyRow[]; shopifyError?: string }> {
-  const [metaRows, googleRows, shopifyResult] = await Promise.all([
-    fetchSource('facebook', params),
-    fetchSource('google_ads', params),
-    fetchShopifyDirect(params),
+async function fetchAllRows(params: Record<string, string>): Promise<WindsorRow[]> {
+  const [meta, google, shopify] = await Promise.all([
+    fetchFromWindsor('facebook', META_FIELDS, params),
+    fetchFromWindsor('google_ads', GOOGLE_FIELDS, params),
+    // Windsor /all filtered to shopify source — /shopify endpoint returns null order fields
+    fetchFromWindsor('all', SHOPIFY_FIELDS, params),
   ]);
-  return { adRows: [...metaRows, ...googleRows], shopifyRows: shopifyResult.rows, shopifyError: shopifyResult.error };
+
+  const shopifyRows = shopify.rows.filter(r =>
+    String(r.source || '').toLowerCase().includes('shopify')
+  );
+
+  return [
+    ...meta.rows.map(r => ({ ...r, source: 'facebook' })),
+    ...google.rows.map(r => ({ ...r, source: 'google' })),
+    ...shopifyRows,
+  ];
 }
 
 function addDays(dateStr: string, days: number): string {
@@ -306,17 +212,13 @@ export async function GET(request: NextRequest) {
   const debug = searchParams.get('debug') === 'true';
 
   if (!WINDSOR_API_KEY) {
-    const metrics = getMetricsForTimeframe(isCustom ? '30d' : tf);
-    const revenueData = getRevenueForTimeframe(isCustom ? '30d' : tf);
-    return NextResponse.json({ source: 'mock', timeframe: tf, metrics, revenueData });
+    return NextResponse.json({ source: 'mock', timeframe: tf, metrics: getMetricsForTimeframe(tf), revenueData: getRevenueForTimeframe(tf) });
   }
 
-  // For today/yesterday use explicit dates to avoid preset issues + handle data lag
   const todayStr = new Date().toISOString().split('T')[0];
   const yesterdayStr = addDays(todayStr, -1);
 
   try {
-    // Build query params for current period
     let currentParams: Record<string, string>;
     if (isCustom && dateFrom && dateTo) {
       currentParams = { date_from: dateFrom, date_to: dateTo };
@@ -329,73 +231,63 @@ export async function GET(request: NextRequest) {
     }
 
     if (debug) {
-      const debugFetch = async (source: 'facebook' | 'google_ads') => {
-        try {
-          const fields = source === 'facebook' ? META_FIELDS : GOOGLE_FIELDS;
-          const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...currentParams });
-          const url = `https://connectors.windsor.ai/${source}?${qs}`;
-          const res = await fetch(url, { cache: 'no-store' });
-          const json = await res.json();
-          return { url: url.replace(WINDSOR_API_KEY!, '[KEY]'), rowCount: json.data?.length ?? 0, error: json.error ?? null, sample: (json.data || []).slice(0, 2) };
-        } catch (e) {
-          return { error: String(e), rowCount: 0, sample: [] };
-        }
-      };
-      const [meta, google, shopifyResult] = await Promise.all([
-        debugFetch('facebook'),
-        debugFetch('google_ads'),
-        fetchShopifyDirect(currentParams),
+      const [meta, google, shopifyAll] = await Promise.all([
+        fetchFromWindsor('facebook', META_FIELDS, currentParams),
+        fetchFromWindsor('google_ads', GOOGLE_FIELDS, currentParams),
+        fetchFromWindsor('all', SHOPIFY_FIELDS, currentParams),
       ]);
-      return NextResponse.json({ debug: true, hasApiKey: !!WINDSOR_API_KEY, hasShopifyToken: !!SHOPIFY_TOKEN, params: currentParams, meta, google, shopifyDirect: { rowCount: shopifyResult.rows.length, error: shopifyResult.error, parseErrors: shopifyResult.parseErrors, sample: shopifyResult.rows.slice(0, 3) } });
+      const shopifyRows = shopifyAll.rows.filter(r => String(r.source || '').toLowerCase().includes('shopify'));
+      return NextResponse.json({
+        debug: true,
+        params: currentParams,
+        meta: { rowCount: meta.rowCount, error: meta.error, sample: meta.rows.slice(0, 2) },
+        google: { rowCount: google.rowCount, error: google.error, sample: google.rows.slice(0, 2) },
+        shopify: {
+          allRowCount: shopifyAll.rowCount,
+          shopifySourceRows: shopifyRows.length,
+          error: shopifyAll.error,
+          sample: shopifyRows.slice(0, 3),
+          // Show all unique sources from /all to understand what's in there
+          sources: Array.from(new Set(shopifyAll.rows.map(r => r.source))).slice(0, 20),
+        },
+      });
     }
 
     const isShortTf = tf === 'today' || tf === 'yesterday';
+    let currentRows = await fetchAllRows(currentParams);
 
-    // Fetch current period — ad spend from Windsor, revenue/orders direct from Shopify
-    let { adRows: currentAdRows, shopifyRows: currentShopifyRows, shopifyError: currentShopifyError } = await fetchWindsor(currentParams);
-
-    // If today/yesterday still returns no ad data, fall back to the most recent available day.
+    // Fallback for today/yesterday with no data: use most recent available
     let latestAvailableDate: string | null = null;
-    if (currentAdRows.length === 0 && isShortTf) {
-      const recent = await fetchWindsor({ date_preset: 'last_7dT' });
-      if (recent.adRows.length > 0) {
-        const dates = recent.adRows.map(r => String(r.date || '').split('T')[0]).filter(Boolean).sort();
+    if (currentRows.filter(r => !String(r.source || '').includes('shopify')).length === 0 && isShortTf) {
+      const recentRows = await fetchAllRows({ date_preset: 'last_7dT' });
+      if (recentRows.length > 0) {
+        const dates = recentRows.map(r => String(r.date || '').split('T')[0]).filter(Boolean).sort();
         latestAvailableDate = dates[dates.length - 1];
-        currentAdRows = recent.adRows.filter(r => String(r.date || '').split('T')[0] === latestAvailableDate);
+        currentRows = recentRows.filter(r => String(r.date || '').split('T')[0] === latestAvailableDate);
       }
     }
 
-    const shopifyDataLag = false;
-    const shopifyLatestDate: string | null = null;
+    const current = aggregateRows(currentRows);
 
-    const current = aggregateRows(currentAdRows, currentShopifyRows);
-    const hasDataLag = latestAvailableDate !== null;
-
-    // Fetch comparison period if requested
     let priorPeriod = null;
     let priorLabel = '';
 
     if (withCompare) {
       let priorParams: Record<string, string>;
-
       if (isCustom && dateFrom && dateTo) {
-        // Mirror the exact same number of days before the selected range
         const days = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1;
         const priorTo = addDays(dateFrom, -1);
         const priorFrom = addDays(dateFrom, -days);
         priorParams = { date_from: priorFrom, date_to: priorTo };
         priorLabel = `${priorFrom} – ${priorTo}`;
       } else {
-        // Use the second half of a doubled preset (e.g. last_60dT gives us the prior 30 in the first half)
         priorParams = { date_preset: COMPARE_PRESETS[tf] || 'last_60dT' };
         priorLabel = COMPARE_PRESETS[tf] || '';
       }
 
-      const { adRows: priorAdRows, shopifyRows: priorShopifyRows } = await fetchWindsor(priorParams);
-      const priorAgg = aggregateRows(priorAdRows, priorShopifyRows);
+      const priorRows = await fetchAllRows(priorParams);
+      const priorAgg = aggregateRows(priorRows);
 
-      // For preset comparison, prior period data includes current + prior rows together
-      // so we subtract current to isolate the prior window
       if (!isCustom) {
         priorPeriod = {
           totalRevenue: Math.max(0, priorAgg.metrics.totalRevenue - current.metrics.totalRevenue),
@@ -425,23 +317,19 @@ export async function GET(request: NextRequest) {
       dateFrom: dateFrom || null,
       dateTo: dateTo || null,
       revenueSource: current.revenueSource,
-      ...(currentShopifyError ? { shopifyError: currentShopifyError } : {}),
       metrics: current.metrics,
       revenueData: current.revenueData,
-      ...(hasDataLag ? { dataLag: true, latestAvailableDate } : {}),
-      ...(shopifyDataLag ? { shopifyDataLag: true, shopifyLatestDate } : {}),
+      ...(latestAvailableDate ? { dataLag: true, latestAvailableDate } : {}),
       ...(priorPeriod ? { priorPeriod, priorLabel } : {}),
     });
 
   } catch (err) {
-    const metrics = getMetricsForTimeframe(isCustom ? '30d' : tf);
-    const revenueData = getRevenueForTimeframe(isCustom ? '30d' : tf);
     return NextResponse.json({
       source: 'mock_fallback',
       error: err instanceof Error ? err.message : 'Unknown error',
       timeframe: tf,
-      metrics,
-      revenueData,
+      metrics: getMetricsForTimeframe(isCustom ? '30d' : tf),
+      revenueData: getRevenueForTimeframe(isCustom ? '30d' : tf),
     });
   }
 }
