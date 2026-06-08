@@ -178,7 +178,9 @@ const GOOGLE_FIELDS = [
 
 const SHOPIFY_FIELDS = [
   'date', 'source',
+  'order_id', 'total_price', 'subtotal_price', 'total_price_usd',
   'order_count', 'order_current_total_price', 'order_subtotal_price',
+  'revenue', 'price', 'financial_status',
   'customer_is_returning',
 ].join(',');
 
