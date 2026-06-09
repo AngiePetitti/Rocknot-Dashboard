@@ -93,6 +93,9 @@ interface AggregatedMetrics {
   metaSpend: number;
   googleSpend: number;
   tiktokSpend: number;
+  metaRevenue: number;
+  googleRevenue: number;
+  tiktokRevenue: number;
   newCustomers: number;
   returningCustomers: number;
   pctNew: number;
@@ -102,7 +105,9 @@ interface AggregatedMetrics {
 interface DayBucket {
   date: string;
   shopifyRevenue: number;
-  adRevenue: number;
+  metaRevenue: number;
+  googleRevenue: number;
+  tiktokRevenue: number;
   orders: number;
   adSpend: number;
   metaSpend: number;
@@ -113,7 +118,7 @@ interface DayBucket {
 }
 
 function emptyBucket(date: string): DayBucket {
-  return { date, shopifyRevenue: 0, adRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, newCustomers: 0, returningCustomers: 0 };
+  return { date, shopifyRevenue: 0, metaRevenue: 0, googleRevenue: 0, tiktokRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, newCustomers: 0, returningCustomers: 0 };
 }
 
 function aggregateRows(rows: WindsorRow[]) {
@@ -140,13 +145,13 @@ function aggregateRows(rows: WindsorRow[]) {
           ? (row as Record<string, unknown>).purchase_roas as Array<{ value?: string }>
           : null;
         const roasVal = roasArr ? Number(roasArr[0]?.value || 0) : 0;
-        byDate[date].adRevenue += roasVal > 0 ? roasVal * spend : 0;
+        byDate[date].metaRevenue += roasVal > 0 ? roasVal * spend : 0;
         byDate[date].metaSpend += spend;
       } else if (src.includes('google')) {
-        byDate[date].adRevenue += Number(row.conversion_value || row.revenue || 0);
+        byDate[date].googleRevenue += Number(row.conversion_value || row.revenue || 0);
         byDate[date].googleSpend += spend;
       } else if (src.includes('tiktok')) {
-        byDate[date].adRevenue += Number(row.conversion_value || row.revenue || 0);
+        byDate[date].tiktokRevenue += Number(row.conversion_value || row.revenue || 0);
         byDate[date].tiktokSpend += spend;
       }
     }
@@ -156,15 +161,18 @@ function aggregateRows(rows: WindsorRow[]) {
   const shopifyRevenueTotal = dailyData.reduce((s, d) => s + d.shopifyRevenue, 0);
   const hasShopifyRevenue = shopifyRevenueTotal > 0;
 
-  const totalRevenue = hasShopifyRevenue
-    ? shopifyRevenueTotal
-    : dailyData.reduce((s, d) => s + d.adRevenue, 0);
+  // Total revenue is Shopify-only — no fallback to ad attribution.
+  // Per-platform attributed revenue is reported separately for the platform table.
+  const totalRevenue = shopifyRevenueTotal;
 
   const totalAdSpend    = dailyData.reduce((s, d) => s + d.adSpend, 0);
   const totalOrders     = Math.round(dailyData.reduce((s, d) => s + d.orders, 0));
   const totalMetaSpend  = dailyData.reduce((s, d) => s + d.metaSpend, 0);
   const totalGoogleSpend = dailyData.reduce((s, d) => s + d.googleSpend, 0);
   const totalTikTokSpend = dailyData.reduce((s, d) => s + d.tiktokSpend, 0);
+  const totalMetaRevenue = dailyData.reduce((s, d) => s + d.metaRevenue, 0);
+  const totalGoogleRevenue = dailyData.reduce((s, d) => s + d.googleRevenue, 0);
+  const totalTikTokRevenue = dailyData.reduce((s, d) => s + d.tiktokRevenue, 0);
   const totalNewCust    = dailyData.reduce((s, d) => s + d.newCustomers, 0);
   const totalRetCust    = dailyData.reduce((s, d) => s + d.returningCustomers, 0);
 
@@ -178,6 +186,9 @@ function aggregateRows(rows: WindsorRow[]) {
     metaSpend: Math.round(totalMetaSpend),
     googleSpend: Math.round(totalGoogleSpend),
     tiktokSpend: Math.round(totalTikTokSpend),
+    metaRevenue: Math.round(totalMetaRevenue),
+    googleRevenue: Math.round(totalGoogleRevenue),
+    tiktokRevenue: Math.round(totalTikTokRevenue),
     newCustomers: totalNewCust,
     returningCustomers: totalRetCust,
     pctNew: totalOrders > 0 ? Math.round((totalNewCust / totalOrders) * 1000) / 10 : 0,
@@ -186,12 +197,12 @@ function aggregateRows(rows: WindsorRow[]) {
 
   const revenueData = dailyData.map(d => ({
     date: d.date,
-    revenue: Math.round(hasShopifyRevenue ? d.shopifyRevenue : d.adRevenue),
+    revenue: Math.round(d.shopifyRevenue),
     orders: Math.round(d.orders),
     adSpend: Math.round(d.adSpend),
   }));
 
-  return { metrics, revenueData, revenueSource: hasShopifyRevenue ? 'shopify' : 'ad_attribution' };
+  return { metrics, revenueData, revenueSource: hasShopifyRevenue ? 'shopify' : 'none' };
 }
 
 // Ad platform fields

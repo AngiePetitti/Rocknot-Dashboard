@@ -23,6 +23,9 @@ interface LiveMetrics {
   metaSpend?: number;
   googleSpend?: number;
   tiktokSpend?: number;
+  metaRevenue?: number;
+  googleRevenue?: number;
+  tiktokRevenue?: number;
   newCustomers?: number;
   returningCustomers?: number;
   newCustomerRevenue?: number;
@@ -66,20 +69,26 @@ export default function OverviewContent() {
   const [latestAvailableDate, setLatestAvailableDate] = useState<string | null>(null);
   const [shopifyDataLag, setShopifyDataLag] = useState<boolean>(false);
   const [shopifyLatestDate, setShopifyLatestDate] = useState<string | null>(null);
-  const [revenueSource, setRevenueSource] = useState<'shopify' | 'ad_attribution' | null>(null);
+  const [revenueSource, setRevenueSource] = useState<'shopify' | 'none' | null>(null);
 
   function buildLivePlatformSpend(m: LiveMetrics): PlatformSpend[] | null {
     if (!m.metaSpend && !m.googleSpend && !m.tiktokSpend) return null;
     const platforms: PlatformSpend[] = [];
-    if ((m.metaSpend ?? 0) > 0) {
-      platforms.push({ platform: 'Meta', spend: m.metaSpend ?? 0, revenue: 0, roas: 0, ctr: 0, impressions: 0, color: '#818cf8' });
-    }
-    if ((m.googleSpend ?? 0) > 0) {
-      platforms.push({ platform: 'Google', spend: m.googleSpend ?? 0, revenue: 0, roas: 0, ctr: 0, impressions: 0, color: '#34d399' });
-    }
-    if ((m.tiktokSpend ?? 0) > 0) {
-      platforms.push({ platform: 'TikTok', spend: m.tiktokSpend ?? 0, revenue: 0, roas: 0, ctr: 0, impressions: 0, color: '#f472b6' });
-    }
+    const push = (platform: string, spend: number, revenue: number, color: string) => {
+      if (spend <= 0) return;
+      platforms.push({
+        platform,
+        spend,
+        revenue,
+        roas: spend > 0 ? Math.round((revenue / spend) * 100) / 100 : 0,
+        ctr: 0,
+        impressions: 0,
+        color,
+      });
+    };
+    push('Meta', m.metaSpend ?? 0, m.metaRevenue ?? 0, '#818cf8');
+    push('Google', m.googleSpend ?? 0, m.googleRevenue ?? 0, '#34d399');
+    push('TikTok', m.tiktokSpend ?? 0, m.tiktokRevenue ?? 0, '#f472b6');
     return platforms.length > 0 ? platforms : null;
   }
 
@@ -199,11 +208,11 @@ export default function OverviewContent() {
         </div>
       )}
 
-      {revenueSource === 'ad_attribution' && isLive && (
+      {revenueSource === 'none' && isLive && (
         <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-blue-700">
           <span>ℹ️</span>
           <span>
-            Shopify hasn&apos;t synced revenue for this period yet — showing Meta/Google attributed revenue as an estimate. Orders will show as 0 until Shopify syncs.
+            Shopify hasn&apos;t synced revenue for this period yet — revenue and orders will show as 0 until Shopify syncs. Platform-attributed revenue is shown in the platform table below.
           </span>
         </div>
       )}
