@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
+const META_AD_ACCOUNT_ID = process.env.META_AD_ACCOUNT_ID || '165092079662754';
 
 const DATE_PRESETS: Record<string, string> = {
   today: 'last_1dT',
@@ -73,13 +74,16 @@ async function fetchCreatives(source: 'facebook' | 'tiktok', params: Record<stri
 
 function buildAdUrl(platform: 'Meta' | 'TikTok', adId: string, accountId: string): string | null {
   if (platform === 'Meta' && adId) {
-    const act = accountId ? `act_${accountId.replace('act_', '')}` : '';
-    return act
-      ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${act}&selected_ad_ids=${adId}`
-      : `https://adsmanager.facebook.com/adsmanager/manage/ads?selected_ad_ids=${adId}`;
+    // Use the known correct account ID from env — Windsor's account_id field can be unreliable
+    const act = `act_${META_AD_ACCOUNT_ID.replace('act_', '')}`;
+    return `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${act}&selected_ad_ids=${adId}`;
   }
-  if (platform === 'TikTok' && accountId) {
-    return `https://ads.tiktok.com/i18n/perf/campaign?aadvid=${accountId}`;
+  if (platform === 'TikTok') {
+    // Use Windsor's account_id for TikTok if available, fall back to env
+    const tiktokAccount = accountId || '';
+    return tiktokAccount
+      ? `https://ads.tiktok.com/i18n/perf/campaign?aadvid=${tiktokAccount}`
+      : null;
   }
   return null;
 }
