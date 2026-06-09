@@ -138,7 +138,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ source: 'mock', platforms: [], dailySpend: [] });
   }
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const yesterdayStr = addDays(todayStr, -1);
 
   const dateFrom = searchParams.get('date_from') || '';
