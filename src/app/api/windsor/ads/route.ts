@@ -4,16 +4,6 @@ export const dynamic = 'force-dynamic';
 
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 
-const DATE_PRESETS: Record<string, string> = {
-  today:      'last_1dT',
-  yesterday:  'last_1d',
-  '7d':       'last_7dT',
-  '14d':      'last_14dT',
-  '30d':      'last_30dT',
-  last_month: 'last_1m',
-  '6m':       'last_180d',
-  ytd:        'this_year',
-};
 
 interface WindsorRow {
   date?: string;
@@ -151,18 +141,47 @@ export async function GET(request: NextRequest) {
   const todayStr = new Date().toISOString().split('T')[0];
   const yesterdayStr = addDays(todayStr, -1);
 
-  let params: Record<string, string>;
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
 
+  // Build explicit date ranges to match Meta Ads Manager conventions exactly
+  function rangeParams(daysBack: number): Record<string, string> {
+    return { date_from: addDays(todayStr, -daysBack), date_to: yesterdayStr };
+  }
+
+  function firstOfMonth(monthsBack: number): string {
+    const d = new Date();
+    d.setMonth(d.getMonth() - monthsBack, 1);
+    return d.toISOString().split('T')[0];
+  }
+  function lastOfPrevMonth(): string {
+    const d = new Date();
+    d.setDate(0);
+    return d.toISOString().split('T')[0];
+  }
+
+  let params: Record<string, string>;
   if (tfRaw === 'custom' && dateFrom && dateTo) {
     params = { date_from: dateFrom, date_to: dateTo };
   } else if (tfRaw === 'today') {
     params = { date_from: todayStr, date_to: todayStr };
   } else if (tfRaw === 'yesterday') {
     params = { date_from: yesterdayStr, date_to: yesterdayStr };
+  } else if (tfRaw === '7d') {
+    params = rangeParams(7);
+  } else if (tfRaw === '14d') {
+    params = rangeParams(14);
+  } else if (tfRaw === '30d') {
+    params = rangeParams(30);
+  } else if (tfRaw === 'last_month') {
+    params = { date_from: firstOfMonth(1), date_to: lastOfPrevMonth() };
+  } else if (tfRaw === '6m') {
+    params = rangeParams(180);
+  } else if (tfRaw === 'ytd') {
+    const year = new Date().getFullYear();
+    params = { date_from: `${year}-01-01`, date_to: yesterdayStr };
   } else {
-    params = { date_preset: DATE_PRESETS[tfRaw] || 'last_30dT' };
+    params = rangeParams(30);
   }
 
   const debug = searchParams.get('debug') === 'true';
