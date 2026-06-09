@@ -45,14 +45,28 @@ export interface PlatformData {
   color: string;
 }
 
-async function fetchSource(source: 'facebook' | 'google_ads' | 'tiktok', params: Record<string, string>): Promise<WindsorRow[]> {
+// Totals request: no date field — Windsor returns per-ad aggregated rows (avoids row-limit truncation)
+async function fetchSourceTotals(source: 'facebook' | 'google_ads' | 'tiktok', params: Record<string, string>): Promise<WindsorRow[]> {
   const fieldMap = {
-    facebook:   'date,source,spend,impressions,clicks,ctr,purchase_roas,conversions',
-    google_ads: 'date,source,spend,impressions,clicks,ctr,conversions,conversion_value',
-    tiktok:     'date,source,spend,impressions,clicks,ctr,conversion_value',
+    facebook:   'source,spend,impressions,clicks,ctr,purchase_roas',
+    google_ads: 'source,spend,impressions,clicks,ctr,conversion_value',
+    tiktok:     'source,spend,impressions,clicks,ctr,conversion_value',
   };
   try {
     const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields: fieldMap[source], _renderer: 'json', ...params });
+    const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return (json.data || []) as WindsorRow[];
+  } catch {
+    return [];
+  }
+}
+
+// Daily request: only date+spend — Windsor returns ~1 row per day (small row count for chart)
+async function fetchSourceDaily(source: 'facebook' | 'google_ads' | 'tiktok', params: Record<string, string>): Promise<WindsorRow[]> {
+  try {
+    const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields: 'date,source,spend', _renderer: 'json', ...params });
     const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = await res.json();
@@ -154,37 +168,42 @@ export async function GET(request: NextRequest) {
   const debug = searchParams.get('debug') === 'true';
 
   try {
-    const [metaRows, googleRows, tiktokRows] = await Promise.all([
-      fetchSource('facebook', params),
-      fetchSource('google_ads', params),
-      fetchSource('tiktok', params),
+    const [metaTotals, googleTotals, tiktokTotals, metaDaily, googleDaily, tiktokDaily] = await Promise.all([
+      fetchSourceTotals('facebook', params),
+      fetchSourceTotals('google_ads', params),
+      fetchSourceTotals('tiktok', params),
+      fetchSourceDaily('facebook', params),
+      fetchSourceDaily('google_ads', params),
+      fetchSourceDaily('tiktok', params),
     ]);
 
     if (debug) {
-      const metaSpend = metaRows.reduce((s, r) => s + Number(r.spend || 0), 0);
+      const metaSpend = metaTotals.reduce((s, r) => s + Number(r.spend || 0), 0);
       return NextResponse.json({
         debug: true,
         params,
-        metaRowCount: metaRows.length,
+        metaTotalsRowCount: metaTotals.length,
         metaSpendTotal: Math.round(metaSpend * 100) / 100,
-        metaSample: metaRows.slice(0, 5),
-        googleRowCount: googleRows.length,
-        tiktokRowCount: tiktokRows.length,
+        metaTotalsSample: metaTotals.slice(0, 5),
+        metaDailyRowCount: metaDaily.length,
+        metaDailySample: metaDaily.slice(0, 5),
+        googleTotalsRowCount: googleTotals.length,
+        tiktokTotalsRowCount: tiktokTotals.length,
       });
     }
 
     const platforms: PlatformData[] = [];
 
-    const meta = aggregatePlatform(metaRows, 'Meta', '#818cf8');
+    const meta = aggregatePlatform(metaTotals, 'Meta', '#818cf8');
     if (meta.spend > 0) platforms.push(meta);
 
-    const google = aggregatePlatform(googleRows, 'Google', '#34d399');
+    const google = aggregatePlatform(googleTotals, 'Google', '#34d399');
     if (google.spend > 0) platforms.push(google);
 
-    const tiktok = aggregatePlatform(tiktokRows, 'TikTok', '#f472b6');
+    const tiktok = aggregatePlatform(tiktokTotals, 'TikTok', '#f472b6');
     if (tiktok.spend > 0) platforms.push(tiktok);
 
-    const dailySpend = buildDailySpend(metaRows, googleRows, tiktokRows);
+    const dailySpend = buildDailySpend(metaDaily, googleDaily, tiktokDaily);
 
     return NextResponse.json({ source: 'windsor_live', platforms, dailySpend });
   } catch (err) {
