@@ -159,9 +159,13 @@ export async function GET(request: NextRequest) {
       fetchCreatives('tiktok', { date_preset: datePreset }),
     ]);
 
+    const metaActId = `act_${META_AD_ACCOUNT_ID.replace('act_', '')}`;
+
     if (debug) {
       return NextResponse.json({
         debug: true,
+        metaActId,
+        META_AD_ACCOUNT_ID,
         metaRaw: metaResult.raw,
         tiktokRaw: tiktokResult.raw,
       });
@@ -172,7 +176,7 @@ export async function GET(request: NextRequest) {
       ...aggregateCreatives(tiktokResult.rows, 'TikTok'),
     ].sort((a, b) => b.spend - a.spend);
 
-    return NextResponse.json({ source: 'windsor_live', creatives });
+    return NextResponse.json({ source: 'windsor_live', metaActId, creatives });
   } catch (err) {
     return NextResponse.json({
       source: 'error',
