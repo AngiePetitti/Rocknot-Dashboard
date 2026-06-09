@@ -150,14 +150,17 @@ export async function GET(request: NextRequest) {
   }
 
   function firstOfMonth(monthsBack: number): string {
-    const d = new Date();
-    d.setMonth(d.getMonth() - monthsBack, 1);
-    return d.toISOString().split('T')[0];
+    // Use PST date parts to avoid UTC day-shift
+    const pst = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const [y, m] = pst.split('-').map(Number);
+    const target = new Date(y, m - 1 - monthsBack, 1);
+    return target.toLocaleDateString('en-CA');
   }
   function lastOfPrevMonth(): string {
-    const d = new Date();
-    d.setDate(0);
-    return d.toISOString().split('T')[0];
+    const pst = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const [y, m] = pst.split('-').map(Number);
+    const lastDay = new Date(y, m - 1, 0);
+    return lastDay.toLocaleDateString('en-CA');
   }
 
   let params: Record<string, string>;
@@ -178,7 +181,7 @@ export async function GET(request: NextRequest) {
   } else if (tfRaw === '6m') {
     params = rangeParams(180);
   } else if (tfRaw === 'ytd') {
-    const year = new Date().getFullYear();
+    const year = todayStr.split('-')[0];
     params = { date_from: `${year}-01-01`, date_to: yesterdayStr };
   } else {
     params = rangeParams(30);

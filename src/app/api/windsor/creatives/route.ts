@@ -5,16 +5,34 @@ export const dynamic = 'force-dynamic';
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 const META_AD_ACCOUNT_ID = process.env.META_AD_ACCOUNT_ID || '165092079662754';
 
-const DATE_PRESETS: Record<string, string> = {
-  today: 'last_1dT',
-  yesterday: 'last_1d',
-  '7d': 'last_7dT',
-  '14d': 'last_14dT',
-  '30d': 'last_30dT',
-  last_month: 'last_1m',
-  '6m': 'last_180d',
-  ytd: 'this_year',
-};
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split('T')[0];
+}
+
+function buildDateParams(tfRaw: string): Record<string, string> {
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const yesterdayStr = addDays(todayStr, -1);
+
+  if (tfRaw === 'today') return { date_from: todayStr, date_to: todayStr };
+  if (tfRaw === 'yesterday') return { date_from: yesterdayStr, date_to: yesterdayStr };
+  if (tfRaw === '7d') return { date_from: addDays(todayStr, -7), date_to: yesterdayStr };
+  if (tfRaw === '14d') return { date_from: addDays(todayStr, -14), date_to: yesterdayStr };
+  if (tfRaw === '30d') return { date_from: addDays(todayStr, -30), date_to: yesterdayStr };
+  if (tfRaw === '6m') return { date_from: addDays(todayStr, -180), date_to: yesterdayStr };
+  if (tfRaw === 'ytd') {
+    const year = todayStr.split('-')[0];
+    return { date_from: `${year}-01-01`, date_to: yesterdayStr };
+  }
+  if (tfRaw === 'last_month') {
+    const [y, m] = todayStr.split('-').map(Number);
+    const firstOfPrev = new Date(y, m - 2, 1).toLocaleDateString('en-CA');
+    const lastOfPrev = new Date(y, m - 1, 0).toLocaleDateString('en-CA');
+    return { date_from: firstOfPrev, date_to: lastOfPrev };
+  }
+  return { date_from: addDays(todayStr, -30), date_to: yesterdayStr };
+}
 
 interface CreativeRow {
   source?: string;
@@ -146,17 +164,18 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const tfRaw = searchParams.get('tf') || '30d';
-  const datePreset = DATE_PRESETS[tfRaw] || 'last_30dT';
   const debug = searchParams.get('debug') === 'true';
 
   if (!WINDSOR_API_KEY) {
     return NextResponse.json({ source: 'mock', creatives: [] });
   }
 
+  const params = buildDateParams(tfRaw);
+
   try {
     const [metaResult, tiktokResult] = await Promise.all([
-      fetchCreatives('facebook', { date_preset: datePreset }),
-      fetchCreatives('tiktok', { date_preset: datePreset }),
+      fetchCreatives('facebook', params),
+      fetchCreatives('tiktok', params),
     ]);
 
     const metaActId = `act_${META_AD_ACCOUNT_ID.replace('act_', '')}`;

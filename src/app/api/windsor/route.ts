@@ -6,27 +6,66 @@ export const dynamic = 'force-dynamic';
 
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 
-const DATE_PRESETS: Record<Timeframe, string> = {
-  today:      'last_1dT',
-  yesterday:  'last_1d',
-  '7d':       'last_7dT',
-  '14d':      'last_14dT',
-  '30d':      'last_30dT',
-  last_month: 'last_1m',
-  '6m':       'last_180d',
-  ytd:        'this_year',
-};
+function buildCurrentParams(tf: Timeframe, todayStr: string, yesterdayStr: string): Record<string, string> {
+  if (tf === 'today') return { date_from: todayStr, date_to: todayStr };
+  if (tf === 'yesterday') return { date_from: yesterdayStr, date_to: yesterdayStr };
+  if (tf === '7d') return { date_from: addDays(todayStr, -7), date_to: yesterdayStr };
+  if (tf === '14d') return { date_from: addDays(todayStr, -14), date_to: yesterdayStr };
+  if (tf === '30d') return { date_from: addDays(todayStr, -30), date_to: yesterdayStr };
+  if (tf === '6m') return { date_from: addDays(todayStr, -180), date_to: yesterdayStr };
+  if (tf === 'ytd') {
+    const year = todayStr.split('-')[0];
+    return { date_from: `${year}-01-01`, date_to: yesterdayStr };
+  }
+  if (tf === 'last_month') {
+    const [y, m] = todayStr.split('-').map(Number);
+    return {
+      date_from: new Date(y, m - 2, 1).toLocaleDateString('en-CA'),
+      date_to: new Date(y, m - 1, 0).toLocaleDateString('en-CA'),
+    };
+  }
+  return { date_from: addDays(todayStr, -30), date_to: yesterdayStr };
+}
 
-const COMPARE_PRESETS: Record<Timeframe, string> = {
-  today:      'last_1d',
-  yesterday:  'last_2d',
-  '7d':       'last_14dT',
-  '14d':      'last_28dT',
-  '30d':      'last_60dT',
-  last_month: 'last_2m',
-  '6m':       'last_360d',
-  ytd:        'this_yearT',
-};
+function buildPriorParams(tf: Timeframe, todayStr: string, yesterdayStr: string): { params: Record<string, string>; label: string } {
+  if (tf === 'today') {
+    return { params: { date_from: yesterdayStr, date_to: yesterdayStr }, label: yesterdayStr };
+  }
+  if (tf === 'yesterday') {
+    const d = addDays(yesterdayStr, -1);
+    return { params: { date_from: d, date_to: d }, label: d };
+  }
+  if (tf === '7d') {
+    const from = addDays(todayStr, -14); const to = addDays(todayStr, -8);
+    return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
+  }
+  if (tf === '14d') {
+    const from = addDays(todayStr, -28); const to = addDays(todayStr, -15);
+    return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
+  }
+  if (tf === '30d') {
+    const from = addDays(todayStr, -60); const to = addDays(todayStr, -31);
+    return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
+  }
+  if (tf === '6m') {
+    const from = addDays(todayStr, -360); const to = addDays(todayStr, -181);
+    return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
+  }
+  if (tf === 'ytd') {
+    const year = Number(todayStr.split('-')[0]) - 1;
+    const from = `${year}-01-01`;
+    const to = `${year}-12-31`;
+    return { params: { date_from: from, date_to: to }, label: `${year}` };
+  }
+  if (tf === 'last_month') {
+    const [y, m] = todayStr.split('-').map(Number);
+    const from = new Date(y, m - 3, 1).toLocaleDateString('en-CA');
+    const to = new Date(y, m - 2, 0).toLocaleDateString('en-CA');
+    return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
+  }
+  const from = addDays(todayStr, -60); const to = addDays(todayStr, -31);
+  return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
+}
 
 interface WindsorRow {
   date?: string;
@@ -222,12 +261,8 @@ export async function GET(request: NextRequest) {
     let currentParams: Record<string, string>;
     if (isCustom && dateFrom && dateTo) {
       currentParams = { date_from: dateFrom, date_to: dateTo };
-    } else if (tf === 'today') {
-      currentParams = { date_from: todayStr, date_to: todayStr };
-    } else if (tf === 'yesterday') {
-      currentParams = { date_from: yesterdayStr, date_to: yesterdayStr };
     } else {
-      currentParams = { date_preset: DATE_PRESETS[tf] || 'last_30dT' };
+      currentParams = buildCurrentParams(tf, todayStr, yesterdayStr);
     }
 
     if (debug) {
@@ -302,8 +337,9 @@ export async function GET(request: NextRequest) {
         priorParams = { date_from: priorFrom, date_to: priorTo };
         priorLabel = `${priorFrom} – ${priorTo}`;
       } else {
-        priorParams = { date_preset: COMPARE_PRESETS[tf] || 'last_60dT' };
-        priorLabel = COMPARE_PRESETS[tf] || '';
+        const prior = buildPriorParams(tf, todayStr, yesterdayStr);
+        priorParams = prior.params;
+        priorLabel = prior.label;
       }
 
       const priorRows = await fetchAllRows(priorParams);
