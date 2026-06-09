@@ -151,12 +151,27 @@ export async function GET(request: NextRequest) {
     params = { date_preset: DATE_PRESETS[tfRaw] || 'last_30dT' };
   }
 
+  const debug = searchParams.get('debug') === 'true';
+
   try {
     const [metaRows, googleRows, tiktokRows] = await Promise.all([
       fetchSource('facebook', params),
       fetchSource('google_ads', params),
       fetchSource('tiktok', params),
     ]);
+
+    if (debug) {
+      const metaSpend = metaRows.reduce((s, r) => s + Number(r.spend || 0), 0);
+      return NextResponse.json({
+        debug: true,
+        params,
+        metaRowCount: metaRows.length,
+        metaSpendTotal: Math.round(metaSpend * 100) / 100,
+        metaSample: metaRows.slice(0, 5),
+        googleRowCount: googleRows.length,
+        tiktokRowCount: tiktokRows.length,
+      });
+    }
 
     const platforms: PlatformData[] = [];
 
