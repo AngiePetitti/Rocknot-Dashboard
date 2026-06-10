@@ -215,6 +215,53 @@ const GOOGLE_FIELDS = ['date', 'source', 'spend', 'impressions', 'clicks', 'conv
 // per Windsor support, mixing reports in one query nulls out order fields.
 const SHOPIFY_FIELDS = ['date', 'source', 'order_count', 'order_current_total_price', 'order_subtotal_price', 'order_total_price', 'order_gross_sales', 'order_net_sales'].join(',');
 
+// Separate queries per Windsor support: orders (with customer id) and the
+// Customers report (customer_is_returning) must not share a query — they are
+// joined here on order_customer_id = customer_id.
+const SHOPIFY_ORDER_CUSTOMER_FIELDS = ['date', 'source', 'order_id', 'order_customer_id'].join(',');
+const SHOPIFY_CUSTOMER_FIELDS = ['source', 'customer_id', 'customer_is_returning'].join(',');
+
+interface CustomerSplit {
+  byDate: Record<string, { newCustomers: number; returningCustomers: number }>;
+}
+
+async function fetchCustomerSplit(params: Record<string, string>): Promise<CustomerSplit> {
+  const empty: CustomerSplit = { byDate: {} };
+  try {
+    const [orders, customers] = await Promise.all([
+      fetchFromWindsor('all', SHOPIFY_ORDER_CUSTOMER_FIELDS, params),
+      fetchFromWindsor('all', SHOPIFY_CUSTOMER_FIELDS, params),
+    ]);
+
+    const isReturningById: Record<string, boolean> = {};
+    for (const row of customers.rows) {
+      if (!String(row.source || '').toLowerCase().includes('shopify')) continue;
+      const id = String((row as Record<string, unknown>).customer_id || '');
+      if (!id) continue;
+      const v = (row as Record<string, unknown>).customer_is_returning;
+      isReturningById[id] = v === true || v === 'true' || v === 1 || v === '1';
+    }
+
+    const byDate: CustomerSplit['byDate'] = {};
+    const seenOrders = new Set<string>();
+    for (const row of orders.rows) {
+      if (!String(row.source || '').toLowerCase().includes('shopify')) continue;
+      const date = String(row.date || '').split('T')[0];
+      const custId = String((row as Record<string, unknown>).order_customer_id || '');
+      const orderId = String((row as Record<string, unknown>).order_id || '');
+      if (!date || !custId) continue;
+      if (orderId && seenOrders.has(orderId)) continue;
+      if (orderId) seenOrders.add(orderId);
+      if (!byDate[date]) byDate[date] = { newCustomers: 0, returningCustomers: 0 };
+      if (isReturningById[custId]) byDate[date].returningCustomers += 1;
+      else byDate[date].newCustomers += 1;
+    }
+    return { byDate };
+  } catch {
+    return empty;
+  }
+}
+
 async function fetchFromWindsor(endpoint: string, fields: string, params: Record<string, string>): Promise<{ rows: WindsorRow[]; error?: string; rowCount: number }> {
   try {
     const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
@@ -322,7 +369,11 @@ export async function GET(request: NextRequest) {
     }
 
     const isShortTf = tf === 'today' || tf === 'yesterday';
-    let currentRows = await fetchAllRows(currentParams);
+    const [initialRows, customerSplit] = await Promise.all([
+      fetchAllRows(currentParams),
+      fetchCustomerSplit(currentParams),
+    ]);
+    let currentRows = initialRows;
 
     // Fallback for today/yesterday with no data: use most recent available
     let latestAvailableDate: string | null = null;
@@ -336,6 +387,19 @@ export async function GET(request: NextRequest) {
     }
 
     const current = aggregateRows(currentRows);
+
+    // Overlay new vs returning customer counts from the joined
+    // Orders + Customers queries
+    const splitDays = Object.values(customerSplit.byDate);
+    if (splitDays.length > 0) {
+      const newCust = splitDays.reduce((s, d) => s + d.newCustomers, 0);
+      const retCust = splitDays.reduce((s, d) => s + d.returningCustomers, 0);
+      const splitTotal = newCust + retCust;
+      current.metrics.newCustomers = newCust;
+      current.metrics.returningCustomers = retCust;
+      current.metrics.pctNew = splitTotal > 0 ? Math.round((newCust / splitTotal) * 1000) / 10 : 0;
+      current.metrics.pctReturning = splitTotal > 0 ? Math.round((retCust / splitTotal) * 1000) / 10 : 0;
+    }
 
     let priorPeriod = null;
     let priorLabel = '';
