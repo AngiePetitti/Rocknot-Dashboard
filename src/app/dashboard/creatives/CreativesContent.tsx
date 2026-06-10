@@ -23,9 +23,11 @@ interface CreativePerformance {
   ctr: number;
   impressions: number;
   clicks: number;
+  conversions?: number;
+  costPerConversion?: number;
 }
 
-type SortKey = 'spend' | 'roas' | 'ctr' | 'impressions';
+type SortKey = 'spend' | 'roas' | 'ctr' | 'conversions';
 type PlatformFilter = 'all' | 'Meta' | 'TikTok';
 
 export default function CreativesContent() {
@@ -51,7 +53,7 @@ export default function CreativesContent() {
 
   const filtered = creatives
     .filter(c => platformFilter === 'all' || c.platform === platformFilter)
-    .sort((a, b) => b[sortKey] - a[sortKey]);
+    .sort((a, b) => (b[sortKey] ?? 0) - (a[sortKey] ?? 0));
 
   const totalSpend = filtered.reduce((s, c) => s + c.spend, 0);
   const totalRevenue = filtered.reduce((s, c) => s + c.revenue, 0);
@@ -109,7 +111,7 @@ export default function CreativesContent() {
             { key: 'spend', label: 'Spend' },
             { key: 'roas', label: 'ROAS' },
             { key: 'ctr', label: 'CTR' },
-            { key: 'impressions', label: 'Impressions' },
+            { key: 'conversions', label: 'Conversions' },
           ] as { key: SortKey; label: string }[]).map(opt => (
             <button
               key={opt.key}
@@ -228,8 +230,12 @@ export default function CreativesContent() {
                     <p className="text-gray-700 font-bold">{formatPercent(creative.ctr)}</p>
                   </div>
                   <div>
-                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Impressions</p>
-                    <p className="text-gray-700 font-bold">{creative.impressions.toLocaleString()}</p>
+                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Conversions</p>
+                    <p className="text-gray-700 font-bold">{(creative.conversions ?? 0).toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Cost / Conv</p>
+                    <p className="text-gray-700 font-bold">{creative.costPerConversion ? formatCurrency(creative.costPerConversion) : '—'}</p>
                   </div>
                   <div>
                     <p className="text-gray-400 uppercase font-semibold mb-0.5">Clicks</p>

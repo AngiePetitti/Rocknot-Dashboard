@@ -66,18 +66,20 @@ export interface CreativePerformance {
   ctr: number;
   impressions: number;
   clicks: number;
+  conversions: number;
+  costPerConversion: number;
 }
 
 const FIELDS_BY_SOURCE: Record<'facebook' | 'tiktok', string> = {
   facebook: [
     'source', 'ad_name', 'ad_id', 'account_id', 'adset_name', 'campaign',
     'spend', 'impressions', 'clicks', 'ctr',
-    'purchase_roas', 'conversion_values',
+    'purchase_roas', 'conversion_values', 'actions_omni_purchase',
   ].join(','),
   tiktok: [
     'source', 'ad_name', 'ad_id', 'account_id', 'adset_name', 'campaign',
     'spend', 'impressions', 'clicks', 'ctr',
-    'conversion_value', 'revenue',
+    'conversion_value', 'revenue', 'conversions',
   ].join(','),
 };
 
@@ -132,6 +134,8 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
         ctr: 0,
         impressions: 0,
         clicks: 0,
+        conversions: 0,
+        costPerConversion: 0,
       };
     }
 
@@ -150,6 +154,7 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
 
     entry.impressions += Number(row.impressions || 0);
     entry.clicks += Number(row.clicks || 0);
+    entry.conversions += Number(rawRow.actions_omni_purchase || rawRow.conversions || 0);
   }
 
   return Object.values(byAd).map(c => ({
@@ -158,6 +163,8 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
     revenue: Math.round(c.revenue * 100) / 100,
     roas: c.spend > 0 ? Math.round((c.revenue / c.spend) * 100) / 100 : 0,
     ctr: c.impressions > 0 ? Math.round((c.clicks / c.impressions) * 10000) / 100 : 0,
+    conversions: Math.round(c.conversions),
+    costPerConversion: c.conversions > 0 ? Math.round((c.spend / c.conversions) * 100) / 100 : 0,
   }));
 }
 

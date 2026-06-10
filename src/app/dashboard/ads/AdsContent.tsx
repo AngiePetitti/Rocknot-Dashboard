@@ -48,6 +48,8 @@ interface CreativeRow {
   ctr: number;
   impressions: number;
   clicks: number;
+  conversions?: number;
+  costPerConversion?: number;
 }
 
 function formatDate(dateStr: string) {
@@ -281,7 +283,7 @@ export default function AdsContent() {
                 <table className="w-full text-sm min-w-[700px]">
                   <thead>
                     <tr className="border-b border-gray-100">
-                      {['Ad Name', 'Platform', 'Spend', 'ROAS', 'CTR', 'Impressions', 'Clicks', ''].map(h => (
+                      {['Ad Name', 'Platform', 'Spend', 'ROAS', 'CTR', 'Conversions', 'Cost / Conv', 'Clicks', ''].map(h => (
                         <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -301,7 +303,8 @@ export default function AdsContent() {
                           </span>
                         </td>
                         <td className="py-3 pr-4 text-gray-600">{formatPercent(ad.ctr)}</td>
-                        <td className="py-3 pr-4 text-gray-600">{(ad.impressions / 1000).toFixed(0)}k</td>
+                        <td className="py-3 pr-4 text-gray-600">{(ad.conversions ?? 0).toLocaleString()}</td>
+                        <td className="py-3 pr-4 text-gray-600">{ad.costPerConversion ? formatCurrency(ad.costPerConversion) : '—'}</td>
                         <td className="py-3 pr-4 text-gray-600">{ad.clicks.toLocaleString()}</td>
                         <td className="py-3">
                           {ad.adUrl && (
