@@ -48,8 +48,8 @@ function dateStr(d: DailyRow['date']): string {
 export async function getOverview(dateFrom: string, dateTo: string): Promise<OverviewResult> {
   const ds = getDataset();
 
-  // One daily rollup joining all sources. Column names mirror Windsor's
-  // connector field names — adjust here if the first sync lands differently.
+  // One daily rollup joining all sources. Column names verified against the
+  // actual Windsor-created BigQuery schema (rocknot dataset, Jun 2026).
   const sql = `
     WITH shopify AS (
       SELECT DATE(date) AS d,
@@ -61,8 +61,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     ),
     customers AS (
       SELECT DATE(o.date) AS d,
-             COUNTIF(NOT IFNULL(c.customer_is_returning, FALSE)) AS new_customers,
-             COUNTIF(IFNULL(c.customer_is_returning, FALSE)) AS returning_customers
+             COUNTIF(LOWER(IFNULL(CAST(c.customer_is_returning AS STRING), 'false')) NOT IN ('true', '1')) AS new_customers,
+             COUNTIF(LOWER(IFNULL(CAST(c.customer_is_returning AS STRING), 'false')) IN ('true', '1')) AS returning_customers
       FROM \`${ds}.shopify_orders\` o
       LEFT JOIN \`${ds}.shopify_customers\` c
         ON CAST(o.order_customer_id AS STRING) = CAST(c.customer_id AS STRING)
@@ -72,7 +72,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     meta AS (
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
-             SUM(CAST(spend AS FLOAT64) * IFNULL(CAST(purchase_roas AS FLOAT64), 0)) AS revenue
+             SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.facebook_ads\`
       WHERE DATE(date) BETWEEN @date_from AND @date_to
       GROUP BY d
@@ -80,7 +80,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     google AS (
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
-             SUM(IFNULL(CAST(conversion_value AS FLOAT64), 0)) AS revenue
+             SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.google_ads\`
       WHERE DATE(date) BETWEEN @date_from AND @date_to
       GROUP BY d
@@ -88,7 +88,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     tiktok AS (
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
-             SUM(IFNULL(CAST(conversion_value AS FLOAT64), 0)) AS revenue
+             SUM(IFNULL(CAST(onsite_total_purchase_value AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.tiktok_ads\`
       WHERE DATE(date) BETWEEN @date_from AND @date_to
       GROUP BY d
