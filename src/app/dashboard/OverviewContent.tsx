@@ -311,23 +311,28 @@ export default function OverviewContent() {
         />
       </div>
 
-      {/* New vs Returning Customer Cards */}
+      {/* New vs Returning Customer Cards — hidden on Today: the customer
+          match hasn't settled mid-day and would misreport the split */}
       {metrics.newCustomers !== undefined && metrics.newCustomers > 0 && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <MetricCard
-            title="New Customers"
-            value={String(metrics.newCustomers)}
-            subtitle={`${metrics.pctNew?.toFixed(1) ?? 0}% of orders`}
-            accentColor="#a5f3fc"
-            trend={{ value: formatCurrency(metrics.newCustomerRevenue ?? 0) + ' revenue', positive: true }}
-          />
-          <MetricCard
-            title="Returning Customers"
-            value={String(metrics.returningCustomers ?? 0)}
-            subtitle={`${metrics.pctReturning?.toFixed(1) ?? 0}% of orders`}
-            accentColor="#bbf7d0"
-            trend={{ value: formatCurrency(metrics.returningCustomerRevenue ?? 0) + ' revenue', positive: true }}
-          />
+          {tfRaw !== 'today' && (
+            <>
+              <MetricCard
+                title="New Customers"
+                value={String(metrics.newCustomers)}
+                subtitle={`${metrics.pctNew?.toFixed(1) ?? 0}% of orders`}
+                accentColor="#a5f3fc"
+                trend={{ value: formatCurrency(metrics.newCustomerRevenue ?? 0) + ' revenue', positive: true }}
+              />
+              <MetricCard
+                title="Returning Customers"
+                value={String(metrics.returningCustomers ?? 0)}
+                subtitle={`${metrics.pctReturning?.toFixed(1) ?? 0}% of orders`}
+                accentColor="#bbf7d0"
+                trend={{ value: formatCurrency(metrics.returningCustomerRevenue ?? 0) + ' revenue', positive: true }}
+              />
+            </>
+          )}
           <MetricCard
             title="Meta Spend"
             value={formatCurrency(metrics.metaSpend ?? 0)}
