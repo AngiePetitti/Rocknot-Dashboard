@@ -11,6 +11,8 @@ export interface PlatformData {
   impressions: number;
   clicks: number;
   ctr: number;
+  conversions: number;
+  costPerConversion: number;
   color: string;
 }
 
@@ -25,7 +27,7 @@ interface TotalsRow {
   platform: string;
   spend: number | null;
   revenue: number | null;
-  impressions: number | null;
+  conversions: number | null;
   clicks: number | null;
 }
 
@@ -40,8 +42,8 @@ function dateStr(d: DailyRow['date']): string {
   return typeof d === 'string' ? d : d.value;
 }
 
-// impressions is referenced in this SQL; if the Windsor tasks don't sync that
-// field yet the query throws and the caller falls back to the Windsor REST API.
+// Conversions per platform: Meta = omni purchases, Google = conversions,
+// TikTok = onsite purchases — the same counts each ads manager reports.
 export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<{ platforms: PlatformData[]; dailySpend: DaySpend[] }> {
   const ds = getDataset();
 
@@ -49,7 +51,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     SELECT 'Meta' AS platform,
            SUM(CAST(spend AS FLOAT64)) AS spend,
            SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
-           SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions,
+           SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS conversions,
            SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks
     FROM \`${ds}.facebook_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
@@ -57,7 +59,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     SELECT 'Google',
            SUM(CAST(spend AS FLOAT64)),
            SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)),
-           SUM(IFNULL(CAST(impressions AS FLOAT64), 0)),
+           SUM(IFNULL(CAST(conversions AS FLOAT64), 0)),
            SUM(IFNULL(CAST(clicks AS FLOAT64), 0))
     FROM \`${ds}.google_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
@@ -65,7 +67,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     SELECT 'TikTok',
            SUM(CAST(spend AS FLOAT64)),
            SUM(IFNULL(CAST(onsite_total_purchase_value AS FLOAT64), 0)),
-           SUM(IFNULL(CAST(impressions AS FLOAT64), 0)),
+           SUM(IFNULL(CAST(onsite_total_purchase AS FLOAT64), 0)),
            SUM(IFNULL(CAST(clicks AS FLOAT64), 0))
     FROM \`${ds}.tiktok_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
@@ -113,16 +115,18 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     const spend = Number(r?.spend || 0);
     if (spend <= 0) continue;
     const revenue = Number(r?.revenue || 0);
-    const impressions = Number(r?.impressions || 0);
+    const conversions = Number(r?.conversions || 0);
     const clicks = Number(r?.clicks || 0);
     platforms.push({
       platform: name,
       spend: Math.round(spend * 100) / 100,
       revenue: Math.round(revenue * 100) / 100,
       roas: spend > 0 ? Math.round((revenue / spend) * 100) / 100 : 0,
-      impressions: Math.round(impressions),
+      impressions: 0,
       clicks: Math.round(clicks),
-      ctr: impressions > 0 ? Math.round((clicks / impressions) * 10000) / 100 : 0,
+      ctr: 0,
+      conversions: Math.round(conversions),
+      costPerConversion: conversions > 0 ? Math.round((spend / conversions) * 100) / 100 : 0,
       color: colors[name],
     });
   }

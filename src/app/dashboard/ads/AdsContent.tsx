@@ -23,6 +23,8 @@ interface PlatformData {
   impressions: number;
   clicks: number;
   ctr: number;
+  conversions?: number;
+  costPerConversion?: number;
   color: string;
 }
 
@@ -180,12 +182,12 @@ export default function AdsContent() {
                     <p className="font-bold" style={{ color: p.roas >= 3.5 ? '#22c55e' : '#ef4444' }}>{formatROAS(p.roas)}</p>
                   </div>
                   <div>
-                    <p className="text-gray-400 uppercase font-semibold mb-0.5">CTR</p>
-                    <p className="font-bold text-gray-800">{formatPercent(p.ctr)}</p>
+                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Conversions</p>
+                    <p className="font-bold text-gray-800">{(p.conversions ?? 0).toLocaleString()}</p>
                   </div>
                   <div>
-                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Impressions</p>
-                    <p className="font-bold text-gray-800">{(p.impressions / 1000).toFixed(0)}k</p>
+                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Cost / Conv</p>
+                    <p className="font-bold text-gray-800">{p.costPerConversion ? formatCurrency(p.costPerConversion) : '—'}</p>
                   </div>
                   <div>
                     <p className="text-gray-400 uppercase font-semibold mb-0.5">Clicks</p>
