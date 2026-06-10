@@ -13,15 +13,21 @@ import { BigQuery } from '@google-cloud/bigquery';
 
 let client: BigQuery | null = null;
 
+// Env values pasted into Vercel can pick up stray whitespace (tabs/newlines);
+// trim everything so a copy-paste artifact never breaks the connection.
+function env(name: string): string {
+  return (process.env[name] || '').trim();
+}
+
 export function isBigQueryConfigured(): boolean {
-  return Boolean(process.env.GCP_PROJECT_ID && process.env.GCP_SERVICE_ACCOUNT_KEY && process.env.BQ_DATASET);
+  return Boolean(env('GCP_PROJECT_ID') && env('GCP_SERVICE_ACCOUNT_KEY') && env('BQ_DATASET'));
 }
 
 export function getBigQuery(): BigQuery {
   if (!client) {
-    const credentials = JSON.parse(process.env.GCP_SERVICE_ACCOUNT_KEY!);
+    const credentials = JSON.parse(env('GCP_SERVICE_ACCOUNT_KEY'));
     client = new BigQuery({
-      projectId: process.env.GCP_PROJECT_ID,
+      projectId: env('GCP_PROJECT_ID'),
       credentials,
     });
   }
@@ -29,7 +35,7 @@ export function getBigQuery(): BigQuery {
 }
 
 export function getDataset(): string {
-  return process.env.BQ_DATASET!;
+  return env('BQ_DATASET');
 }
 
 // All queries pass dates as parameters — never interpolate user input into SQL.
