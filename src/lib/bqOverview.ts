@@ -53,7 +53,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const sql = `
     WITH shopify AS (
       SELECT DATE(date) AS d,
-             SUM(CAST(order_total_price AS FLOAT64)) AS revenue,
+             SUM(COALESCE(CAST(order_net_sales AS FLOAT64), CAST(order_total_price AS FLOAT64))) AS revenue,
              COUNT(DISTINCT order_id) AS orders
       FROM \`${ds}.shopify_orders\`
       WHERE DATE(date) BETWEEN @date_from AND @date_to
