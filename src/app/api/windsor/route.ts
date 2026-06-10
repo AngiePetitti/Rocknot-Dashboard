@@ -3,6 +3,7 @@ import { getMetricsForTimeframe, getRevenueForTimeframe } from '@/src/lib/mockDa
 import { Timeframe } from '@/src/lib/mockData';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getOverview } from '@/src/lib/bqOverview';
+import { fetchMetaToday } from '@/src/lib/metaLive';
 
 export const dynamic = 'force-dynamic';
 
@@ -428,6 +429,24 @@ export async function GET(request: NextRequest) {
     }
 
     const current = aggregateRows(currentRows);
+
+    // For "today", replace Meta numbers with the Graph API's live figures —
+    // Windsor refreshes from Meta on a delay, so its intraday spend runs low.
+    if (tfRaw === 'today' && !latestAvailableDate) {
+      const metaLive = await fetchMetaToday();
+      if (metaLive && metaLive.spend >= current.metrics.metaSpend) {
+        const spendDelta = metaLive.spend - current.metrics.metaSpend;
+        current.metrics.metaSpend = Math.round(metaLive.spend * 100) / 100;
+        current.metrics.metaRevenue = Math.round(metaLive.revenue * 100) / 100;
+        current.metrics.totalAdSpend = Math.round((current.metrics.totalAdSpend + spendDelta) * 100) / 100;
+        current.metrics.mer = current.metrics.totalAdSpend > 0
+          ? Math.round((current.metrics.totalRevenue / current.metrics.totalAdSpend) * 100) / 100
+          : 0;
+        if (current.revenueData.length === 1) {
+          current.revenueData[0].adSpend = Math.round(current.metrics.totalAdSpend);
+        }
+      }
+    }
 
     // Overlay new vs returning customer counts from the joined
     // Orders + Customers queries

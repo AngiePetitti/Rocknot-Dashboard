@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getAdsOverview } from '@/src/lib/bqAds';
+import { fetchMetaToday } from '@/src/lib/metaLive';
 
 export const dynamic = 'force-dynamic';
 
@@ -232,6 +233,16 @@ export async function GET(request: NextRequest) {
     const platforms: PlatformData[] = [];
 
     const meta = aggregatePlatform(metaTotals, 'Meta', '#818cf8');
+    // Live Graph API numbers for today — Windsor's intraday Meta data lags
+    if (tfRaw === 'today') {
+      const metaLive = await fetchMetaToday();
+      if (metaLive && metaLive.spend >= meta.spend) {
+        meta.spend = Math.round(metaLive.spend * 100) / 100;
+        meta.revenue = Math.round(metaLive.revenue * 100) / 100;
+        meta.roas = meta.spend > 0 ? Math.round((meta.revenue / meta.spend) * 100) / 100 : 0;
+        meta.clicks = metaLive.clicks;
+      }
+    }
     if (meta.spend > 0) platforms.push(meta);
 
     const google = aggregatePlatform(googleTotals, 'Google', '#34d399');
