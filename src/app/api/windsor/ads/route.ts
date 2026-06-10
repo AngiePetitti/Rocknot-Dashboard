@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isBigQueryConfigured } from '@/src/lib/bigquery';
+import { getAdsOverview } from '@/src/lib/bqAds';
 
 export const dynamic = 'force-dynamic';
 
@@ -188,6 +190,17 @@ export async function GET(request: NextRequest) {
   }
 
   const debug = searchParams.get('debug') === 'true';
+
+  // Prefer BigQuery; if it fails (e.g. a column not yet synced by Windsor)
+  // fall through to the Windsor REST API below.
+  if (isBigQueryConfigured() && !debug) {
+    try {
+      const { platforms, dailySpend } = await getAdsOverview(params.date_from, params.date_to);
+      return NextResponse.json({ source: 'bigquery_live', platforms, dailySpend });
+    } catch {
+      // fall through to Windsor REST
+    }
+  }
 
   try {
     const [metaTotals, googleTotals, tiktokTotals, metaDaily, googleDaily, tiktokDaily] = await Promise.all([
