@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMetricsForTimeframe, getRevenueForTimeframe } from '@/src/lib/mockData';
 import { Timeframe } from '@/src/lib/mockData';
+import { isBigQueryConfigured } from '@/src/lib/bigquery';
+import { getOverview } from '@/src/lib/bqOverview';
 
 export const dynamic = 'force-dynamic';
 
@@ -325,6 +327,42 @@ export async function GET(request: NextRequest) {
       currentParams = { date_from: dateFrom, date_to: dateTo };
     } else {
       currentParams = buildCurrentParams(tf, todayStr, yesterdayStr);
+    }
+
+    // BigQuery path: Windsor syncs data into per-client BigQuery tables and
+    // the dashboard queries those — no Windsor REST quirks (row limits,
+    // report-mixing restrictions, preset mismatches).
+    if (isBigQueryConfigured() && !debug) {
+      const overview = await getOverview(currentParams.date_from, currentParams.date_to);
+
+      let bqPrior = null;
+      let bqPriorLabel = '';
+      if (withCompare) {
+        if (isCustom && dateFrom && dateTo) {
+          const days = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1;
+          const priorTo = addDays(dateFrom, -1);
+          const priorFrom = addDays(dateFrom, -days);
+          const p = await getOverview(priorFrom, priorTo);
+          bqPrior = p.metrics;
+          bqPriorLabel = `${priorFrom} – ${priorTo}`;
+        } else {
+          const prior = buildPriorParams(tf, todayStr, yesterdayStr);
+          const p = await getOverview(prior.params.date_from, prior.params.date_to);
+          bqPrior = p.metrics;
+          bqPriorLabel = prior.label;
+        }
+      }
+
+      return NextResponse.json({
+        source: 'bigquery_live',
+        timeframe: tf,
+        dateFrom: dateFrom || null,
+        dateTo: dateTo || null,
+        revenueSource: overview.revenueSource,
+        metrics: overview.metrics,
+        revenueData: overview.revenueData,
+        ...(bqPrior ? { priorPeriod: bqPrior, priorLabel: bqPriorLabel } : {}),
+      });
     }
 
     if (debug) {

@@ -135,7 +135,7 @@ export default function OverviewContent() {
 
   const merColor = metrics.mer >= MER_GOAL ? '#22c55e' : '#ef4444';
   const merLabel = metrics.mer >= MER_GOAL ? '✓ Above Goal' : '✗ Below Goal';
-  const isLive = liveSource === 'windsor_live';
+  const isLive = liveSource === 'windsor_live' || liveSource === 'bigquery_live';
 
   return (
     <div>
