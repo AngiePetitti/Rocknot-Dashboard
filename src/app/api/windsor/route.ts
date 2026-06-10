@@ -332,7 +332,10 @@ export async function GET(request: NextRequest) {
     // BigQuery path: Windsor syncs data into per-client BigQuery tables and
     // the dashboard queries those — no Windsor REST quirks (row limits,
     // report-mixing restrictions, preset mismatches).
-    if (isBigQueryConfigured() && !debug) {
+    // "Today" is the exception: BigQuery only updates when Windsor's scheduled
+    // sync runs, so the live view goes straight to the Windsor API instead.
+    const includesToday = tfRaw === 'today' || (isCustom && dateTo >= todayStr);
+    if (isBigQueryConfigured() && !debug && !includesToday) {
       const overview = await getOverview(currentParams.date_from, currentParams.date_to);
 
       let bqPrior = null;

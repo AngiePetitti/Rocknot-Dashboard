@@ -192,8 +192,10 @@ export async function GET(request: NextRequest) {
   const debug = searchParams.get('debug') === 'true';
 
   // Prefer BigQuery; if it fails (e.g. a column not yet synced by Windsor)
-  // fall through to the Windsor REST API below.
-  if (isBigQueryConfigured() && !debug) {
+  // fall through to the Windsor REST API below. "Today" always uses the
+  // Windsor API since BigQuery only refreshes on Windsor's sync schedule.
+  const includesToday = tfRaw === 'today' || params.date_to >= todayStr;
+  if (isBigQueryConfigured() && !debug && !includesToday) {
     try {
       const { platforms, dailySpend } = await getAdsOverview(params.date_from, params.date_to);
       return NextResponse.json({ source: 'bigquery_live', platforms, dailySpend });
