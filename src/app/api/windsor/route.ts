@@ -79,7 +79,9 @@ interface WindsorRow {
   order_count?: number | string;
   order_current_total_price?: number | string;
   order_subtotal_price?: number | string;
-  customer_is_returning?: number | string | boolean;
+  order_total_price?: number | string;
+  order_gross_sales?: number | string;
+  order_net_sales?: number | string;
   [key: string]: string | number | boolean | undefined;
 }
 
@@ -134,7 +136,7 @@ function aggregateRows(rows: WindsorRow[]) {
     const isShopify = src.includes('shopify');
 
     if (isShopify) {
-      const rev = Number(row.order_current_total_price || row.order_subtotal_price || row.revenue || 0);
+      const rev = Number(row.order_total_price || row.order_current_total_price || row.order_subtotal_price || row.order_gross_sales || row.order_net_sales || row.revenue || 0);
       byDate[date].shopifyRevenue += rev;
       byDate[date].orders += Math.round(Number(row.order_count || 0));
     } else {
@@ -208,8 +210,10 @@ function aggregateRows(rows: WindsorRow[]) {
 // Ad platform fields
 const META_FIELDS = ['date', 'source', 'spend', 'impressions', 'clicks', 'ctr', 'purchase_roas', 'conversions'].join(',');
 const GOOGLE_FIELDS = ['date', 'source', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value'].join(',');
-// Shopify fields via Windsor /all endpoint
-const SHOPIFY_FIELDS = ['date', 'source', 'order_count', 'order_current_total_price', 'order_subtotal_price', 'customer_is_returning'].join(',');
+// Shopify fields via Windsor /all endpoint — order-level fields only.
+// Do not mix with Customer-endpoint fields (e.g. customer_is_returning) —
+// per Windsor support, mixing reports in one query nulls out order fields.
+const SHOPIFY_FIELDS = ['date', 'source', 'order_count', 'order_current_total_price', 'order_subtotal_price', 'order_total_price', 'order_gross_sales', 'order_net_sales'].join(',');
 
 async function fetchFromWindsor(endpoint: string, fields: string, params: Record<string, string>): Promise<{ rows: WindsorRow[]; error?: string; rowCount: number }> {
   try {
@@ -281,11 +285,8 @@ export async function GET(request: NextRequest) {
       const DISCOVERY_FIELDS = [
         'date', 'source',
         'order_count', 'order_current_total_price', 'order_subtotal_price',
-        'total_price', 'subtotal_price', 'price', 'revenue',
-        'line_item_price', 'line_item_total_price', 'line_items_price',
-        'order_total', 'order_total_price', 'gross_sales', 'net_sales',
-        'sale_amount', 'total_sales', 'order_value',
-        'customer_is_returning', 'order_id',
+        'order_total_price', 'order_gross_sales', 'order_net_sales',
+        'order_customer_id', 'order_id',
       ].join(',');
 
       const [meta, google, shopifyAll] = await Promise.all([
@@ -299,7 +300,7 @@ export async function GET(request: NextRequest) {
       const nonNullFields: Record<string, number> = {};
       for (const row of shopifyRows.slice(0, 100)) {
         for (const [k, v] of Object.entries(row)) {
-          if (v !== null && v !== undefined && v !== '' && v !== false && k !== 'source' && k !== 'date' && k !== 'customer_is_returning') {
+          if (v !== null && v !== undefined && v !== '' && v !== false && k !== 'source' && k !== 'date') {
             nonNullFields[k] = (nonNullFields[k] || 0) + 1;
           }
         }
