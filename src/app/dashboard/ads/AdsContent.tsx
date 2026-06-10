@@ -52,6 +52,8 @@ interface CreativeRow {
   costPerConversion?: number;
 }
 
+type AdSortKey = 'name' | 'platform' | 'spend' | 'roas' | 'ctr' | 'conversions' | 'costPerConversion' | 'clicks';
+
 function formatDate(dateStr: string) {
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -68,6 +70,7 @@ export default function AdsContent() {
   const [dailySpend, setDailySpend] = useState<DaySpend[]>([]);
   const [creatives, setCreatives] = useState<CreativeRow[]>([]);
   const [status, setStatus] = useState<'loading' | 'live' | 'error'>('loading');
+  const [adSort, setAdSort] = useState<{ key: AdSortKey; dir: 'asc' | 'desc' }>({ key: 'spend', dir: 'desc' });
 
   useEffect(() => {
     setStatus('loading');
@@ -92,6 +95,14 @@ export default function AdsContent() {
   const totalRevenue = platforms.reduce((s, p) => s + p.revenue, 0);
   const blendedROAS = totalSpend > 0 ? totalRevenue / totalSpend : 0;
   const bestPlatform = platforms.length > 0 ? platforms.reduce((b, p) => p.roas > b.roas ? p : b) : null;
+
+  const sortedCreatives = [...creatives].sort((a, b) => {
+    const dir = adSort.dir === 'desc' ? -1 : 1;
+    if (adSort.key === 'name' || adSort.key === 'platform') {
+      return a[adSort.key].localeCompare(b[adSort.key]) * dir;
+    }
+    return ((a[adSort.key] ?? 0) - (b[adSort.key] ?? 0)) * dir;
+  });
 
   const subtitle = tfRaw === 'custom' && dateFrom && dateTo
     ? `Ad Performance · ${dateFrom} → ${dateTo}`
@@ -283,13 +294,33 @@ export default function AdsContent() {
                 <table className="w-full text-sm min-w-[700px]">
                   <thead>
                     <tr className="border-b border-gray-100">
-                      {['Ad Name', 'Platform', 'Spend', 'ROAS', 'CTR', 'Conversions', 'Cost / Conv', 'Clicks', ''].map(h => (
-                        <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4 whitespace-nowrap">{h}</th>
+                      {([
+                        { key: 'name', label: 'Ad Name' },
+                        { key: 'platform', label: 'Platform' },
+                        { key: 'spend', label: 'Spend' },
+                        { key: 'roas', label: 'ROAS' },
+                        { key: 'ctr', label: 'CTR' },
+                        { key: 'conversions', label: 'Conversions' },
+                        { key: 'costPerConversion', label: 'Cost / Conv' },
+                        { key: 'clicks', label: 'Clicks' },
+                      ] as { key: AdSortKey; label: string }[]).map(h => (
+                        <th key={h.key} className="text-left pb-2 pr-4 whitespace-nowrap">
+                          <button
+                            onClick={() => setAdSort(s => ({ key: h.key, dir: s.key === h.key && s.dir === 'desc' ? 'asc' : 'desc' }))}
+                            className={`text-xs font-semibold uppercase transition-colors ${
+                              adSort.key === h.key ? 'text-purple-600' : 'text-gray-400 hover:text-gray-600'
+                            }`}
+                          >
+                            {h.label}
+                            {adSort.key === h.key && <span className="ml-1">{adSort.dir === 'desc' ? '↓' : '↑'}</span>}
+                          </button>
+                        </th>
                       ))}
+                      <th className="pb-2" />
                     </tr>
                   </thead>
                   <tbody>
-                    {creatives.map(ad => (
+                    {sortedCreatives.map(ad => (
                       <tr key={`${ad.platform}-${ad.id}`} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                         <td className="py-3 pr-4 max-w-[220px]">
                           <span className="font-medium text-gray-800 line-clamp-1 block">{ad.name}</span>
