@@ -304,7 +304,7 @@ export default function AdsContent() {
                         { key: 'costPerConversion', label: 'Cost / Conv' },
                         { key: 'clicks', label: 'Clicks' },
                       ] as { key: AdSortKey; label: string }[]).map(h => (
-                        <th key={h.key} className="text-left pb-2 pr-4 whitespace-nowrap">
+                        <th key={h.key} className={`pb-2 px-3 whitespace-nowrap w-px ${h.key === 'name' ? 'text-left pl-0' : 'text-right'}`}>
                           <button
                             onClick={() => setAdSort(s => ({ key: h.key, dir: s.key === h.key && s.dir === 'desc' ? 'asc' : 'desc' }))}
                             className={`text-xs font-semibold uppercase transition-colors ${
@@ -316,28 +316,28 @@ export default function AdsContent() {
                           </button>
                         </th>
                       ))}
-                      <th className="pb-2" />
+                      <th className="pb-2 w-px" />
                     </tr>
                   </thead>
                   <tbody>
                     {sortedCreatives.map(ad => (
                       <tr key={`${ad.platform}-${ad.id}`} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                        <td className="py-3 pr-4 max-w-[220px]">
+                        <td className="py-2.5 pr-3">
                           <span className="font-medium text-gray-800 line-clamp-1 block">{ad.name}</span>
                           {ad.campaign && <span className="text-[10px] text-gray-400 line-clamp-1 block">{ad.campaign}</span>}
                         </td>
-                        <td className="py-3 pr-4"><PlatformBadge platform={ad.platform} /></td>
-                        <td className="py-3 pr-4 text-gray-600">{formatCurrency(ad.spend)}</td>
-                        <td className="py-3 pr-4">
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap"><PlatformBadge platform={ad.platform} /></td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap text-gray-600">{formatCurrency(ad.spend)}</td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap">
                           <span className="font-bold" style={{ color: ad.roas >= 3.5 ? '#22c55e' : '#ef4444' }}>
                             {formatROAS(ad.roas)}
                           </span>
                         </td>
-                        <td className="py-3 pr-4 text-gray-600">{formatPercent(ad.ctr)}</td>
-                        <td className="py-3 pr-4 text-gray-600">{(ad.conversions ?? 0).toLocaleString()}</td>
-                        <td className="py-3 pr-4 text-gray-600">{ad.costPerConversion ? formatCurrency(ad.costPerConversion) : '—'}</td>
-                        <td className="py-3 pr-4 text-gray-600">{ad.clicks.toLocaleString()}</td>
-                        <td className="py-3">
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap text-gray-600">{formatPercent(ad.ctr)}</td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap text-gray-600">{(ad.conversions ?? 0).toLocaleString()}</td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap text-gray-600">{ad.costPerConversion ? formatCurrency(ad.costPerConversion) : '—'}</td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap text-gray-600">{ad.clicks.toLocaleString()}</td>
+                        <td className="py-2.5 pl-3 whitespace-nowrap">
                           {ad.adUrl && (
                             <a href={ad.adUrl} target="_blank" rel="noopener noreferrer"
                               className="text-xs font-semibold text-purple-500 hover:text-purple-700">
