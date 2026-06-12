@@ -220,14 +220,14 @@ export async function GET(request: NextRequest) {
   const params = buildDateParams(tfRaw);
 
   try {
-    const [metaResult, tiktokResult, metaThumbs, tiktokThumbs, metaVideos, tiktokVideos] = await Promise.all([
+    const [metaResult, tiktokResult, metaThumbs, tiktokThumbs, tiktokVideos] = await Promise.all([
       fetchCreatives('facebook', params),
       fetchCreatives('tiktok', params),
       fetchWindsorAdUrls('facebook', params, ['thumbnail_url', 'image_url']),
       fetchWindsorAdUrls('tiktok', params, ['video_thumbnail_url']),
-      // Playable video sources — separate isolated calls so an unsupported
-      // field can't take the thumbnails (or anything else) down with it.
-      fetchWindsorAdUrls('facebook', params, ['video_url']),
+      // Playable video sources. Only TikTok: Windsor's facebook connector is
+      // Insights-based and has no video source field (verified Jun 2026) —
+      // Meta playback would need the Graph API ad-preview embed + valid token.
       fetchWindsorAdUrls('tiktok', params, ['video_url']),
     ]);
 
@@ -247,7 +247,6 @@ export async function GET(request: NextRequest) {
     const tiktokCreatives = aggregateCreatives(tiktokResult.rows, 'TikTok');
     for (const c of metaCreatives) {
       c.thumbnailUrl = metaThumbs.urls[c.id] || null;
-      c.videoUrl = metaVideos.urls[c.id] || null;
     }
     for (const c of tiktokCreatives) {
       c.thumbnailUrl = tiktokThumbs.urls[c.id] || null;
@@ -260,9 +259,9 @@ export async function GET(request: NextRequest) {
       source: 'windsor_live',
       metaActId,
       thumbnailsFound: Object.keys(metaThumbs.urls).length + Object.keys(tiktokThumbs.urls).length,
-      videosFound: Object.keys(metaVideos.urls).length + Object.keys(tiktokVideos.urls).length,
+      videosFound: Object.keys(tiktokVideos.urls).length,
       thumbnailError: metaThumbs.error || tiktokThumbs.error,
-      videoError: metaVideos.error || tiktokVideos.error,
+      videoError: tiktokVideos.error,
       creatives,
     }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {
