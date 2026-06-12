@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { cacheHeaders } from '@/src/lib/cacheHeaders';
 
 export const dynamic = 'force-dynamic';
 
@@ -110,7 +111,7 @@ export async function GET(request: NextRequest) {
       p.percentOfTotal = totalRevenue > 0 ? Math.round((p.revenue / totalRevenue) * 1000) / 10 : 0;
     }
 
-    return NextResponse.json({ source: 'shopify_live', products, totalRevenue, totalUnits });
+    return NextResponse.json({ source: 'shopify_live', products, totalRevenue, totalUnits }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {
     return NextResponse.json({ source: 'error', error: String(err), products: [], totalRevenue: 0, totalUnits: 0 });
   }

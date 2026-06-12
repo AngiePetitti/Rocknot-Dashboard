@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { cacheHeaders } from '@/src/lib/cacheHeaders';
 
 export const dynamic = 'force-dynamic';
 
@@ -174,7 +175,7 @@ export async function GET(request: NextRequest) {
   const debug = searchParams.get('debug') === 'true';
 
   if (!WINDSOR_API_KEY) {
-    return NextResponse.json({ source: 'mock', creatives: [] });
+    return NextResponse.json({ source: 'error', error: 'Windsor API key not configured', creatives: [] });
   }
 
   const params = buildDateParams(tfRaw);
@@ -202,7 +203,7 @@ export async function GET(request: NextRequest) {
       ...aggregateCreatives(tiktokResult.rows, 'TikTok'),
     ].sort((a, b) => b.spend - a.spend);
 
-    return NextResponse.json({ source: 'windsor_live', metaActId, creatives });
+    return NextResponse.json({ source: 'windsor_live', metaActId, creatives }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {
     return NextResponse.json({
       source: 'error',

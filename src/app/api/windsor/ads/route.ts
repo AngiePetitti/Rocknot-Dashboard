@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getAdsOverview } from '@/src/lib/bqAds';
 import { fetchMetaToday } from '@/src/lib/metaLive';
+import { cacheHeaders } from '@/src/lib/cacheHeaders';
 
 export const dynamic = 'force-dynamic';
 
@@ -199,7 +200,7 @@ export async function GET(request: NextRequest) {
   if (isBigQueryConfigured() && !debug && !includesToday) {
     try {
       const { platforms, dailySpend } = await getAdsOverview(params.date_from, params.date_to);
-      return NextResponse.json({ source: 'bigquery_live', platforms, dailySpend });
+      return NextResponse.json({ source: 'bigquery_live', platforms, dailySpend }, { headers: cacheHeaders(false) });
     } catch {
       // fall through to Windsor REST
     }
@@ -253,7 +254,7 @@ export async function GET(request: NextRequest) {
 
     const dailySpend = buildDailySpend(metaDaily, googleDaily, tiktokDaily);
 
-    return NextResponse.json({ source: 'windsor_live', platforms, dailySpend });
+    return NextResponse.json({ source: 'windsor_live', platforms, dailySpend }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {
     return NextResponse.json({ source: 'error', error: String(err), platforms: [], dailySpend: [] });
   }

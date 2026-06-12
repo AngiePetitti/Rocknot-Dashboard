@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getOverview } from '@/src/lib/bqOverview';
 import { getAdsOverview } from '@/src/lib/bqAds';
+import { cacheHeaders } from '@/src/lib/cacheHeaders';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest) {
   const dateTo = searchParams.get('date_to') || '';
 
   if (!isBigQueryConfigured()) {
-    return NextResponse.json({ source: 'mock', attribution: [] });
+    return NextResponse.json({ source: 'error', error: 'BigQuery not configured', attribution: [] });
   }
 
   try {
@@ -90,7 +91,7 @@ export async function GET(request: NextRequest) {
       a.percentage = Math.round((a.revenue / grandTotal) * 1000) / 10;
     }
 
-    return NextResponse.json({ source: 'bigquery_live', totalRevenue, attribution });
+    return NextResponse.json({ source: 'bigquery_live', totalRevenue, attribution }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {
     return NextResponse.json({ source: 'error', error: String(err), attribution: [] });
   }

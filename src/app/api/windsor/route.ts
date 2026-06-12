@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getMetricsForTimeframe, getRevenueForTimeframe } from '@/src/lib/mockData';
 import { Timeframe } from '@/src/lib/mockData';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getOverview } from '@/src/lib/bqOverview';
 import { fetchMetaToday } from '@/src/lib/metaLive';
+import { cacheHeaders } from '@/src/lib/cacheHeaders';
 
 export const dynamic = 'force-dynamic';
 
@@ -316,7 +316,7 @@ export async function GET(request: NextRequest) {
   const debug = searchParams.get('debug') === 'true';
 
   if (!WINDSOR_API_KEY) {
-    return NextResponse.json({ source: 'mock', timeframe: tf, metrics: getMetricsForTimeframe(tf), revenueData: getRevenueForTimeframe(tf) });
+    return NextResponse.json({ source: 'error', error: 'Windsor API key not configured', timeframe: tf, metrics: null, revenueData: [] });
   }
 
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
@@ -366,7 +366,7 @@ export async function GET(request: NextRequest) {
         metrics: overview.metrics,
         revenueData: overview.revenueData,
         ...(bqPrior ? { priorPeriod: bqPrior, priorLabel: bqPriorLabel } : {}),
-      });
+      }, { headers: cacheHeaders(false) });
     }
 
     if (debug) {
@@ -514,15 +514,15 @@ export async function GET(request: NextRequest) {
       revenueData: current.revenueData,
       ...(latestAvailableDate ? { dataLag: true, latestAvailableDate } : {}),
       ...(priorPeriod ? { priorPeriod, priorLabel } : {}),
-    });
+    }, { headers: cacheHeaders(includesToday) });
 
   } catch (err) {
     return NextResponse.json({
-      source: 'mock_fallback',
+      source: 'error',
       error: err instanceof Error ? err.message : 'Unknown error',
       timeframe: tf,
-      metrics: getMetricsForTimeframe(isCustom ? '30d' : tf),
-      revenueData: getRevenueForTimeframe(isCustom ? '30d' : tf),
+      metrics: null,
+      revenueData: [],
     });
   }
 }

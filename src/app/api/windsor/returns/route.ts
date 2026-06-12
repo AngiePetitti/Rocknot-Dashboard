@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { cacheHeaders } from '@/src/lib/cacheHeaders';
 
 export const dynamic = 'force-dynamic';
 
@@ -137,7 +138,7 @@ export async function GET(request: NextRequest) {
       returnRate,
       trend: trendData,
       topReturnedProducts,
-    });
+    }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {
     return NextResponse.json({
       source: 'error',
