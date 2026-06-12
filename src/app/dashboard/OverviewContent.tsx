@@ -318,7 +318,6 @@ export default function OverviewContent() {
           subtitle={`${metrics.totalOrders} orders`}
           accentColor="#c4b5fd"
           comparison={priorPeriod ? { current: metrics.totalRevenue, prior: priorPeriod.totalRevenue } : undefined}
-          trend={!priorPeriod ? { value: 'vs prior period', positive: true } : undefined}
         />
         <MetricCard
           title="Total Ad Spend"

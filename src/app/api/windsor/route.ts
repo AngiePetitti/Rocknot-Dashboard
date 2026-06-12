@@ -55,10 +55,12 @@ function buildPriorParams(tf: Timeframe, todayStr: string, yesterdayStr: string)
     return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
   }
   if (tf === 'ytd') {
-    const year = Number(todayStr.split('-')[0]) - 1;
-    const from = `${year}-01-01`;
-    const to = `${year}-12-31`;
-    return { params: { date_from: from, date_to: to }, label: `${year}` };
+    // Same-period-last-year, not the full prior year — YTD through June must
+    // compare against last year through the same June date.
+    const [y, m, d] = yesterdayStr.split('-');
+    const from = `${Number(y) - 1}-01-01`;
+    const to = `${Number(y) - 1}-${m}-${m === '02' && d === '29' ? '28' : d}`;
+    return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
   }
   if (tf === 'last_month') {
     const [y, m] = todayStr.split('-').map(Number);
