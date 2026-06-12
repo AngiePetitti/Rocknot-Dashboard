@@ -1,8 +1,19 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { customerMetrics, cohortData, repeatCustomerProducts } from '@/src/lib/mockData';
+import { useEffect, useState } from 'react';
+import { CustomerMetrics, CohortData } from '@/src/lib/mockData';
 import { formatCurrency, formatPercent } from '@/src/lib/utils';
+
+const EMPTY_METRICS: CustomerMetrics = {
+  repeatPurchaserRate: 0,
+  avgLTV: 0,
+  firstOrderAvg: 0,
+  secondOrderAvg: 0,
+  thirdPlusOrderAvg: 0,
+  totalCustomers: 0,
+  repeatCustomers: 0,
+};
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import MetricCard from '@/src/components/ui/MetricCard';
@@ -22,6 +33,31 @@ import {
 export default function CustomersContent() {
   const searchParams = useSearchParams();
 
+  const [customerMetrics, setCustomerMetrics] = useState<CustomerMetrics>(EMPTY_METRICS);
+  const [cohortData, setCohortData] = useState<CohortData[]>([]);
+  const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
+
+  useEffect(() => {
+    fetch('/api/windsor/customers')
+      .then(r => r.json())
+      .then(data => {
+        if (data.source === 'bigquery_live' && data.customerMetrics) {
+          setCustomerMetrics(data.customerMetrics);
+          setCohortData(data.cohortData || []);
+          setStatus('ok');
+        } else {
+          setCustomerMetrics(EMPTY_METRICS);
+          setCohortData([]);
+          setStatus('error');
+        }
+      })
+      .catch(() => {
+        setCustomerMetrics(EMPTY_METRICS);
+        setCohortData([]);
+        setStatus('error');
+      });
+  }, []);
+
   const buybackData = [
     { order: '1st Order', avg: customerMetrics.firstOrderAvg, fill: '#c4b5fd' },
     { order: '2nd Order', avg: customerMetrics.secondOrderAvg, fill: '#f9a8d4' },
@@ -34,6 +70,13 @@ export default function CustomersContent() {
         <TimeframeSelector />
       </Header>
 
+      {status === 'error' && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-red-700">
+          <span>⚠️</span>
+          <span>Customer data is unavailable — BigQuery query failed or hasn&apos;t synced yet.</span>
+        </div>
+      )}
+
       {/* Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <MetricCard
@@ -41,7 +84,6 @@ export default function CustomersContent() {
           value={formatPercent(customerMetrics.repeatPurchaserRate)}
           subtitle={`${customerMetrics.repeatCustomers.toLocaleString()} of ${customerMetrics.totalCustomers.toLocaleString()} customers`}
           accentColor="#c4b5fd"
-          trend={{ value: '2.1% vs prior period', positive: true }}
         />
         <MetricCard
           title="Avg Lifetime Value"
@@ -63,8 +105,8 @@ export default function CustomersContent() {
         />
       </div>
 
-      {/* Buyback Analysis + Repeat Products */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+      {/* Buyback Analysis */}
+      <div className="grid grid-cols-1 gap-5 mb-6">
         <Card accentColor="#f9a8d4">
           <h2 className="text-sm font-bold text-gray-700 mb-1">Buyback Analysis</h2>
           <p className="text-xs text-gray-400 mb-4">
@@ -103,42 +145,12 @@ export default function CustomersContent() {
             <p className="text-xs text-violet-700 font-medium">
               💡 Repeat customers spend{' '}
               <strong>
-                {formatPercent(((customerMetrics.thirdPlusOrderAvg - customerMetrics.firstOrderAvg) / customerMetrics.firstOrderAvg) * 100, 0)} more
+                {customerMetrics.firstOrderAvg > 0
+                  ? formatPercent(((customerMetrics.thirdPlusOrderAvg - customerMetrics.firstOrderAvg) / customerMetrics.firstOrderAvg) * 100, 0)
+                  : '—'} more
               </strong>{' '}
               by their 3rd order. Focus retention campaigns on 2nd purchase conversion.
             </p>
-          </div>
-        </Card>
-
-        <Card accentColor="#86efac">
-          <h2 className="text-sm font-bold text-gray-700 mb-1">What Repeat Customers Buy Most</h2>
-          <p className="text-xs text-gray-400 mb-4">Products purchased by repeat buyers</p>
-          <div className="space-y-3">
-            {repeatCustomerProducts.map((product, i) => (
-              <div key={product.name} className="flex items-center gap-3">
-                <span className="text-xs font-bold text-gray-400 w-4">{i + 1}</span>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-gray-700">{product.name}</span>
-                    <span className="text-xs font-semibold text-gray-500">
-                      {product.purchaseCount} purchases
-                    </span>
-                  </div>
-                  <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{
-                        width: `${product.pct}%`,
-                        backgroundColor: ['#c4b5fd', '#f9a8d4', '#fde68a', '#86efac', '#93c5fd'][i],
-                      }}
-                    />
-                  </div>
-                </div>
-                <span className="text-xs font-bold text-gray-600 w-10 text-right">
-                  {formatPercent(product.pct)}
-                </span>
-              </div>
-            ))}
           </div>
         </Card>
       </div>
@@ -176,7 +188,9 @@ export default function CustomersContent() {
               <p className="text-2xl font-bold text-gray-800">{formatCurrency(tier.ltv)}</p>
               <p className="text-xs text-gray-400 mt-1">
                 {tier.count.toLocaleString()} customers ·{' '}
-                {formatPercent((tier.count / customerMetrics.totalCustomers) * 100)} of base
+                {customerMetrics.totalCustomers > 0
+                  ? formatPercent((tier.count / customerMetrics.totalCustomers) * 100)
+                  : '—'} of base
               </p>
             </div>
           ))}

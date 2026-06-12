@@ -1,7 +1,8 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { Timeframe, getAttributionForTimeframe, getMetricsForTimeframe } from '@/src/lib/mockData';
+import { useEffect, useState } from 'react';
+import { Timeframe, AttributionData } from '@/src/lib/mockData';
 import { formatCurrency, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
@@ -35,14 +36,45 @@ const renderLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: an
 
 export default function AttributionContent() {
   const searchParams = useSearchParams();
-  const tf = (searchParams.get('tf') || '30d') as Timeframe;
+  const tfRaw = searchParams.get('tf') || '30d';
+  const tf = (tfRaw === 'custom' ? '30d' : tfRaw) as Timeframe;
+  const dateFrom = searchParams.get('date_from') || '';
+  const dateTo = searchParams.get('date_to') || '';
 
-  const attribution = getAttributionForTimeframe(tf);
-  const metrics = getMetricsForTimeframe(tf);
-  const totalRevenue = metrics.totalRevenue;
+  const [attribution, setAttribution] = useState<AttributionData[]>([]);
+  const [totalRevenue, setTotalRevenue] = useState<number>(0);
+  const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
 
-  const topPlatform = attribution.reduce((a, b) => a.revenue > b.revenue ? a : b);
-  const paidRevenue = attribution.filter(a => !['Direct / Shopify', 'Email / SMS'].includes(a.platform))
+  useEffect(() => {
+    setStatus('loading');
+    const params = new URLSearchParams({ tf: tfRaw });
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+
+    fetch(`/api/windsor/attribution?${params}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.source === 'bigquery_live') {
+          setAttribution(data.attribution || []);
+          setTotalRevenue(data.totalRevenue ?? 0);
+          setStatus('ok');
+        } else {
+          setAttribution([]);
+          setTotalRevenue(0);
+          setStatus('error');
+        }
+      })
+      .catch(() => {
+        setAttribution([]);
+        setTotalRevenue(0);
+        setStatus('error');
+      });
+  }, [tfRaw, dateFrom, dateTo]);
+
+  const topPlatform = attribution.length
+    ? attribution.reduce((a, b) => a.revenue > b.revenue ? a : b)
+    : { platform: '—', revenue: 0, orders: 0, percentage: 0, color: '#94a3b8' };
+  const paidRevenue = attribution.filter(a => !['Direct / Shopify', 'Direct / Other', 'Email / SMS'].includes(a.platform))
     .reduce((s, a) => s + a.revenue, 0);
 
   const barData = attribution.map(a => ({
@@ -78,16 +110,29 @@ export default function AttributionContent() {
         <MetricCard
           title="Paid Channel Revenue"
           value={formatCurrency(paidRevenue)}
-          subtitle={formatPercent((paidRevenue / totalRevenue) * 100) + ' of total'}
+          subtitle={(totalRevenue > 0 ? formatPercent((paidRevenue / totalRevenue) * 100) : '—') + ' of total'}
           accentColor="#fde68a"
         />
         <MetricCard
           title="Organic / Direct"
           value={formatCurrency(totalRevenue - paidRevenue)}
-          subtitle={formatPercent(((totalRevenue - paidRevenue) / totalRevenue) * 100) + ' of total'}
+          subtitle={(totalRevenue > 0 ? formatPercent(((totalRevenue - paidRevenue) / totalRevenue) * 100) : '—') + ' of total'}
           accentColor="#86efac"
         />
       </div>
+
+      {status === 'error' && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-red-700">
+          <span>⚠️</span>
+          <span>Attribution data is unavailable — BigQuery query failed or hasn&apos;t synced yet.</span>
+        </div>
+      )}
+      {status === 'ok' && attribution.length === 0 && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-amber-700">
+          <span>⚠️</span>
+          <span>No attribution data for this period.</span>
+        </div>
+      )}
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
