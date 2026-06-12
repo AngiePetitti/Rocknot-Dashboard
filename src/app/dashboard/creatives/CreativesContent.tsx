@@ -38,6 +38,7 @@ export default function CreativesContent() {
   const [status, setStatus] = useState<'loading' | 'live' | 'empty' | 'error'>('loading');
   const [sortKey, setSortKey] = useState<SortKey>('spend');
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>('all');
+  const [selected, setSelected] = useState<CreativePerformance | null>(null);
 
   useEffect(() => {
     setStatus('loading');
@@ -58,6 +59,11 @@ export default function CreativesContent() {
   const totalSpend = filtered.reduce((s, c) => s + c.spend, 0);
   const totalRevenue = filtered.reduce((s, c) => s + c.revenue, 0);
   const blendedROAS = totalSpend > 0 ? totalRevenue / totalSpend : 0;
+  const totalImpressions = filtered.reduce((s, c) => s + c.impressions, 0);
+  const totalClicks = filtered.reduce((s, c) => s + c.clicks, 0);
+  const totalConversions = filtered.reduce((s, c) => s + (c.conversions ?? 0), 0);
+  const avgCTR = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
+  const avgCostPerConv = totalConversions > 0 ? totalSpend / totalConversions : 0;
 
   return (
     <div>
@@ -154,7 +160,12 @@ export default function CreativesContent() {
       {status === 'live' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {filtered.map(creative => (
-            <Card key={`${creative.platform}-${creative.id}`} className="overflow-hidden !p-0">
+            <div
+              key={`${creative.platform}-${creative.id}`}
+              onClick={() => setSelected(creative)}
+              className="cursor-pointer transition-transform hover:-translate-y-0.5"
+            >
+            <Card className="overflow-hidden !p-0">
               {/* Thumbnail / placeholder */}
               <div className="aspect-video bg-gray-100 flex items-center justify-center overflow-hidden relative">
                 {creative.thumbnailUrl ? (
@@ -180,17 +191,10 @@ export default function CreativesContent() {
                 <div className="absolute top-2 left-2">
                   <PlatformBadge platform={creative.platform} />
                 </div>
-                {/* Link to ad manager */}
-                {creative.adUrl && (
-                  <a
-                    href={creative.adUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="absolute top-2 right-2 bg-white/90 hover:bg-white text-gray-600 hover:text-gray-900 rounded-lg px-2 py-1 text-xs font-semibold shadow-sm transition-colors flex items-center gap-1"
-                  >
-                    View ↗
-                  </a>
-                )}
+                {/* Open in-dashboard breakdown */}
+                <span className="absolute top-2 right-2 bg-white/90 text-gray-600 rounded-lg px-2 py-1 text-xs font-semibold shadow-sm flex items-center gap-1">
+                  Analyze
+                </span>
               </div>
 
               <div className="p-4">
@@ -244,7 +248,122 @@ export default function CreativesContent() {
                 </div>
               </div>
             </Card>
+            </div>
           ))}
+        </div>
+      )}
+
+      {/* Creative detail modal */}
+      {selected && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setSelected(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Preview */}
+            <div className="aspect-video bg-gray-100 flex items-center justify-center overflow-hidden relative rounded-t-2xl">
+              {selected.thumbnailUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={selected.thumbnailUrl} alt={selected.name} className="w-full h-full object-contain bg-gray-900" />
+              ) : (
+                <span className="text-gray-300 text-5xl">🎨</span>
+              )}
+              <div className="absolute top-3 left-3">
+                <PlatformBadge platform={selected.platform} />
+              </div>
+              <button
+                onClick={() => setSelected(null)}
+                className="absolute top-3 right-3 bg-white/90 hover:bg-white text-gray-600 hover:text-gray-900 rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold shadow-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6">
+              <p className="text-base font-bold text-gray-800 leading-snug mb-1">{selected.name}</p>
+              {selected.campaign && (
+                <p className="text-xs text-gray-400 mb-0.5">
+                  <span className="font-semibold text-gray-500">Campaign:</span> {selected.campaign}
+                </p>
+              )}
+              {selected.adset && (
+                <p className="text-xs text-gray-400 mb-4">
+                  <span className="font-semibold text-gray-500">Ad Set:</span> {selected.adset}
+                </p>
+              )}
+
+              {/* Headline metrics vs account average for the period */}
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                {([
+                  { label: 'ROAS', value: formatROAS(selected.roas), avg: blendedROAS, actual: selected.roas, higherIsBetter: true },
+                  { label: 'CTR', value: formatPercent(selected.ctr), avg: avgCTR, actual: selected.ctr, higherIsBetter: true },
+                  { label: 'Cost / Conv', value: selected.costPerConversion ? formatCurrency(selected.costPerConversion) : '—', avg: avgCostPerConv, actual: selected.costPerConversion ?? 0, higherIsBetter: false },
+                ]).map(m => {
+                  const hasComparison = m.avg > 0 && m.actual > 0;
+                  const deltaPct = hasComparison ? ((m.actual - m.avg) / m.avg) * 100 : 0;
+                  const good = m.higherIsBetter ? deltaPct >= 0 : deltaPct <= 0;
+                  return (
+                    <div key={m.label} className="bg-gray-50 rounded-xl p-3">
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">{m.label}</p>
+                      <p className="text-lg font-bold text-gray-800">{m.value}</p>
+                      {hasComparison && (
+                        <p className="text-[11px] font-semibold" style={{ color: good ? '#22c55e' : '#ef4444' }}>
+                          {deltaPct >= 0 ? '▲' : '▼'} {Math.abs(deltaPct).toFixed(0)}% vs avg
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Full breakdown */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3 text-xs mb-5">
+                <div>
+                  <p className="text-gray-400 uppercase font-semibold mb-0.5">Spend</p>
+                  <p className="text-gray-700 font-bold text-sm">{formatCurrency(selected.spend)}</p>
+                  <p className="text-[10px] text-gray-400">{totalSpend > 0 ? `${((selected.spend / totalSpend) * 100).toFixed(1)}% of total` : ''}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 uppercase font-semibold mb-0.5">Revenue</p>
+                  <p className="text-gray-700 font-bold text-sm">{formatCurrency(selected.revenue)}</p>
+                  <p className="text-[10px] text-gray-400">{totalRevenue > 0 ? `${((selected.revenue / totalRevenue) * 100).toFixed(1)}% of total` : ''}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 uppercase font-semibold mb-0.5">Conversions</p>
+                  <p className="text-gray-700 font-bold text-sm">{(selected.conversions ?? 0).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 uppercase font-semibold mb-0.5">Impressions</p>
+                  <p className="text-gray-700 font-bold text-sm">{selected.impressions.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 uppercase font-semibold mb-0.5">Clicks</p>
+                  <p className="text-gray-700 font-bold text-sm">{selected.clicks.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 uppercase font-semibold mb-0.5">CPC</p>
+                  <p className="text-gray-700 font-bold text-sm">{selected.clicks > 0 ? formatCurrency(selected.spend / selected.clicks) : '—'}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+                <p className="text-[11px] text-gray-400">Period: {TIMEFRAME_LABELS[tf] || tf}</p>
+                {selected.adUrl && (
+                  <a
+                    href={selected.adUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold text-purple-600 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 rounded-lg px-3 py-2 transition-colors"
+                  >
+                    Open in {selected.platform === 'Meta' ? 'Ads Manager' : 'TikTok Ads'} ↗
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
