@@ -5,7 +5,6 @@ export const dynamic = 'force-dynamic';
 
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 const META_AD_ACCOUNT_ID = process.env.META_AD_ACCOUNT_ID || '165092079662754';
-const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr);
@@ -170,41 +169,38 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
   }));
 }
 
-// Windsor doesn't expose creative image/thumbnail fields, so pull them
-// directly from the Meta Graph API using the ad ids we already have.
-// Batched via the multi-id endpoint, 50 ids per request (Graph API limit).
-async function fetchMetaThumbnails(adIds: string[]): Promise<{ thumbnails: Record<string, string>; error: string | null }> {
-  if (!META_ACCESS_TOKEN) return { thumbnails: {}, error: 'META_ACCESS_TOKEN not configured' };
-  if (adIds.length === 0) return { thumbnails: {}, error: null };
-
-  const thumbnails: Record<string, string> = {};
-  let error: string | null = null;
-  const chunkSize = 50;
-
-  for (let i = 0; i < adIds.length; i += chunkSize) {
-    const chunk = adIds.slice(i, i + chunkSize);
-    const qs = new URLSearchParams({
-      ids: chunk.join(','),
-      fields: 'creative{thumbnail_url,image_url}',
-      access_token: META_ACCESS_TOKEN,
-    });
-    try {
-      const res = await fetch(`https://graph.facebook.com/v19.0/?${qs}`, { cache: 'no-store' });
-      const json = await res.json();
-      if (json.error) {
-        error = error || String(json.error.message || 'Graph API error');
-        continue;
-      }
-      for (const id of chunk) {
-        const url = json[id]?.creative?.thumbnail_url || json[id]?.creative?.image_url;
-        if (url) thumbnails[id] = url;
-      }
-    } catch (e) {
-      error = error || String(e);
+// Creative previews come from Windsor too (its Meta connection is already
+// authorized, unlike our direct Meta token which keeps expiring). This is a
+// separate request from the performance fetch so an unsupported field here
+// can never break the main data.
+async function fetchWindsorThumbnails(
+  source: 'facebook' | 'tiktok',
+  params: Record<string, string>
+): Promise<{ thumbnails: Record<string, string>; error: string | null }> {
+  const fieldSets: Record<typeof source, string> = {
+    facebook: 'ad_id,thumbnail_url,image_url',
+    tiktok: 'ad_id,video_thumbnail_url',
+  };
+  const qs = new URLSearchParams({
+    api_key: WINDSOR_API_KEY!,
+    fields: fieldSets[source],
+    _renderer: 'json',
+    ...params,
+  });
+  try {
+    const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store' });
+    const json = await res.json();
+    if (json.error) return { thumbnails: {}, error: String(json.error) };
+    const thumbnails: Record<string, string> = {};
+    for (const row of (json.data || []) as Array<Record<string, unknown>>) {
+      const id = String(row.ad_id || '');
+      const url = String(row.thumbnail_url || row.image_url || row.video_thumbnail_url || '');
+      if (id && url && url !== 'null' && url.startsWith('http')) thumbnails[id] = url;
     }
+    return { thumbnails, error: null };
+  } catch (e) {
+    return { thumbnails: {}, error: String(e) };
   }
-
-  return { thumbnails, error };
 }
 
 export async function GET(request: NextRequest) {
@@ -219,9 +215,11 @@ export async function GET(request: NextRequest) {
   const params = buildDateParams(tfRaw);
 
   try {
-    const [metaResult, tiktokResult] = await Promise.all([
+    const [metaResult, tiktokResult, metaThumbs, tiktokThumbs] = await Promise.all([
       fetchCreatives('facebook', params),
       fetchCreatives('tiktok', params),
+      fetchWindsorThumbnails('facebook', params),
+      fetchWindsorThumbnails('tiktok', params),
     ]);
 
     const metaActId = `act_${META_AD_ACCOUNT_ID.replace('act_', '')}`;
@@ -237,21 +235,17 @@ export async function GET(request: NextRequest) {
     }
 
     const metaCreatives = aggregateCreatives(metaResult.rows, 'Meta');
-    const { thumbnails, error: thumbnailError } = await fetchMetaThumbnails(metaCreatives.map(c => c.id));
-    for (const c of metaCreatives) {
-      c.thumbnailUrl = thumbnails[c.id] || null;
-    }
+    const tiktokCreatives = aggregateCreatives(tiktokResult.rows, 'TikTok');
+    for (const c of metaCreatives) c.thumbnailUrl = metaThumbs.thumbnails[c.id] || null;
+    for (const c of tiktokCreatives) c.thumbnailUrl = tiktokThumbs.thumbnails[c.id] || null;
 
-    const creatives = [
-      ...metaCreatives,
-      ...aggregateCreatives(tiktokResult.rows, 'TikTok'),
-    ].sort((a, b) => b.spend - a.spend);
+    const creatives = [...metaCreatives, ...tiktokCreatives].sort((a, b) => b.spend - a.spend);
 
     return NextResponse.json({
       source: 'windsor_live',
       metaActId,
-      thumbnailsFound: Object.keys(thumbnails).length,
-      thumbnailError,
+      thumbnailsFound: Object.keys(metaThumbs.thumbnails).length + Object.keys(tiktokThumbs.thumbnails).length,
+      thumbnailError: metaThumbs.error || tiktokThumbs.error,
       creatives,
     }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {
