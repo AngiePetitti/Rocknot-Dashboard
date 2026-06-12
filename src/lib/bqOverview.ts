@@ -20,6 +20,8 @@ export interface OverviewResult {
     tiktokRevenue: number;
     newCustomers: number;
     returningCustomers: number;
+    newCustomerRevenue: number;
+    returningCustomerRevenue: number;
     pctNew: number;
     pctReturning: number;
   };
@@ -39,6 +41,8 @@ interface DailyRow {
   tiktok_revenue: number | null;
   new_customers: number | null;
   returning_customers: number | null;
+  new_customer_revenue: number | null;
+  returning_customer_revenue: number | null;
 }
 
 function dateStr(d: DailyRow['date']): string {
@@ -62,7 +66,11 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     customers AS (
       SELECT DATE(o.date) AS d,
              COUNTIF(LOWER(IFNULL(CAST(c.customer_is_returning AS STRING), 'false')) NOT IN ('true', '1')) AS new_customers,
-             COUNTIF(LOWER(IFNULL(CAST(c.customer_is_returning AS STRING), 'false')) IN ('true', '1')) AS returning_customers
+             COUNTIF(LOWER(IFNULL(CAST(c.customer_is_returning AS STRING), 'false')) IN ('true', '1')) AS returning_customers,
+             SUM(IF(LOWER(IFNULL(CAST(c.customer_is_returning AS STRING), 'false')) NOT IN ('true', '1'),
+                    CAST(o.order_total_price AS FLOAT64), 0)) AS new_customer_revenue,
+             SUM(IF(LOWER(IFNULL(CAST(c.customer_is_returning AS STRING), 'false')) IN ('true', '1'),
+                    CAST(o.order_total_price AS FLOAT64), 0)) AS returning_customer_revenue
       FROM \`${ds}.shopify_orders\` o
       LEFT JOIN \`${ds}.shopify_customers\` c
         ON CAST(o.order_customer_id AS STRING) = CAST(c.customer_id AS STRING)
@@ -107,7 +115,9 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       IFNULL(google.revenue, 0)               AS google_revenue,
       IFNULL(tiktok.revenue, 0)               AS tiktok_revenue,
       IFNULL(customers.new_customers, 0)      AS new_customers,
-      IFNULL(customers.returning_customers, 0) AS returning_customers
+      IFNULL(customers.returning_customers, 0) AS returning_customers,
+      IFNULL(customers.new_customer_revenue, 0)       AS new_customer_revenue,
+      IFNULL(customers.returning_customer_revenue, 0) AS returning_customer_revenue
     FROM days
     LEFT JOIN shopify   ON shopify.d = days.d
     LEFT JOIN customers ON customers.d = days.d
@@ -123,6 +133,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   let metaSpend = 0, googleSpend = 0, tiktokSpend = 0;
   let metaRevenue = 0, googleRevenue = 0, tiktokRevenue = 0;
   let newCustomers = 0, returningCustomers = 0;
+  let newCustomerRevenue = 0, returningCustomerRevenue = 0;
 
   const revenueData = rows.map(r => {
     const revenue = Number(r.revenue || 0);
@@ -139,6 +150,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     tiktokRevenue += Number(r.tiktok_revenue || 0);
     newCustomers += Number(r.new_customers || 0);
     returningCustomers += Number(r.returning_customers || 0);
+    newCustomerRevenue += Number(r.new_customer_revenue || 0);
+    returningCustomerRevenue += Number(r.returning_customer_revenue || 0);
 
     return { date: dateStr(r.date), revenue: Math.round(revenue), orders, adSpend: Math.round(adSpend) };
   });
@@ -162,6 +175,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       tiktokRevenue: Math.round(tiktokRevenue),
       newCustomers,
       returningCustomers,
+      newCustomerRevenue: Math.round(newCustomerRevenue),
+      returningCustomerRevenue: Math.round(returningCustomerRevenue),
       pctNew: totalCust > 0 ? Math.round((newCustomers / totalCust) * 1000) / 10 : 0,
       pctReturning: totalCust > 0 ? Math.round((returningCustomers / totalCust) * 1000) / 10 : 0,
     },

@@ -358,14 +358,14 @@ export default function OverviewContent() {
                 value={String(metrics.newCustomers)}
                 subtitle={`${metrics.pctNew?.toFixed(1) ?? 0}% of orders`}
                 accentColor="#a5f3fc"
-                trend={{ value: formatCurrency(metrics.newCustomerRevenue ?? 0) + ' revenue', positive: true }}
+                trend={metrics.newCustomerRevenue ? { value: formatCurrency(metrics.newCustomerRevenue) + ' revenue', positive: true } : undefined}
               />
               <MetricCard
                 title="Returning Customers"
                 value={String(metrics.returningCustomers ?? 0)}
                 subtitle={`${metrics.pctReturning?.toFixed(1) ?? 0}% of orders`}
                 accentColor="#bbf7d0"
-                trend={{ value: formatCurrency(metrics.returningCustomerRevenue ?? 0) + ' revenue', positive: true }}
+                trend={metrics.returningCustomerRevenue ? { value: formatCurrency(metrics.returningCustomerRevenue) + ' revenue', positive: true } : undefined}
               />
             </>
           )}
