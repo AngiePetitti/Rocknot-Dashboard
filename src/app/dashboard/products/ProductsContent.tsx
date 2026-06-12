@@ -1,7 +1,7 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { Timeframe, getTopProductsForTimeframe, getMetricsForTimeframe } from '@/src/lib/mockData';
+import { useEffect, useState } from 'react';
 import { formatCurrency, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
@@ -20,27 +20,81 @@ import {
 
 const PRODUCT_COLORS = ['#c4b5fd', '#f9a8d4', '#fde68a', '#86efac', '#93c5fd', '#fdba74', '#ddd6fe', '#fce7f3', '#fef9c3', '#dcfce7'];
 
+interface ProductSales {
+  id: string;
+  name: string;
+  category: string;
+  unitsSold: number;
+  revenue: number;
+  percentOfTotal: number;
+}
+
 export default function ProductsContent() {
   const searchParams = useSearchParams();
-  const tf = (searchParams.get('tf') || '30d') as Timeframe;
+  const tfRaw = searchParams.get('tf') || '30d';
+  const dateFrom = searchParams.get('date_from') || '';
+  const dateTo = searchParams.get('date_to') || '';
 
-  const products = getTopProductsForTimeframe(tf);
-  const metrics = getMetricsForTimeframe(tf);
-  const totalRevenue = metrics.totalRevenue;
-  const totalUnits = products.reduce((s, p) => s + p.unitsSold, 0);
+  const [products, setProducts] = useState<ProductSales[]>([]);
+  const [totalRevenue, setTotalRevenue] = useState<number>(0);
+  const [totalUnits, setTotalUnits] = useState<number>(0);
+  const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
+
+  useEffect(() => {
+    setStatus('loading');
+    const params = new URLSearchParams({ tf: tfRaw });
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+
+    fetch(`/api/windsor/products?${params}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.source === 'shopify_live') {
+          setProducts(data.products || []);
+          setTotalRevenue(data.totalRevenue ?? 0);
+          setTotalUnits(data.totalUnits ?? 0);
+          setStatus('ok');
+        } else {
+          setProducts([]);
+          setTotalRevenue(0);
+          setTotalUnits(0);
+          setStatus('error');
+        }
+      })
+      .catch(() => {
+        setProducts([]);
+        setTotalRevenue(0);
+        setTotalUnits(0);
+        setStatus('error');
+      });
+  }, [tfRaw, dateFrom, dateTo]);
+
   const topProduct = products[0];
 
   const barData = products.slice(0, 8).map((p, i) => ({
-    name: p.name.replace('Rocknot ', '').replace('Music Lover ', '').slice(0, 20),
+    name: p.name.slice(0, 20),
     revenue: p.revenue,
     color: PRODUCT_COLORS[i],
   }));
 
   return (
     <div>
-      <Header title="Top Products" subtitle={`Sales performance · ${TIMEFRAME_LABELS[tf] || tf}`}>
+      <Header title="Top Products" subtitle={`Sales performance · ${TIMEFRAME_LABELS[tfRaw] || tfRaw}`}>
         <TimeframeSelector />
       </Header>
+
+      {status === 'error' && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-red-700">
+          <span>⚠️</span>
+          <span>Product sales data is unavailable — Shopify query failed or hasn&apos;t synced yet.</span>
+        </div>
+      )}
+      {status === 'ok' && products.length === 0 && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-amber-700">
+          <span>⚠️</span>
+          <span>No product sales for this period.</span>
+        </div>
+      )}
 
       {/* Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -58,13 +112,13 @@ export default function ProductsContent() {
         />
         <MetricCard
           title="Top Product"
-          value={topProduct.name.split(' ').slice(0, 2).join(' ')}
-          subtitle={formatCurrency(topProduct.revenue)}
+          value={topProduct ? topProduct.name.split(' ').slice(0, 2).join(' ') : '—'}
+          subtitle={topProduct ? formatCurrency(topProduct.revenue) : '—'}
           accentColor="#c4b5fd"
         />
         <MetricCard
           title="Top Product Share"
-          value={formatPercent(topProduct.percentOfTotal)}
+          value={topProduct ? formatPercent(topProduct.percentOfTotal) : '—'}
           subtitle="Of total revenue"
           accentColor="#f9a8d4"
         />
@@ -127,7 +181,7 @@ export default function ProductsContent() {
                   <td className="py-3 pr-4">
                     <span
                       className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white"
-                      style={{ backgroundColor: PRODUCT_COLORS[i] || '#e2e8f0', color: i < 3 ? '#374151' : '#374151' }}
+                      style={{ backgroundColor: PRODUCT_COLORS[i] || '#e2e8f0', color: '#374151' }}
                     >
                       {i + 1}
                     </span>
@@ -147,7 +201,7 @@ export default function ProductsContent() {
                           className="h-full rounded-full"
                           style={{
                             width: `${product.percentOfTotal}%`,
-                            backgroundColor: PRODUCT_COLORS[i],
+                            backgroundColor: PRODUCT_COLORS[i] || '#e2e8f0',
                           }}
                         />
                       </div>
