@@ -73,8 +73,15 @@ export async function tableExists(table: string): Promise<boolean> {
 
 // SQL fragment excluding cancelled orders, matching Shopify's reports (which
 // never count cancelled orders). Empty string until the shopify_order_status
-// sync exists. The inner IS NOT NULL guard on order_id keeps NOT IN sane.
+// sync exists. Windsor writes order_cancelled_at as a string and uses text
+// like "null"/"" (not SQL NULL) for non-cancelled orders, so only treat rows
+// as cancelled when the value looks like an actual timestamp. The inner
+// IS NOT NULL guard on order_id keeps NOT IN sane.
 export async function cancelledOrderClause(): Promise<string> {
   if (!(await tableExists('shopify_order_status'))) return '';
-  return ` AND order_id NOT IN (SELECT order_id FROM \`${getDataset()}.shopify_order_status\` WHERE order_cancelled_at IS NOT NULL AND order_id IS NOT NULL)`;
+  return ` AND order_id NOT IN (
+    SELECT order_id FROM \`${getDataset()}.shopify_order_status\`
+    WHERE order_id IS NOT NULL
+      AND LOWER(TRIM(IFNULL(CAST(order_cancelled_at AS STRING), ''))) NOT IN ('', 'null', 'none', 'nan', '0', 'false')
+  )`;
 }
