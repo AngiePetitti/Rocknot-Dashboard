@@ -173,10 +173,12 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
 // Windsor doesn't expose creative image/thumbnail fields, so pull them
 // directly from the Meta Graph API using the ad ids we already have.
 // Batched via the multi-id endpoint, 50 ids per request (Graph API limit).
-async function fetchMetaThumbnails(adIds: string[]): Promise<Record<string, string>> {
-  if (!META_ACCESS_TOKEN || adIds.length === 0) return {};
+async function fetchMetaThumbnails(adIds: string[]): Promise<{ thumbnails: Record<string, string>; error: string | null }> {
+  if (!META_ACCESS_TOKEN) return { thumbnails: {}, error: 'META_ACCESS_TOKEN not configured' };
+  if (adIds.length === 0) return { thumbnails: {}, error: null };
 
   const thumbnails: Record<string, string> = {};
+  let error: string | null = null;
   const chunkSize = 50;
 
   for (let i = 0; i < adIds.length; i += chunkSize) {
@@ -189,17 +191,20 @@ async function fetchMetaThumbnails(adIds: string[]): Promise<Record<string, stri
     try {
       const res = await fetch(`https://graph.facebook.com/v19.0/?${qs}`, { cache: 'no-store' });
       const json = await res.json();
-      if (json.error) continue;
+      if (json.error) {
+        error = error || String(json.error.message || 'Graph API error');
+        continue;
+      }
       for (const id of chunk) {
         const url = json[id]?.creative?.thumbnail_url || json[id]?.creative?.image_url;
         if (url) thumbnails[id] = url;
       }
-    } catch {
-      // Skip thumbnails for this chunk; placeholders will be shown instead.
+    } catch (e) {
+      error = error || String(e);
     }
   }
 
-  return thumbnails;
+  return { thumbnails, error };
 }
 
 export async function GET(request: NextRequest) {
@@ -232,7 +237,7 @@ export async function GET(request: NextRequest) {
     }
 
     const metaCreatives = aggregateCreatives(metaResult.rows, 'Meta');
-    const thumbnails = await fetchMetaThumbnails(metaCreatives.map(c => c.id));
+    const { thumbnails, error: thumbnailError } = await fetchMetaThumbnails(metaCreatives.map(c => c.id));
     for (const c of metaCreatives) {
       c.thumbnailUrl = thumbnails[c.id] || null;
     }
@@ -242,7 +247,13 @@ export async function GET(request: NextRequest) {
       ...aggregateCreatives(tiktokResult.rows, 'TikTok'),
     ].sort((a, b) => b.spend - a.spend);
 
-    return NextResponse.json({ source: 'windsor_live', metaActId, creatives }, { headers: cacheHeaders(tfRaw === 'today') });
+    return NextResponse.json({
+      source: 'windsor_live',
+      metaActId,
+      thumbnailsFound: Object.keys(thumbnails).length,
+      thumbnailError,
+      creatives,
+    }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {
     return NextResponse.json({
       source: 'error',
