@@ -44,6 +44,15 @@ Create these five tasks, all pointed at the `rocknot` dataset, scheduled
 | Facebook Ads     | date, spend, impressions, clicks, purchase_roas, conversions                   | `facebook_ads`      |
 | Google Ads       | date, spend, impressions, clicks, conversions, conversion_value                | `google_ads`        |
 | TikTok Ads       | date, spend, impressions, clicks, conversions, conversion_value                | `tiktok_ads`        |
+| Shopify (Order Status) | date, order_id, order_cancelled_at                                       | `shopify_order_status` |
+
+The `shopify_order_status` task is optional but recommended: it lets the
+dashboard exclude cancelled orders (as Shopify's own reports do), which
+corrects order counts and AOV. Set its "Columns to Match" to `order_id` and
+backfill as far as the plan allows. The dashboard detects this table
+automatically and applies the filter once it exists — adding new fields later
+should follow this same pattern: a small dedicated task per field group,
+rather than editing existing tasks.
 
 **Important:** the table names must match exactly — the dashboard queries
 these names. Orders and Customers must be two separate tasks (Windsor cannot

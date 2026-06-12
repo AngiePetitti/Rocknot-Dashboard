@@ -1,4 +1,4 @@
-import { runQuery, getDataset } from '@/src/lib/bigquery';
+import { runQuery, getDataset, cancelledOrderClause } from '@/src/lib/bigquery';
 
 // Overview metrics computed from the Windsor→BigQuery tables.
 // Returns the same shape as the Windsor REST aggregation so the
@@ -54,6 +54,7 @@ function dateStr(d: DailyRow['date']): string {
 
 export async function getOverview(dateFrom: string, dateTo: string): Promise<OverviewResult> {
   const ds = getDataset();
+  const noCancelled = await cancelledOrderClause();
 
   // One daily rollup joining all sources. Column names verified against the
   // actual Windsor-created BigQuery schema (rocknot dataset, Jun 2026).
@@ -63,7 +64,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
              SUM(COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64))) AS revenue,
              COUNT(DISTINCT order_id) AS orders
       FROM \`${ds}.shopify_orders\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to
+      WHERE DATE(date) BETWEEN @date_from AND @date_to${noCancelled}
       GROUP BY d
     ),
     meta AS (
@@ -120,7 +121,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     WITH firsts AS (
       SELECT CAST(order_customer_id AS STRING) AS cid, MIN(DATE(date)) AS first_order
       FROM \`${ds}.shopify_orders\`
-      WHERE order_customer_id IS NOT NULL
+      WHERE order_customer_id IS NOT NULL${noCancelled}
       GROUP BY cid
     ),
     period AS (
@@ -128,7 +129,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
              SUM(COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.shopify_orders\`
       WHERE DATE(date) BETWEEN @date_from AND @date_to
-        AND order_customer_id IS NOT NULL
+        AND order_customer_id IS NOT NULL${noCancelled}
       GROUP BY cid
     )
     SELECT

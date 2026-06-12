@@ -47,3 +47,34 @@ export async function runQuery<T = Record<string, unknown>>(
   const [rows] = await bq.query({ query: sql, params });
   return rows as T[];
 }
+
+// Optional tables (e.g. shopify_order_status) may not exist until their
+// Windsor task first runs. Once seen, a table never disappears in practice,
+// so cache positives for the life of the instance; negatives are re-checked
+// each call so new tables get picked up without a redeploy.
+const tableCache: Record<string, boolean> = {};
+
+export async function tableExists(table: string): Promise<boolean> {
+  if (tableCache[table]) return true;
+  try {
+    const rows = await runQuery<{ ok: number }>(
+      `SELECT 1 AS ok FROM \`${getDataset()}\`.INFORMATION_SCHEMA.TABLES WHERE table_name = @t LIMIT 1`,
+      { t: table }
+    );
+    if (rows.length > 0) {
+      tableCache[table] = true;
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+// SQL fragment excluding cancelled orders, matching Shopify's reports (which
+// never count cancelled orders). Empty string until the shopify_order_status
+// sync exists. The inner IS NOT NULL guard on order_id keeps NOT IN sane.
+export async function cancelledOrderClause(): Promise<string> {
+  if (!(await tableExists('shopify_order_status'))) return '';
+  return ` AND order_id NOT IN (SELECT order_id FROM \`${getDataset()}.shopify_order_status\` WHERE order_cancelled_at IS NOT NULL AND order_id IS NOT NULL)`;
+}
