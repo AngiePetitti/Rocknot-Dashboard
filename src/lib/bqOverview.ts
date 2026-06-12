@@ -39,6 +39,9 @@ interface DailyRow {
   meta_revenue: number | null;
   google_revenue: number | null;
   tiktok_revenue: number | null;
+}
+
+interface CustomerRow {
   new_customers: number | null;
   returning_customers: number | null;
   new_customer_revenue: number | null;
@@ -61,20 +64,6 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
              COUNT(DISTINCT order_id) AS orders
       FROM \`${ds}.shopify_orders\`
       WHERE DATE(date) BETWEEN @date_from AND @date_to
-      GROUP BY d
-    ),
-    customers AS (
-      SELECT DATE(o.date) AS d,
-             COUNTIF(LOWER(IFNULL(CAST(c.customer_is_returning AS STRING), 'false')) NOT IN ('true', '1')) AS new_customers,
-             COUNTIF(LOWER(IFNULL(CAST(c.customer_is_returning AS STRING), 'false')) IN ('true', '1')) AS returning_customers,
-             SUM(IF(LOWER(IFNULL(CAST(c.customer_is_returning AS STRING), 'false')) NOT IN ('true', '1'),
-                    CAST(o.order_total_price AS FLOAT64), 0)) AS new_customer_revenue,
-             SUM(IF(LOWER(IFNULL(CAST(c.customer_is_returning AS STRING), 'false')) IN ('true', '1'),
-                    CAST(o.order_total_price AS FLOAT64), 0)) AS returning_customer_revenue
-      FROM \`${ds}.shopify_orders\` o
-      LEFT JOIN \`${ds}.shopify_customers\` c
-        ON CAST(o.order_customer_id AS STRING) = CAST(c.customer_id AS STRING)
-      WHERE DATE(o.date) BETWEEN @date_from AND @date_to
       GROUP BY d
     ),
     meta AS (
@@ -113,27 +102,58 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       IFNULL(tiktok.spend, 0)                 AS tiktok_spend,
       IFNULL(meta.revenue, 0)                 AS meta_revenue,
       IFNULL(google.revenue, 0)               AS google_revenue,
-      IFNULL(tiktok.revenue, 0)               AS tiktok_revenue,
-      IFNULL(customers.new_customers, 0)      AS new_customers,
-      IFNULL(customers.returning_customers, 0) AS returning_customers,
-      IFNULL(customers.new_customer_revenue, 0)       AS new_customer_revenue,
-      IFNULL(customers.returning_customer_revenue, 0) AS returning_customer_revenue
+      IFNULL(tiktok.revenue, 0)               AS tiktok_revenue
     FROM days
     LEFT JOIN shopify   ON shopify.d = days.d
-    LEFT JOIN customers ON customers.d = days.d
     LEFT JOIN meta      ON meta.d = days.d
     LEFT JOIN google    ON google.d = days.d
     LEFT JOIN tiktok    ON tiktok.d = days.d
     ORDER BY days.d
   `;
 
-  const rows = await runQuery<DailyRow>(sql, { date_from: dateFrom, date_to: dateTo });
+  // Customer counts match Shopify's definition: distinct customers who ordered
+  // in the period, "returning" when their first-ever order predates it. The
+  // old order-level count (via customer_is_returning, a *current* attribute)
+  // overstated returning share badly. Guest checkouts have no customer id and
+  // are excluded, as in Shopify's report.
+  const customerSql = `
+    WITH firsts AS (
+      SELECT CAST(order_customer_id AS STRING) AS cid, MIN(DATE(date)) AS first_order
+      FROM \`${ds}.shopify_orders\`
+      WHERE order_customer_id IS NOT NULL
+      GROUP BY cid
+    ),
+    period AS (
+      SELECT CAST(order_customer_id AS STRING) AS cid,
+             SUM(COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0)) AS revenue
+      FROM \`${ds}.shopify_orders\`
+      WHERE DATE(date) BETWEEN @date_from AND @date_to
+        AND order_customer_id IS NOT NULL
+      GROUP BY cid
+    )
+    SELECT
+      COUNTIF(f.first_order >= @date_from) AS new_customers,
+      COUNTIF(f.first_order < @date_from)  AS returning_customers,
+      IFNULL(SUM(IF(f.first_order >= @date_from, p.revenue, 0)), 0) AS new_customer_revenue,
+      IFNULL(SUM(IF(f.first_order < @date_from, p.revenue, 0)), 0)  AS returning_customer_revenue
+    FROM period p
+    JOIN firsts f USING (cid)
+  `;
+
+  const [rows, custRows] = await Promise.all([
+    runQuery<DailyRow>(sql, { date_from: dateFrom, date_to: dateTo }),
+    runQuery<CustomerRow>(customerSql, { date_from: dateFrom, date_to: dateTo }),
+  ]);
+  const cust = custRows[0] ?? {
+    new_customers: 0,
+    returning_customers: 0,
+    new_customer_revenue: 0,
+    returning_customer_revenue: 0,
+  };
 
   let totalRevenue = 0, totalOrders = 0;
   let metaSpend = 0, googleSpend = 0, tiktokSpend = 0;
   let metaRevenue = 0, googleRevenue = 0, tiktokRevenue = 0;
-  let newCustomers = 0, returningCustomers = 0;
-  let newCustomerRevenue = 0, returningCustomerRevenue = 0;
 
   const revenueData = rows.map(r => {
     const revenue = Number(r.revenue || 0);
@@ -148,15 +168,15 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     metaRevenue += Number(r.meta_revenue || 0);
     googleRevenue += Number(r.google_revenue || 0);
     tiktokRevenue += Number(r.tiktok_revenue || 0);
-    newCustomers += Number(r.new_customers || 0);
-    returningCustomers += Number(r.returning_customers || 0);
-    newCustomerRevenue += Number(r.new_customer_revenue || 0);
-    returningCustomerRevenue += Number(r.returning_customer_revenue || 0);
 
     return { date: dateStr(r.date), revenue: Math.round(revenue), orders, adSpend: Math.round(adSpend) };
   });
 
   const totalAdSpend = metaSpend + googleSpend + tiktokSpend;
+  const newCustomers = Number(cust.new_customers || 0);
+  const returningCustomers = Number(cust.returning_customers || 0);
+  const newCustomerRevenue = Number(cust.new_customer_revenue || 0);
+  const returningCustomerRevenue = Number(cust.returning_customer_revenue || 0);
   const totalCust = newCustomers + returningCustomers;
 
   return {
