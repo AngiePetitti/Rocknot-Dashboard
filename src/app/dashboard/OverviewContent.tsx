@@ -2,7 +2,7 @@
 
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Timeframe, getMetricsForTimeframe, getRevenueForTimeframe, getPlatformSpendForTimeframe, PlatformSpend, DailyRevenue } from '@/src/lib/mockData';
+import { Timeframe, PlatformSpend, DailyRevenue } from '@/src/lib/mockData';
 import { formatCurrency, formatROAS, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import MetricCard from '@/src/components/ui/MetricCard';
@@ -12,6 +12,15 @@ import RevenueChart from '@/src/components/charts/RevenueChart';
 import SpendDonut from '@/src/components/charts/SpendDonut';
 
 const MER_GOAL = 3.5;
+
+const EMPTY_METRICS: LiveMetrics = {
+  totalRevenue: 0,
+  totalOrders: 0,
+  totalAdSpend: 0,
+  aov: 0,
+  mer: 0,
+  returns: 0,
+};
 
 interface LiveMetrics {
   totalRevenue: number;
@@ -53,13 +62,8 @@ export default function OverviewContent() {
   const dateTo = searchParams.get('date_to') || '';
   const compareOn = searchParams.get('compare') === 'true';
 
-  const staticTf = tf;
-  const staticMetrics = getMetricsForTimeframe(staticTf);
-  const staticRevenueData = getRevenueForTimeframe(staticTf);
-  const platformSpend = getPlatformSpendForTimeframe(staticTf);
-
-  const [metrics, setMetrics] = useState<LiveMetrics>({ ...staticMetrics, returns: 0 });
-  const [revenueData, setRevenueData] = useState<DailyRevenue[]>(staticRevenueData);
+  const [metrics, setMetrics] = useState<LiveMetrics>(EMPTY_METRICS);
+  const [revenueData, setRevenueData] = useState<DailyRevenue[]>([]);
   const [priorPeriod, setPriorPeriod] = useState<PriorPeriod | null>(null);
   const [priorLabel, setPriorLabel] = useState<string>('');
   const [livePlatformSpend, setLivePlatformSpend] = useState<PlatformSpend[] | null>(null);
@@ -93,8 +97,8 @@ export default function OverviewContent() {
   }
 
   useEffect(() => {
-    setMetrics({ returns: 0, ...staticMetrics });
-    setRevenueData(staticRevenueData);
+    setMetrics(EMPTY_METRICS);
+    setRevenueData([]);
     setPriorPeriod(null);
     setLivePlatformSpend(null);
     setDataLag(false);
@@ -112,9 +116,18 @@ export default function OverviewContent() {
     fetch(`/api/windsor?${params}`)
       .then(r => r.json())
       .then(data => {
-        const m = data.metrics ? { returns: 0, ...data.metrics } : { returns: 0, ...staticMetrics };
-        if (data.metrics) setMetrics(m);
-        if (data.revenueData?.length) setRevenueData(data.revenueData);
+        const source = data.source || 'unknown';
+        if (source !== 'windsor_live' && source !== 'bigquery_live') {
+          setMetrics(EMPTY_METRICS);
+          setRevenueData([]);
+          setLivePlatformSpend(null);
+          setLiveSource('error');
+          setLastUpdated(new Date().toLocaleTimeString());
+          return;
+        }
+        const m: LiveMetrics = { returns: 0, ...data.metrics };
+        setMetrics(m);
+        setRevenueData(data.revenueData || []);
         if (data.priorPeriod) { setPriorPeriod(data.priorPeriod); setPriorLabel(data.priorLabel || ''); }
         setLivePlatformSpend(buildLivePlatformSpend(m));
         setDataLag(!!data.dataLag);
@@ -122,13 +135,15 @@ export default function OverviewContent() {
         setShopifyDataLag(!!data.shopifyDataLag);
         setShopifyLatestDate(data.shopifyLatestDate || null);
         setRevenueSource(data.revenueSource || null);
-        setLiveSource(data.source || 'unknown');
+        setLiveSource(source);
         setLastUpdated(new Date().toLocaleTimeString());
       })
       .catch(() => {
+        setMetrics(EMPTY_METRICS);
+        setRevenueData([]);
         setLivePlatformSpend(null);
         setDataLag(false);
-        setLiveSource('mock_fallback');
+        setLiveSource('error');
         setLastUpdated(new Date().toLocaleTimeString());
       });
   }, [tfRaw, dateFrom, dateTo, compareOn]);
@@ -151,14 +166,14 @@ export default function OverviewContent() {
       {/* Live indicator */}
       <div className="flex items-center gap-2 mb-4">
         <span
-          className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-400' : liveSource === 'loading' ? 'bg-yellow-400' : 'bg-gray-300'}`}
+          className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-400' : liveSource === 'loading' ? 'bg-yellow-400' : 'bg-red-400'}`}
         />
         <span className="text-xs text-gray-400">
           {liveSource === 'loading'
             ? 'Loading Windsor data...'
             : isLive
             ? `Live · Windsor.ai · Updated ${lastUpdated}`
-            : `Estimated data · ${lastUpdated}`}
+            : `Data unavailable · ${lastUpdated}`}
         </span>
         <button
           onClick={() => {
@@ -170,22 +185,44 @@ export default function OverviewContent() {
             fetch(`/api/windsor?${p}`)
               .then(r => r.json())
               .then(data => {
-                const m = data.metrics ? { returns: 0, ...data.metrics } : metrics;
-                if (data.metrics) setMetrics(m);
-                if (data.revenueData?.length) setRevenueData(data.revenueData);
+                const source = data.source || 'unknown';
+                if (source !== 'windsor_live' && source !== 'bigquery_live') {
+                  setMetrics(EMPTY_METRICS);
+                  setRevenueData([]);
+                  setLivePlatformSpend(null);
+                  setLiveSource('error');
+                  setLastUpdated(new Date().toLocaleTimeString());
+                  return;
+                }
+                const m: LiveMetrics = { returns: 0, ...data.metrics };
+                setMetrics(m);
+                setRevenueData(data.revenueData || []);
                 if (data.priorPeriod) { setPriorPeriod(data.priorPeriod); setPriorLabel(data.priorLabel || ''); }
                 setLivePlatformSpend(buildLivePlatformSpend(m));
                 setRevenueSource(data.revenueSource || null);
-                setLiveSource(data.source || 'unknown');
+                setLiveSource(source);
                 setLastUpdated(new Date().toLocaleTimeString());
               })
-              .catch(() => setLiveSource('mock_fallback'));
+              .catch(() => {
+                setMetrics(EMPTY_METRICS);
+                setRevenueData([]);
+                setLivePlatformSpend(null);
+                setLiveSource('error');
+                setLastUpdated(new Date().toLocaleTimeString());
+              });
           }}
           className="text-xs text-purple-500 hover:text-purple-700 font-medium ml-1"
         >
           ↻ Refresh
         </button>
       </div>
+
+      {liveSource === 'error' && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-red-700">
+          <span>⚠️</span>
+          <span>Overview data is unavailable — BigQuery query failed or hasn&apos;t synced yet.</span>
+        </div>
+      )}
 
       {/* Data lag notice */}
       {dataLag && latestAvailableDate && (
@@ -365,7 +402,7 @@ export default function OverviewContent() {
           <p className="text-xs text-gray-400 mb-3">
             Total: {formatCurrency(metrics.totalAdSpend)}
           </p>
-          <SpendDonut data={livePlatformSpend ?? platformSpend} />
+          <SpendDonut data={livePlatformSpend ?? []} />
         </Card>
       </div>
 
@@ -385,7 +422,7 @@ export default function OverviewContent() {
               </tr>
             </thead>
             <tbody>
-              {(livePlatformSpend ?? platformSpend).map((p) => (
+              {(livePlatformSpend ?? []).map((p) => (
                 <tr key={p.platform} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                   <td className="py-3 pr-4">
                     <div className="flex items-center gap-2">
