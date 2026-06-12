@@ -322,7 +322,7 @@ export default function OverviewContent() {
         <MetricCard
           title="Total Ad Spend"
           value={formatCurrency(metrics.totalAdSpend)}
-          subtitle={metrics.metaSpend ? `Meta ${formatCurrency(metrics.metaSpend)} · Google ${formatCurrency(metrics.googleSpend ?? 0)}` : 'Meta + Google'}
+          subtitle={metrics.metaSpend ? `Meta ${formatCurrency(metrics.metaSpend)} · Google ${formatCurrency(metrics.googleSpend ?? 0)}${metrics.tiktokSpend ? ` · TikTok ${formatCurrency(metrics.tiktokSpend)}` : ''}` : 'Meta + Google + TikTok'}
           accentColor="#f9a8d4"
           comparison={priorPeriod ? { current: metrics.totalAdSpend, prior: priorPeriod.totalAdSpend } : undefined}
         />
