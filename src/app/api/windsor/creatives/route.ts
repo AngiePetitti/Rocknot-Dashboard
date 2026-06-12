@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic';
 
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 const META_AD_ACCOUNT_ID = process.env.META_AD_ACCOUNT_ID || '165092079662754';
+const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr);
@@ -169,6 +170,38 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
   }));
 }
 
+// Windsor doesn't expose creative image/thumbnail fields, so pull them
+// directly from the Meta Graph API using the ad ids we already have.
+// Batched via the multi-id endpoint, 50 ids per request (Graph API limit).
+async function fetchMetaThumbnails(adIds: string[]): Promise<Record<string, string>> {
+  if (!META_ACCESS_TOKEN || adIds.length === 0) return {};
+
+  const thumbnails: Record<string, string> = {};
+  const chunkSize = 50;
+
+  for (let i = 0; i < adIds.length; i += chunkSize) {
+    const chunk = adIds.slice(i, i + chunkSize);
+    const qs = new URLSearchParams({
+      ids: chunk.join(','),
+      fields: 'creative{thumbnail_url,image_url}',
+      access_token: META_ACCESS_TOKEN,
+    });
+    try {
+      const res = await fetch(`https://graph.facebook.com/v19.0/?${qs}`, { cache: 'no-store' });
+      const json = await res.json();
+      if (json.error) continue;
+      for (const id of chunk) {
+        const url = json[id]?.creative?.thumbnail_url || json[id]?.creative?.image_url;
+        if (url) thumbnails[id] = url;
+      }
+    } catch {
+      // Skip thumbnails for this chunk; placeholders will be shown instead.
+    }
+  }
+
+  return thumbnails;
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const tfRaw = searchParams.get('tf') || '30d';
@@ -198,8 +231,14 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    const metaCreatives = aggregateCreatives(metaResult.rows, 'Meta');
+    const thumbnails = await fetchMetaThumbnails(metaCreatives.map(c => c.id));
+    for (const c of metaCreatives) {
+      c.thumbnailUrl = thumbnails[c.id] || null;
+    }
+
     const creatives = [
-      ...aggregateCreatives(metaResult.rows, 'Meta'),
+      ...metaCreatives,
       ...aggregateCreatives(tiktokResult.rows, 'TikTok'),
     ].sort((a, b) => b.spend - a.spend);
 
