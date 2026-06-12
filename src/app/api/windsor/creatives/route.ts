@@ -57,6 +57,7 @@ export interface CreativePerformance {
   name: string;
   platform: 'Meta' | 'TikTok';
   thumbnailUrl: string | null;
+  videoUrl: string | null;
   adUrl: string | null;
   campaign: string;
   adset: string;
@@ -125,6 +126,7 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
         name: String(row.ad_name || 'Untitled creative'),
         platform,
         thumbnailUrl: null,
+        videoUrl: null,
         adUrl: buildAdUrl(platform, id, accountId),
         campaign: String(row.campaign || ''),
         adset: String(row.adset_name || ''),
@@ -173,33 +175,36 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
 // authorized, unlike our direct Meta token which keeps expiring). This is a
 // separate request from the performance fetch so an unsupported field here
 // can never break the main data.
-async function fetchWindsorThumbnails(
+async function fetchWindsorAdUrls(
   source: 'facebook' | 'tiktok',
-  params: Record<string, string>
-): Promise<{ thumbnails: Record<string, string>; error: string | null }> {
-  const fieldSets: Record<typeof source, string> = {
-    facebook: 'ad_id,thumbnail_url,image_url',
-    tiktok: 'ad_id,video_thumbnail_url',
-  };
+  params: Record<string, string>,
+  fields: string[]
+): Promise<{ urls: Record<string, string>; error: string | null }> {
   const qs = new URLSearchParams({
     api_key: WINDSOR_API_KEY!,
-    fields: fieldSets[source],
+    fields: ['ad_id', ...fields].join(','),
     _renderer: 'json',
     ...params,
   });
   try {
     const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store' });
     const json = await res.json();
-    if (json.error) return { thumbnails: {}, error: String(json.error) };
-    const thumbnails: Record<string, string> = {};
+    if (json.error) return { urls: {}, error: String(json.error) };
+    const urls: Record<string, string> = {};
     for (const row of (json.data || []) as Array<Record<string, unknown>>) {
       const id = String(row.ad_id || '');
-      const url = String(row.thumbnail_url || row.image_url || row.video_thumbnail_url || '');
-      if (id && url && url !== 'null' && url.startsWith('http')) thumbnails[id] = url;
+      if (!id || urls[id]) continue;
+      for (const f of fields) {
+        const url = String(row[f] || '');
+        if (url && url !== 'null' && url.startsWith('http')) {
+          urls[id] = url;
+          break;
+        }
+      }
     }
-    return { thumbnails, error: null };
+    return { urls, error: null };
   } catch (e) {
-    return { thumbnails: {}, error: String(e) };
+    return { urls: {}, error: String(e) };
   }
 }
 
@@ -215,11 +220,15 @@ export async function GET(request: NextRequest) {
   const params = buildDateParams(tfRaw);
 
   try {
-    const [metaResult, tiktokResult, metaThumbs, tiktokThumbs] = await Promise.all([
+    const [metaResult, tiktokResult, metaThumbs, tiktokThumbs, metaVideos, tiktokVideos] = await Promise.all([
       fetchCreatives('facebook', params),
       fetchCreatives('tiktok', params),
-      fetchWindsorThumbnails('facebook', params),
-      fetchWindsorThumbnails('tiktok', params),
+      fetchWindsorAdUrls('facebook', params, ['thumbnail_url', 'image_url']),
+      fetchWindsorAdUrls('tiktok', params, ['video_thumbnail_url']),
+      // Playable video sources — separate isolated calls so an unsupported
+      // field can't take the thumbnails (or anything else) down with it.
+      fetchWindsorAdUrls('facebook', params, ['video_url']),
+      fetchWindsorAdUrls('tiktok', params, ['video_url']),
     ]);
 
     const metaActId = `act_${META_AD_ACCOUNT_ID.replace('act_', '')}`;
@@ -236,16 +245,24 @@ export async function GET(request: NextRequest) {
 
     const metaCreatives = aggregateCreatives(metaResult.rows, 'Meta');
     const tiktokCreatives = aggregateCreatives(tiktokResult.rows, 'TikTok');
-    for (const c of metaCreatives) c.thumbnailUrl = metaThumbs.thumbnails[c.id] || null;
-    for (const c of tiktokCreatives) c.thumbnailUrl = tiktokThumbs.thumbnails[c.id] || null;
+    for (const c of metaCreatives) {
+      c.thumbnailUrl = metaThumbs.urls[c.id] || null;
+      c.videoUrl = metaVideos.urls[c.id] || null;
+    }
+    for (const c of tiktokCreatives) {
+      c.thumbnailUrl = tiktokThumbs.urls[c.id] || null;
+      c.videoUrl = tiktokVideos.urls[c.id] || null;
+    }
 
     const creatives = [...metaCreatives, ...tiktokCreatives].sort((a, b) => b.spend - a.spend);
 
     return NextResponse.json({
       source: 'windsor_live',
       metaActId,
-      thumbnailsFound: Object.keys(metaThumbs.thumbnails).length + Object.keys(tiktokThumbs.thumbnails).length,
+      thumbnailsFound: Object.keys(metaThumbs.urls).length + Object.keys(tiktokThumbs.urls).length,
+      videosFound: Object.keys(metaVideos.urls).length + Object.keys(tiktokVideos.urls).length,
       thumbnailError: metaThumbs.error || tiktokThumbs.error,
+      videoError: metaVideos.error || tiktokVideos.error,
       creatives,
     }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {

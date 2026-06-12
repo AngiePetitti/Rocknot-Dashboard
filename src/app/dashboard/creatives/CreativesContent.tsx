@@ -14,6 +14,7 @@ interface CreativePerformance {
   name: string;
   platform: 'Meta' | 'TikTok';
   thumbnailUrl: string | null;
+  videoUrl: string | null;
   adUrl: string | null;
   campaign: string;
   adset: string;
@@ -265,7 +266,17 @@ export default function CreativesContent() {
           >
             {/* Preview */}
             <div className="aspect-video bg-gray-100 flex items-center justify-center overflow-hidden relative rounded-t-2xl">
-              {selected.thumbnailUrl ? (
+              {selected.videoUrl ? (
+                <video
+                  src={selected.videoUrl}
+                  poster={selected.thumbnailUrl ?? undefined}
+                  controls
+                  autoPlay
+                  muted
+                  playsInline
+                  className="w-full h-full object-contain bg-gray-900"
+                />
+              ) : selected.thumbnailUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={selected.thumbnailUrl} alt={selected.name} className="w-full h-full object-contain bg-gray-900" />
               ) : (
