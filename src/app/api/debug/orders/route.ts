@@ -120,28 +120,33 @@ export async function GET(request: NextRequest) {
       // attribute the order to its placement date (MIN(date)) — this is how
       // Shopify's own "Total sales by date" report behaves (retroactively
       // reflects refunds against the order's original date).
-      [financialsRevenueCandidates] = await runQuery<Record<string, unknown>>(`
-        WITH last_synced AS (
-          SELECT order_id,
-                 MIN(DATE(date)) AS order_date,
-                 (ARRAY_AGG(CAST(order_total_price AS FLOAT64) ORDER BY date DESC LIMIT 1))[OFFSET(0)] AS last_total_price,
-                 (ARRAY_AGG(CAST(order_net_sales AS FLOAT64) ORDER BY date DESC LIMIT 1))[OFFSET(0)] AS last_net_sales,
-                 (ARRAY_AGG(CAST(order_total_price AS FLOAT64) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS first_total_price,
-                 (ARRAY_AGG(CAST(order_net_sales AS FLOAT64) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS first_net_sales
-          FROM \`${ds}.shopify_order_financials\`
-          GROUP BY order_id
-        )
-        SELECT
-          COUNT(*) AS orders,
-          ROUND(SUM(last_total_price), 2) AS sum_last_total_price,
-          ROUND(SUM(last_net_sales), 2) AS sum_last_net_sales,
-          ROUND(SUM(first_total_price), 2) AS sum_first_total_price,
-          ROUND(SUM(first_net_sales), 2) AS sum_first_net_sales,
-          ROUND(SAFE_DIVIDE(SUM(last_total_price), COUNT(*)), 2) AS aov_last_total,
-          ROUND(SAFE_DIVIDE(SUM(last_net_sales), COUNT(*)), 2) AS aov_last_net
-        FROM last_synced
-        WHERE order_date BETWEEN @from AND @to
-      `, { from, to });
+      try {
+        [financialsRevenueCandidates] = await runQuery<Record<string, unknown>>(`
+          WITH last_synced AS (
+            SELECT order_id,
+                   MIN(DATE(date)) AS order_date,
+                   (ARRAY_AGG(CAST(order_total_price AS FLOAT64) ORDER BY date DESC LIMIT 1))[OFFSET(0)] AS last_total_price,
+                   (ARRAY_AGG(CAST(order_net_sales AS FLOAT64) ORDER BY date DESC LIMIT 1))[OFFSET(0)] AS last_net_sales,
+                   (ARRAY_AGG(CAST(order_total_price AS FLOAT64) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS first_total_price,
+                   (ARRAY_AGG(CAST(order_net_sales AS FLOAT64) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS first_net_sales
+            FROM \`${ds}.shopify_order_financials\`
+            WHERE order_id IS NOT NULL
+            GROUP BY order_id
+          )
+          SELECT
+            COUNT(*) AS orders,
+            ROUND(SUM(last_total_price), 2) AS sum_last_total_price,
+            ROUND(SUM(last_net_sales), 2) AS sum_last_net_sales,
+            ROUND(SUM(first_total_price), 2) AS sum_first_total_price,
+            ROUND(SUM(first_net_sales), 2) AS sum_first_net_sales,
+            ROUND(SAFE_DIVIDE(SUM(last_total_price), COUNT(*)), 2) AS aov_last_total,
+            ROUND(SAFE_DIVIDE(SUM(last_net_sales), COUNT(*)), 2) AS aov_last_net
+          FROM last_synced
+          WHERE order_date BETWEEN @from AND @to
+        `, { from, to });
+      } catch (e) {
+        financialsRevenueCandidates = { error: String(e) };
+      }
     }
 
     // What the dashboard actually computes: each order's first-synced
