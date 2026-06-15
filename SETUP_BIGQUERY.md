@@ -46,13 +46,13 @@ Create these five tasks, all pointed at the `rocknot` dataset, scheduled
 | TikTok Ads       | date, spend, impressions, clicks, conversions, conversion_value                | `tiktok_ads`        |
 | Shopify (Order Status) | date, order_id, order_cancelled_at                                       | `shopify_order_status` |
 
-The `shopify_order_status` task is optional but recommended: it lets the
-dashboard exclude cancelled orders (as Shopify's own reports do), which
-corrects order counts and AOV. Set its "Columns to Match" to `order_id` and
-backfill as far as the plan allows. The dashboard detects this table
-automatically and applies the filter once it exists — adding new fields later
-should follow this same pattern: a small dedicated task per field group,
-rather than editing existing tasks.
+The `shopify_order_status` task is optional. The dashboard does not currently
+use it for revenue/order calculations (see "Revenue, orders, AOV and customer
+formulas" below) — excluding cancelled orders moved both the order count and
+revenue total further from Shopify's reported figures, so it's left
+unfiltered. The table is still queried for diagnostics in
+`/api/debug/orders`. Adding new fields later should follow this same pattern:
+a small dedicated task per field group, rather than editing existing tasks.
 
 **Important:** the table names must match exactly — the dashboard queries
 these names. Orders and Customers must be two separate tasks (Windsor cannot
@@ -87,6 +87,52 @@ You can verify it switched: the live indicator data source will be
    with `BQ_DATASET=clientname`
 
 No code changes.
+
+## Revenue, orders, AOV and customer formulas
+
+Windsor syncs `shopify_orders` as **one row per order per sync-relevant
+date**: an original row on the order's placement date, plus an extra row on
+each later date a refund/adjustment was synced. There's no clean "final
+total" column, so the dashboard has to pick a formula and the only way to
+validate it is against Shopify's own Analytics reports for a fixed date
+range (Jan 1 – Jun 15, 2026 was used as the reference range, compared
+against Shopify Admin → Analytics → Reports).
+
+The formulas landed on (all in `dedupedOrdersCte()` in `src/lib/bigquery.ts`,
+used by `bqOverview.ts` and `bqCustomers.ts`):
+
+- **One row per order**, grouped by `order_id` (falling back to a per-row key
+  for the rare null-`order_id` rows so they aren't dropped).
+- **Revenue / order date** = the order's **first-synced** `order_total_price`,
+  attributed to `MIN(date)` across that order's rows. Matches Shopify's
+  Total Sales / Orders within ~0.6%. (Tried and rejected: summing
+  `order_total_price` across all of an order's rows — produces nonsensical
+  negative totals for some orders; excluding cancelled orders via
+  `shopify_order_status` — moved the totals *further* from Shopify's
+  numbers.)
+- **AOV** = total **first-synced `order_net_sales`** ÷ order count (not
+  `order_total_price`). Matches Shopify's reported AOV within ~0.1%, vs
+  ~2.5% off using `order_total_price`.
+- **New vs. returning customers** (Overview cards) replicates Shopify's
+  "New customer sales over time" report: a customer is "new" if their
+  first-ever order (by `MIN(order_date)`, all-time, not just the selected
+  range) falls within the selected range — and their counted revenue is
+  *just that first order*, not all their orders in the range (Shopify's
+  New segment always has Orders == Customers). "Returning" customers'
+  revenue is the sum of all their orders placed within the range. Matches
+  Shopify's New customers/revenue within ~1-2%.
+  - Note: Shopify's separate "Returning customer rate" cohort report uses a
+    *different* definition (lifetime repeat-purchase status, not order
+    timing) and gives a noticeably different split (e.g. 41% vs ~25%
+    returning for the same range). The New customer sales report was chosen
+    because it's the one with a matching revenue breakdown.
+
+**If these numbers ever look wrong again**: don't re-derive the formula from
+scratch. Use `/api/debug/orders?from=YYYY-MM-DD&to=YYYY-MM-DD` (temporary
+diagnostic endpoint) — it computes `dashboard_calculation`, `aov_candidates`,
+and `customer_stats` so they can be diffed against a fresh Shopify report for
+the same range. A ~1-2% gap is expected and is inherent to Windsor's
+duplicate-row sync model; don't chase an exact match.
 
 ## Troubleshooting
 
