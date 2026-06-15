@@ -63,6 +63,10 @@ export async function GET(request: NextRequest) {
     }
 
     let financialsStats: Record<string, unknown> | null = null;
+    let financialsColumns: Record<string, unknown>[] = [];
+    let financialsCoverage: Record<string, unknown> | null = null;
+    let financialsSample: Record<string, unknown>[] = [];
+    let financialsDupes: Record<string, unknown>[] = [];
     if (await tableExists('shopify_order_financials')) {
       [financialsStats] = await runQuery<Record<string, unknown>>(`
         SELECT
@@ -73,6 +77,41 @@ export async function GET(request: NextRequest) {
           MAX(DATE(date)) AS latest_date
         FROM \`${ds}.shopify_order_financials\`
         WHERE DATE(date) BETWEEN @from AND @to
+      `, { from, to });
+
+      financialsColumns = await runQuery<Record<string, unknown>>(`
+        SELECT column_name, data_type
+        FROM \`${ds}\`.INFORMATION_SCHEMA.COLUMNS
+        WHERE table_name = 'shopify_order_financials'
+        ORDER BY ordinal_position
+      `);
+
+      [financialsCoverage] = await runQuery<Record<string, unknown>>(`
+        SELECT
+          COUNT(*) AS total_rows,
+          COUNT(DISTINCT order_id) AS distinct_orders,
+          MIN(DATE(date)) AS earliest_date,
+          MAX(DATE(date)) AS latest_date
+        FROM \`${ds}.shopify_order_financials\`
+      `);
+
+      financialsSample = await runQuery<Record<string, unknown>>(`
+        SELECT *
+        FROM \`${ds}.shopify_order_financials\`
+        WHERE DATE(date) BETWEEN @from AND @to
+        LIMIT 3
+      `, { from, to });
+
+      financialsDupes = await runQuery<Record<string, unknown>>(`
+        SELECT order_id, COUNT(*) AS copies,
+               ARRAY_AGG(CAST(order_total_price AS STRING) LIMIT 3) AS total_prices,
+               ARRAY_AGG(FORMAT_DATE('%Y-%m-%d', DATE(date)) LIMIT 3) AS dates
+        FROM \`${ds}.shopify_order_financials\`
+        WHERE DATE(date) BETWEEN @from AND @to
+        GROUP BY order_id
+        HAVING COUNT(*) > 1
+        ORDER BY copies DESC
+        LIMIT 5
       `, { from, to });
     }
 
@@ -198,6 +237,10 @@ export async function GET(request: NextRequest) {
       deduplicated: dedupStats,
       shopify_order_status: statusStats,
       shopify_order_financials: financialsStats,
+      shopify_order_financials_columns: financialsColumns,
+      shopify_order_financials_coverage: financialsCoverage,
+      shopify_order_financials_sample: financialsSample,
+      shopify_order_financials_dupes: financialsDupes,
       dashboard_calculation: dashboardStats,
       aov_candidates: aovCandidates,
       customer_stats: customerStats,
