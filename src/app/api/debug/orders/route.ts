@@ -165,14 +165,14 @@ export async function GET(request: NextRequest) {
     // ever" lookups and make long-time customers look new.
     const customerIdByYear = await runQuery<Record<string, unknown>>(`
       SELECT
-        EXTRACT(YEAR FROM DATE(date)) AS year,
-        COUNT(*) AS rows,
+        EXTRACT(YEAR FROM DATE(date)) AS yr,
+        COUNT(*) AS row_count,
         COUNT(DISTINCT order_customer_id) AS distinct_customer_ids,
         COUNTIF(order_customer_id IS NULL) AS null_customer_ids,
         ANY_VALUE(CAST(order_customer_id AS STRING)) AS sample_id
       FROM \`${ds}.shopify_orders\`
-      GROUP BY year
-      ORDER BY year
+      GROUP BY yr
+      ORDER BY yr
     `);
 
     let shopifyCustomersStats: Record<string, unknown> | null = null;
