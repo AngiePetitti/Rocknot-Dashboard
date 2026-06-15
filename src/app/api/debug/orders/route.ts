@@ -135,12 +135,15 @@ export async function GET(request: NextRequest) {
           )
           SELECT
             COUNT(*) AS orders,
+            COUNTIF(last_total_price != 0) AS orders_nonzero,
             ROUND(SUM(last_total_price), 2) AS sum_last_total_price,
             ROUND(SUM(last_net_sales), 2) AS sum_last_net_sales,
             ROUND(SUM(first_total_price), 2) AS sum_first_total_price,
             ROUND(SUM(first_net_sales), 2) AS sum_first_net_sales,
             ROUND(SAFE_DIVIDE(SUM(last_total_price), COUNT(*)), 2) AS aov_last_total,
-            ROUND(SAFE_DIVIDE(SUM(last_net_sales), COUNT(*)), 2) AS aov_last_net
+            ROUND(SAFE_DIVIDE(SUM(last_net_sales), COUNT(*)), 2) AS aov_last_net,
+            ROUND(SAFE_DIVIDE(SUM(last_total_price), COUNTIF(last_total_price != 0)), 2) AS aov_last_total_nonzero,
+            ROUND(SAFE_DIVIDE(SUM(last_net_sales), COUNTIF(last_total_price != 0)), 2) AS aov_last_net_nonzero
           FROM last_synced
           WHERE order_date BETWEEN @from AND @to
         `, { from, to });
