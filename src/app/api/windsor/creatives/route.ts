@@ -175,6 +175,12 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
 // authorized, unlike our direct Meta token which keeps expiring). This is a
 // separate request from the performance fetch so an unsupported field here
 // can never break the main data.
+//
+// Thumbnails/video URLs don't change with the selected timeframe, but
+// re-fetching them on every timeframe switch was a big chunk of this
+// endpoint's latency. Always fetch them over a fixed wide window (so the
+// URL — and Next's fetch cache — is identical across timeframes) and let
+// Next cache the response for an hour.
 async function fetchWindsorAdUrls(
   source: 'facebook' | 'tiktok',
   params: Record<string, string>,
@@ -187,7 +193,7 @@ async function fetchWindsorAdUrls(
     ...params,
   });
   try {
-    const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store' });
+    const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { next: { revalidate: 3600 } });
     const json = await res.json();
     if (json.error) return { urls: {}, error: String(json.error) };
     const urls: Record<string, string> = {};
@@ -218,17 +224,21 @@ export async function GET(request: NextRequest) {
   }
 
   const params = buildDateParams(tfRaw);
+  // Fixed wide window for thumbnail/video URL lookups, independent of `tf`,
+  // so the request URL — and Next's revalidate: 3600 fetch cache — is
+  // identical across timeframe switches.
+  const urlParams = buildDateParams('6m');
 
   try {
     const [metaResult, tiktokResult, metaThumbs, tiktokThumbs, tiktokVideos] = await Promise.all([
       fetchCreatives('facebook', params),
       fetchCreatives('tiktok', params),
-      fetchWindsorAdUrls('facebook', params, ['thumbnail_url', 'image_url']),
-      fetchWindsorAdUrls('tiktok', params, ['video_thumbnail_url']),
+      fetchWindsorAdUrls('facebook', urlParams, ['thumbnail_url', 'image_url']),
+      fetchWindsorAdUrls('tiktok', urlParams, ['video_thumbnail_url']),
       // Playable video sources. Only TikTok: Windsor's facebook connector is
       // Insights-based and has no video source field (verified Jun 2026) —
       // Meta playback would need the Graph API ad-preview embed + valid token.
-      fetchWindsorAdUrls('tiktok', params, ['video_url']),
+      fetchWindsorAdUrls('tiktok', urlParams, ['video_url']),
     ]);
 
     const metaActId = `act_${META_AD_ACCOUNT_ID.replace('act_', '')}`;
