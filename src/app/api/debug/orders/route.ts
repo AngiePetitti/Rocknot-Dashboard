@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { runQuery, getDataset, isBigQueryConfigured, tableExists } from '@/src/lib/bigquery';
+import { runQuery, getDataset, isBigQueryConfigured, tableExists, cancelledOrderClause, dedupedOrdersCte } from '@/src/lib/bigquery';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,6 +74,20 @@ export async function GET(request: NextRequest) {
       `, { from, to });
     }
 
+    // What the dashboard actually computes: sum of order_total_price across
+    // ALL of an order's rows (full price + any later refund deltas),
+    // attributed to the order's earliest date — bucketed by whether that
+    // earliest date falls in the requested range.
+    const noCancelled = await cancelledOrderClause();
+    const [dashboardStats] = await runQuery<Record<string, unknown>>(`
+      WITH order_revenue AS (${dedupedOrdersCte(ds, noCancelled)})
+      SELECT
+        COUNT(*) AS orders,
+        ROUND(SUM(total_price), 2) AS sum_total_price
+      FROM order_revenue
+      WHERE order_date BETWEEN @from AND @to
+    `, { from, to });
+
     const sample = await runQuery<Record<string, unknown>>(`
       SELECT order_id, COUNT(*) AS copies,
              ARRAY_AGG(CAST(order_total_price AS STRING) LIMIT 3) AS total_prices,
@@ -92,6 +106,7 @@ export async function GET(request: NextRequest) {
       deduplicated: dedupStats,
       shopify_order_status: statusStats,
       shopify_order_financials: financialsStats,
+      dashboard_calculation: dashboardStats,
       sample_duplicated_orders: sample,
     });
   } catch (err) {
