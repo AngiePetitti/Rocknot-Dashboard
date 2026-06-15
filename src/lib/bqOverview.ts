@@ -117,17 +117,18 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     ORDER BY days.d
   `;
 
-  // Customer counts match Shopify's definition: distinct customers who ordered
-  // in the period, split by whether this order is their only order ever
-  // ("new") or they've ordered more than once ("returning"). An
-  // order_date-cutoff definition (first order before vs. on/after the period
-  // start) undercounted returning customers by ~40% against Shopify's
-  // reported rate — lifetime order count matches within ~2%. Guest checkouts
-  // have no customer id and are excluded, as in Shopify's report.
+  // Customer counts match Shopify's "New customer sales over time" report:
+  // "new" = customers whose first-ever order falls in this period (sales =
+  // just that first order, matching Shopify's Orders==Customers for the New
+  // segment), "returning" = customers whose first-ever order was before this
+  // period (sales = all of their orders placed during the period). Guest
+  // checkouts have no customer id and are excluded, as in Shopify's report.
   const customerSql = `
     WITH order_revenue AS (${orderRevenueCte}),
-    lifetime AS (
-      SELECT order_customer_id AS cid, COUNT(*) AS lifetime_orders
+    firsts AS (
+      SELECT order_customer_id AS cid,
+             MIN(order_date) AS first_order,
+             (ARRAY_AGG(total_price ORDER BY order_date ASC LIMIT 1))[OFFSET(0)] AS first_order_value
       FROM order_revenue
       WHERE order_customer_id IS NOT NULL
       GROUP BY cid
@@ -140,12 +141,12 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       GROUP BY cid
     )
     SELECT
-      COUNTIF(l.lifetime_orders = 1) AS new_customers,
-      COUNTIF(l.lifetime_orders > 1) AS returning_customers,
-      IFNULL(SUM(IF(l.lifetime_orders = 1, p.revenue, 0)), 0) AS new_customer_revenue,
-      IFNULL(SUM(IF(l.lifetime_orders > 1, p.revenue, 0)), 0) AS returning_customer_revenue
+      COUNTIF(f.first_order >= @date_from) AS new_customers,
+      COUNTIF(f.first_order < @date_from)  AS returning_customers,
+      IFNULL(SUM(IF(f.first_order >= @date_from, f.first_order_value, 0)), 0) AS new_customer_revenue,
+      IFNULL(SUM(IF(f.first_order < @date_from, p.revenue, 0)), 0)            AS returning_customer_revenue
     FROM period p
-    JOIN lifetime l USING (cid)
+    JOIN firsts f USING (cid)
   `;
 
   const [rows, custRows] = await Promise.all([
