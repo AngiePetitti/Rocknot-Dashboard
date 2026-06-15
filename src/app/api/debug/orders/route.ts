@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { runQuery, getDataset, isBigQueryConfigured, tableExists, cancelledOrderClause, dedupedOrdersCte } from '@/src/lib/bigquery';
+import { runQuery, getDataset, isBigQueryConfigured, tableExists, dedupedOrdersCte } from '@/src/lib/bigquery';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,13 +76,11 @@ export async function GET(request: NextRequest) {
       `, { from, to });
     }
 
-    // What the dashboard actually computes: sum of order_total_price across
-    // ALL of an order's rows (full price + any later refund deltas),
-    // attributed to the order's earliest date — bucketed by whether that
-    // earliest date falls in the requested range.
-    const noCancelled = await cancelledOrderClause();
+    // What the dashboard actually computes: each order's first-synced
+    // order_total_price, attributed to the order's earliest date —
+    // bucketed by whether that earliest date falls in the requested range.
     const [dashboardStats] = await runQuery<Record<string, unknown>>(`
-      WITH order_revenue AS (${dedupedOrdersCte(ds, noCancelled)})
+      WITH order_revenue AS (${dedupedOrdersCte(ds)})
       SELECT
         COUNT(*) AS orders,
         ROUND(SUM(total_price), 2) AS sum_total_price

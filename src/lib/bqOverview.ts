@@ -1,4 +1,4 @@
-import { runQuery, getDataset, cancelledOrderClause, dedupedOrdersCte } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte } from '@/src/lib/bigquery';
 
 // Overview metrics computed from the Windsor→BigQuery tables.
 // Returns the same shape as the Windsor REST aggregation so the
@@ -54,9 +54,8 @@ function dateStr(d: DailyRow['date']): string {
 
 export async function getOverview(dateFrom: string, dateTo: string): Promise<OverviewResult> {
   const ds = getDataset();
-  const noCancelled = await cancelledOrderClause();
 
-  const orderRevenueCte = dedupedOrdersCte(ds, noCancelled);
+  const orderRevenueCte = dedupedOrdersCte(ds);
 
   // One daily rollup joining all sources. Column names verified against the
   // actual Windsor-created BigQuery schema (rocknot dataset, Jun 2026).

@@ -1,4 +1,4 @@
-import { runQuery, getDataset, cancelledOrderClause, dedupedOrdersCte } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte } from '@/src/lib/bigquery';
 import { CustomerMetrics, CohortData } from '@/src/lib/mockData';
 
 interface SummaryRow {
@@ -28,10 +28,9 @@ function monthLabel(isoDate: string): string {
 
 export async function getCustomerMetrics(): Promise<CustomerMetrics> {
   const ds = getDataset();
-  const noCancelled = await cancelledOrderClause();
 
   const rows = await runQuery<SummaryRow>(`
-    WITH order_revenue AS (${dedupedOrdersCte(ds, noCancelled)}),
+    WITH order_revenue AS (${dedupedOrdersCte(ds)}),
     ranked AS (
       SELECT order_customer_id AS customer_id,
              total_price AS revenue,
@@ -67,10 +66,9 @@ export async function getCustomerMetrics(): Promise<CustomerMetrics> {
 
 export async function getCohortData(): Promise<CohortData[]> {
   const ds = getDataset();
-  const noCancelled = await cancelledOrderClause();
 
   const rows = await runQuery<CohortRow>(`
-    WITH order_revenue AS (${dedupedOrdersCte(ds, noCancelled)}),
+    WITH order_revenue AS (${dedupedOrdersCte(ds)}),
     orders AS (
       SELECT order_customer_id AS customer_id, order_date AS d
       FROM order_revenue
