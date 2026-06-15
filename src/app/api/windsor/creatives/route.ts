@@ -85,11 +85,14 @@ const FIELDS_BY_SOURCE: Record<'facebook' | 'tiktok', string> = {
   ].join(','),
 };
 
-async function fetchCreatives(source: 'facebook' | 'tiktok', params: Record<string, string>): Promise<{ rows: CreativeRow[]; raw?: unknown }> {
+async function fetchCreatives(source: 'facebook' | 'tiktok', params: Record<string, string>, isToday: boolean): Promise<{ rows: CreativeRow[]; raw?: unknown }> {
   const fields = FIELDS_BY_SOURCE[source];
   const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
   const url = `https://connectors.windsor.ai/${source}?${qs}`;
-  const res = await fetch(url, { cache: 'no-store' });
+  // "Today" must stay live (intraday spend changes by the minute). Past
+  // ranges are historical and won't change, so cache the Windsor response —
+  // this is the main latency cost on a date-range switch.
+  const res = await fetch(url, isToday ? { cache: 'no-store' } : { next: { revalidate: 1800 } });
   const json = await res.json();
   return { rows: json.data || [], raw: json };
 }
@@ -229,10 +232,12 @@ export async function GET(request: NextRequest) {
   // identical across timeframe switches.
   const urlParams = buildDateParams('6m');
 
+  const isToday = tfRaw === 'today';
+
   try {
     const [metaResult, tiktokResult, metaThumbs, tiktokThumbs, tiktokVideos] = await Promise.all([
-      fetchCreatives('facebook', params),
-      fetchCreatives('tiktok', params),
+      fetchCreatives('facebook', params, isToday),
+      fetchCreatives('tiktok', params, isToday),
       fetchWindsorAdUrls('facebook', urlParams, ['thumbnail_url', 'image_url']),
       fetchWindsorAdUrls('tiktok', urlParams, ['video_thumbnail_url']),
       // Playable video sources. Only TikTok: Windsor's facebook connector is
