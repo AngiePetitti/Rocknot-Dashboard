@@ -93,6 +93,7 @@ export async function GET(request: NextRequest) {
     const sample = await runQuery<Record<string, unknown>>(`
       SELECT order_id, COUNT(*) AS copies,
              ARRAY_AGG(CAST(order_total_price AS STRING) LIMIT 3) AS total_prices,
+             ARRAY_AGG(CAST(order_net_sales AS STRING) LIMIT 3) AS net_sales,
              ARRAY_AGG(FORMAT_DATE('%Y-%m-%d', DATE(date)) LIMIT 3) AS dates
       FROM \`${ds}.shopify_orders\`
       WHERE DATE(date) BETWEEN @from AND @to
@@ -102,6 +103,49 @@ export async function GET(request: NextRequest) {
       LIMIT 5
     `, { from, to });
 
+    // Compare candidate formulas (first/last/sum-of-rows, with/without the
+    // cancelled-order filter) against Shopify's own Orders/Total Sales for
+    // this range, to find which one actually matches.
+    const [formulas] = await runQuery<Record<string, unknown>>(`
+      WITH base AS (
+        SELECT order_id, DATE(date) AS d,
+               CAST(order_total_price AS FLOAT64) AS total_price,
+               CAST(order_net_sales AS FLOAT64) AS net_sales
+        FROM \`${ds}.shopify_orders\`
+        WHERE order_id IS NOT NULL
+      ),
+      agg AS (
+        SELECT order_id,
+               MIN(d) AS order_date,
+               SUM(COALESCE(total_price, net_sales, 0)) AS sum_all,
+               (ARRAY_AGG(COALESCE(total_price, net_sales, 0) ORDER BY d ASC LIMIT 1))[OFFSET(0)] AS first_val,
+               (ARRAY_AGG(COALESCE(total_price, net_sales, 0) ORDER BY d DESC LIMIT 1))[OFFSET(0)] AS last_val
+        FROM base
+        GROUP BY order_id
+      ),
+      cancelled AS (
+        SELECT DISTINCT order_id FROM \`${ds}.shopify_order_status\`
+        WHERE LOWER(TRIM(IFNULL(CAST(order_cancelled_at AS STRING), ''))) NOT IN ('', 'null', 'none', 'nan', '0', 'false')
+      ),
+      in_range AS (
+        SELECT a.*, c.order_id IS NOT NULL AS is_cancelled
+        FROM agg a
+        LEFT JOIN cancelled c ON c.order_id = a.order_id
+        WHERE a.order_date BETWEEN @from AND @to
+      )
+      SELECT
+        COUNT(*) AS orders_in_range,
+        COUNTIF(NOT is_cancelled) AS orders_in_range_not_cancelled,
+        COUNTIF(is_cancelled) AS cancelled_in_range,
+        ROUND(SUM(first_val), 2) AS sum_first,
+        ROUND(SUM(last_val), 2) AS sum_last,
+        ROUND(SUM(sum_all), 2) AS sum_all_rows,
+        ROUND(SUM(IF(NOT is_cancelled, first_val, 0)), 2) AS sum_first_not_cancelled,
+        ROUND(SUM(IF(NOT is_cancelled, last_val, 0)), 2) AS sum_last_not_cancelled,
+        ROUND(SUM(IF(NOT is_cancelled, sum_all, 0)), 2) AS sum_all_not_cancelled
+      FROM in_range
+    `, { from, to });
+
     return NextResponse.json({
       range: { from, to },
       shopify_orders: ordersStats,
@@ -109,6 +153,7 @@ export async function GET(request: NextRequest) {
       shopify_order_status: statusStats,
       shopify_order_financials: financialsStats,
       dashboard_calculation: dashboardStats,
+      formulas,
       sample_duplicated_orders: sample,
     });
   } catch (err) {
