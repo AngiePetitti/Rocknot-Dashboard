@@ -60,6 +60,20 @@ export async function GET(request: NextRequest) {
       `);
     }
 
+    let financialsStats: Record<string, unknown> | null = null;
+    if (await tableExists('shopify_order_financials')) {
+      [financialsStats] = await runQuery<Record<string, unknown>>(`
+        SELECT
+          COUNT(*) AS total_rows,
+          COUNT(DISTINCT order_id) AS distinct_orders,
+          ROUND(SUM(CAST(order_total_price AS FLOAT64)), 2) AS sum_total_price,
+          MIN(DATE(date)) AS earliest_date,
+          MAX(DATE(date)) AS latest_date
+        FROM \`${ds}.shopify_order_financials\`
+        WHERE DATE(date) BETWEEN @from AND @to
+      `, { from, to });
+    }
+
     const sample = await runQuery<Record<string, unknown>>(`
       SELECT order_id, COUNT(*) AS copies,
              ARRAY_AGG(CAST(order_total_price AS STRING) LIMIT 3) AS total_prices,
@@ -77,6 +91,7 @@ export async function GET(request: NextRequest) {
       shopify_orders: ordersStats,
       deduplicated: dedupStats,
       shopify_order_status: statusStats,
+      shopify_order_financials: financialsStats,
       sample_duplicated_orders: sample,
     });
   } catch (err) {

@@ -1,4 +1,4 @@
-import { runQuery, getDataset, cancelledOrderClause } from '@/src/lib/bigquery';
+import { runQuery, getDataset, cancelledOrderClause, tableExists } from '@/src/lib/bigquery';
 
 // Overview metrics computed from the Windsor→BigQuery tables.
 // Returns the same shape as the Windsor REST aggregation so the
@@ -56,17 +56,48 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const ds = getDataset();
   const noCancelled = await cancelledOrderClause();
 
-  // One daily rollup joining all sources. Column names verified against the
-  // actual Windsor-created BigQuery schema (rocknot dataset, Jun 2026).
-  const sql = `
-    WITH shopify AS (
+  // shopify_order_financials is keyed one-row-per-order (Columns to Match =
+  // order_id), so SUM(order_total_price) there already reflects refunds and
+  // matches Shopify's Total Sales, unlike shopify_orders which carries extra
+  // refund-adjustment rows per order. Only switch to it once its backfill has
+  // caught up to shopify_orders for this range — otherwise keep the old path
+  // so numbers don't dip mid-backfill.
+  let useFinancials = false;
+  if (await tableExists('shopify_order_financials')) {
+    const [coverage] = await runQuery<{ financials_orders: number; shopify_orders: number }>(`
+      SELECT
+        (SELECT COUNT(DISTINCT order_id) FROM \`${ds}.shopify_order_financials\`
+          WHERE DATE(date) BETWEEN @date_from AND @date_to) AS financials_orders,
+        (SELECT COUNT(DISTINCT order_id) FROM \`${ds}.shopify_orders\`
+          WHERE DATE(date) BETWEEN @date_from AND @date_to${noCancelled}) AS shopify_orders
+    `, { date_from: dateFrom, date_to: dateTo });
+    const financialsOrders = Number(coverage?.financials_orders || 0);
+    const shopifyOrders = Number(coverage?.shopify_orders || 0);
+    useFinancials = shopifyOrders > 0 && financialsOrders / shopifyOrders >= 0.9;
+  }
+
+  const shopifyCte = useFinancials
+    ? `shopify AS (
+      SELECT DATE(date) AS d,
+             SUM(CAST(order_total_price AS FLOAT64)) AS revenue,
+             COUNT(DISTINCT order_id) AS orders
+      FROM \`${ds}.shopify_order_financials\`
+      WHERE DATE(date) BETWEEN @date_from AND @date_to
+      GROUP BY d
+    )`
+    : `shopify AS (
       SELECT DATE(date) AS d,
              SUM(COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64))) AS revenue,
              COUNT(DISTINCT order_id) AS orders
       FROM \`${ds}.shopify_orders\`
       WHERE DATE(date) BETWEEN @date_from AND @date_to${noCancelled}
       GROUP BY d
-    ),
+    )`;
+
+  // One daily rollup joining all sources. Column names verified against the
+  // actual Windsor-created BigQuery schema (rocknot dataset, Jun 2026).
+  const sql = `
+    WITH ${shopifyCte},
     meta AS (
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
