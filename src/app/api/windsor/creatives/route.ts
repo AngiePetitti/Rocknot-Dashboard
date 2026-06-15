@@ -72,15 +72,19 @@ export interface CreativePerformance {
   costPerConversion: number;
 }
 
+// 'ctr' is intentionally excluded: it's a rate metric, and Windsor can only
+// return it un-aggregated (one row per ad per day) — which made larger
+// ranges (30d, ytd) return far more rows and run far slower. ctr is
+// re-derived from clicks/impressions in aggregateCreatives anyway.
 const FIELDS_BY_SOURCE: Record<'facebook' | 'tiktok', string> = {
   facebook: [
     'source', 'ad_name', 'ad_id', 'account_id', 'adset_name', 'campaign',
-    'spend', 'impressions', 'clicks', 'ctr',
+    'spend', 'impressions', 'clicks',
     'purchase_roas', 'conversion_values', 'actions_omni_purchase',
   ].join(','),
   tiktok: [
     'source', 'ad_name', 'ad_id', 'account_id', 'adset_name', 'campaign',
-    'spend', 'impressions', 'clicks', 'ctr',
+    'spend', 'impressions', 'clicks',
     'conversion_value', 'revenue', 'conversions',
   ].join(','),
 };
