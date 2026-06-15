@@ -1,4 +1,4 @@
-import { runQuery, getDataset, cancelledOrderClause, tableExists } from '@/src/lib/bigquery';
+import { runQuery, getDataset, cancelledOrderClause, dedupedOrdersCte } from '@/src/lib/bigquery';
 
 // Overview metrics computed from the Windsor→BigQuery tables.
 // Returns the same shape as the Windsor REST aggregation so the
@@ -56,48 +56,20 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const ds = getDataset();
   const noCancelled = await cancelledOrderClause();
 
-  // shopify_order_financials is keyed one-row-per-order (Columns to Match =
-  // order_id), so SUM(order_total_price) there already reflects refunds and
-  // matches Shopify's Total Sales, unlike shopify_orders which carries extra
-  // refund-adjustment rows per order. Only switch to it once its backfill has
-  // caught up to shopify_orders for this range — otherwise keep the old path
-  // so numbers don't dip mid-backfill.
-  let useFinancials = false;
-  if (await tableExists('shopify_order_financials')) {
-    const [coverage] = await runQuery<{ financials_orders: number; shopify_orders: number }>(`
-      SELECT
-        (SELECT COUNT(DISTINCT order_id) FROM \`${ds}.shopify_order_financials\`
-          WHERE DATE(date) BETWEEN @date_from AND @date_to) AS financials_orders,
-        (SELECT COUNT(DISTINCT order_id) FROM \`${ds}.shopify_orders\`
-          WHERE DATE(date) BETWEEN @date_from AND @date_to${noCancelled}) AS shopify_orders
-    `, { date_from: dateFrom, date_to: dateTo });
-    const financialsOrders = Number(coverage?.financials_orders || 0);
-    const shopifyOrders = Number(coverage?.shopify_orders || 0);
-    useFinancials = shopifyOrders > 0 && financialsOrders / shopifyOrders >= 0.9;
-  }
-
-  const shopifyCte = useFinancials
-    ? `shopify AS (
-      SELECT DATE(date) AS d,
-             SUM(CAST(order_total_price AS FLOAT64)) AS revenue,
-             COUNT(DISTINCT order_id) AS orders
-      FROM \`${ds}.shopify_order_financials\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to
-      GROUP BY d
-    )`
-    : `shopify AS (
-      SELECT DATE(date) AS d,
-             SUM(COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64))) AS revenue,
-             COUNT(DISTINCT order_id) AS orders
-      FROM \`${ds}.shopify_orders\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to${noCancelled}
-      GROUP BY d
-    )`;
+  const orderRevenueCte = dedupedOrdersCte(ds, noCancelled);
 
   // One daily rollup joining all sources. Column names verified against the
   // actual Windsor-created BigQuery schema (rocknot dataset, Jun 2026).
   const sql = `
-    WITH ${shopifyCte},
+    WITH order_revenue AS (${orderRevenueCte}),
+    shopify AS (
+      SELECT order_date AS d,
+             SUM(total_price) AS revenue,
+             COUNT(*) AS orders
+      FROM order_revenue
+      WHERE order_date BETWEEN @date_from AND @date_to
+      GROUP BY d
+    ),
     meta AS (
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
@@ -149,18 +121,18 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // overstated returning share badly. Guest checkouts have no customer id and
   // are excluded, as in Shopify's report.
   const customerSql = `
-    WITH firsts AS (
-      SELECT CAST(order_customer_id AS STRING) AS cid, MIN(DATE(date)) AS first_order
-      FROM \`${ds}.shopify_orders\`
-      WHERE order_customer_id IS NOT NULL${noCancelled}
+    WITH order_revenue AS (${orderRevenueCte}),
+    firsts AS (
+      SELECT order_customer_id AS cid, MIN(order_date) AS first_order
+      FROM order_revenue
+      WHERE order_customer_id IS NOT NULL
       GROUP BY cid
     ),
     period AS (
-      SELECT CAST(order_customer_id AS STRING) AS cid,
-             SUM(COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0)) AS revenue
-      FROM \`${ds}.shopify_orders\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to
-        AND order_customer_id IS NOT NULL${noCancelled}
+      SELECT order_customer_id AS cid, SUM(total_price) AS revenue
+      FROM order_revenue
+      WHERE order_date BETWEEN @date_from AND @date_to
+        AND order_customer_id IS NOT NULL
       GROUP BY cid
     )
     SELECT

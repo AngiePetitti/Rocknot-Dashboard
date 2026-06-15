@@ -1,4 +1,4 @@
-import { runQuery, getDataset, cancelledOrderClause } from '@/src/lib/bigquery';
+import { runQuery, getDataset, cancelledOrderClause, dedupedOrdersCte } from '@/src/lib/bigquery';
 import { CustomerMetrics, CohortData } from '@/src/lib/mockData';
 
 interface SummaryRow {
@@ -31,12 +31,13 @@ export async function getCustomerMetrics(): Promise<CustomerMetrics> {
   const noCancelled = await cancelledOrderClause();
 
   const rows = await runQuery<SummaryRow>(`
-    WITH ranked AS (
+    WITH order_revenue AS (${dedupedOrdersCte(ds, noCancelled)}),
+    ranked AS (
       SELECT order_customer_id AS customer_id,
-             CAST(order_total_price AS FLOAT64) AS revenue,
-             ROW_NUMBER() OVER (PARTITION BY order_customer_id ORDER BY date) AS seq
-      FROM \`${ds}.shopify_orders\`
-      WHERE order_customer_id IS NOT NULL${noCancelled}
+             total_price AS revenue,
+             ROW_NUMBER() OVER (PARTITION BY order_customer_id ORDER BY order_date) AS seq
+      FROM order_revenue
+      WHERE order_customer_id IS NOT NULL
     )
     SELECT
       COUNT(DISTINCT customer_id) AS total_customers,
@@ -69,10 +70,11 @@ export async function getCohortData(): Promise<CohortData[]> {
   const noCancelled = await cancelledOrderClause();
 
   const rows = await runQuery<CohortRow>(`
-    WITH orders AS (
-      SELECT order_customer_id AS customer_id, DATE(date) AS d
-      FROM \`${ds}.shopify_orders\`
-      WHERE order_customer_id IS NOT NULL${noCancelled}
+    WITH order_revenue AS (${dedupedOrdersCte(ds, noCancelled)}),
+    orders AS (
+      SELECT order_customer_id AS customer_id, order_date AS d
+      FROM order_revenue
+      WHERE order_customer_id IS NOT NULL
     ),
     first_order AS (
       SELECT customer_id, MIN(d) AS first_date FROM orders GROUP BY customer_id
