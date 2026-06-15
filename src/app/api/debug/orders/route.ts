@@ -20,6 +20,8 @@ export async function GET(request: NextRequest) {
         COUNT(*) AS total_rows,
         COUNT(DISTINCT order_id) AS distinct_orders,
         COUNT(*) - COUNT(DISTINCT order_id) AS duplicate_rows,
+        COUNTIF(order_id IS NULL) AS null_order_id_rows,
+        ROUND(SUM(IF(order_id IS NULL, COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0), 0)), 2) AS sum_null_order_id,
         ROUND(SUM(CAST(order_total_price AS FLOAT64)), 2) AS sum_total_price,
         ROUND(SUM(CAST(order_gross_sales AS FLOAT64)), 2) AS sum_gross_sales,
         ROUND(SUM(CAST(order_net_sales AS FLOAT64)), 2) AS sum_net_sales,

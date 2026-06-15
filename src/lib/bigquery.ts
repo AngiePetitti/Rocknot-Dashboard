@@ -71,12 +71,6 @@ export async function tableExists(table: string): Promise<boolean> {
   }
 }
 
-// SQL fragment excluding cancelled orders, matching Shopify's reports (which
-// never count cancelled orders). Empty string until the shopify_order_status
-// sync exists. Windsor writes order_cancelled_at as a string and uses text
-// like "null"/"" (not SQL NULL) for non-cancelled orders, so only treat rows
-// as cancelled when the value looks like an actual timestamp. The inner
-// IS NOT NULL guard on order_id keeps NOT IN sane.
 // Windsor writes one row per order per sync-relevant date: the original
 // order row (full price, on the order date), plus an extra row on each
 // later date a refund/adjustment was made (carrying a negative delta in
@@ -85,24 +79,37 @@ export async function tableExists(table: string): Promise<boolean> {
 // regardless of which date they fall on — attributed to the order's
 // earliest (placement) date, matching how Shopify's "Total sales" report
 // buckets refunds against the original order date. Yields one row per
-// order_id: order_id, order_customer_id, order_date, total_price.
+// order: order_id, order_customer_id, order_date, total_price.
+//
+// A handful of rows have a null order_id (no duplicate refund rows to
+// match against), so fall back to a per-row key for those rather than
+// dropping them — excluding them undercounts both revenue and order count.
 export function dedupedOrdersCte(ds: string, noCancelled: string): string {
   return `
-    SELECT order_id,
-           ANY_VALUE(CAST(order_customer_id AS STRING)) AS order_customer_id,
-           MIN(DATE(date)) AS order_date,
-           SUM(COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0)) AS total_price
+    SELECT
+      COALESCE(CAST(order_id AS STRING), TO_JSON_STRING(STRUCT(date, order_total_price, order_net_sales, order_customer_id))) AS order_id,
+      ANY_VALUE(CAST(order_customer_id AS STRING)) AS order_customer_id,
+      MIN(DATE(date)) AS order_date,
+      SUM(COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0)) AS total_price
     FROM \`${ds}.shopify_orders\`
-    WHERE order_id IS NOT NULL${noCancelled}
+    WHERE TRUE${noCancelled}
     GROUP BY order_id
   `;
 }
 
+// SQL fragment excluding cancelled orders, matching Shopify's reports (which
+// never count cancelled orders). Empty string until the shopify_order_status
+// sync exists. Windsor writes order_cancelled_at as a string and uses text
+// like "null"/"" (not SQL NULL) for non-cancelled orders, so only treat rows
+// as cancelled when the value looks like an actual timestamp. Rows with a
+// null order_id can't match the subquery, so pass them through rather than
+// letting `NULL NOT IN (...)` evaluate to NULL (which WHERE treats as false
+// and silently drops the row).
 export async function cancelledOrderClause(): Promise<string> {
   if (!(await tableExists('shopify_order_status'))) return '';
-  return ` AND order_id NOT IN (
+  return ` AND (order_id IS NULL OR order_id NOT IN (
     SELECT order_id FROM \`${getDataset()}.shopify_order_status\`
     WHERE order_id IS NOT NULL
       AND LOWER(TRIM(IFNULL(CAST(order_cancelled_at AS STRING), ''))) NOT IN ('', 'null', 'none', 'nan', '0', 'false')
-  )`;
+  ))`;
 }
