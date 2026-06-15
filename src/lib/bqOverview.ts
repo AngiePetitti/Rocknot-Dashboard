@@ -32,6 +32,7 @@ export interface OverviewResult {
 interface DailyRow {
   date: { value: string } | string;
   revenue: number | null;
+  net_sales: number | null;
   orders: number | null;
   meta_spend: number | null;
   google_spend: number | null;
@@ -64,6 +65,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     shopify AS (
       SELECT order_date AS d,
              SUM(total_price) AS revenue,
+             SUM(net_sales) AS net_sales,
              COUNT(*) AS orders
       FROM order_revenue
       WHERE order_date BETWEEN @date_from AND @date_to
@@ -99,6 +101,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     SELECT
       FORMAT_DATE('%Y-%m-%d', days.d) AS date,
       IFNULL(shopify.revenue, 0)              AS revenue,
+      IFNULL(shopify.net_sales, 0)            AS net_sales,
       IFNULL(shopify.orders, 0)               AS orders,
       IFNULL(meta.spend, 0)                   AS meta_spend,
       IFNULL(google.spend, 0)                 AS google_spend,
@@ -115,14 +118,16 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   `;
 
   // Customer counts match Shopify's definition: distinct customers who ordered
-  // in the period, "returning" when their first-ever order predates it. The
-  // old order-level count (via customer_is_returning, a *current* attribute)
-  // overstated returning share badly. Guest checkouts have no customer id and
-  // are excluded, as in Shopify's report.
+  // in the period, split by whether this order is their only order ever
+  // ("new") or they've ordered more than once ("returning"). An
+  // order_date-cutoff definition (first order before vs. on/after the period
+  // start) undercounted returning customers by ~40% against Shopify's
+  // reported rate — lifetime order count matches within ~2%. Guest checkouts
+  // have no customer id and are excluded, as in Shopify's report.
   const customerSql = `
     WITH order_revenue AS (${orderRevenueCte}),
-    firsts AS (
-      SELECT order_customer_id AS cid, MIN(order_date) AS first_order
+    lifetime AS (
+      SELECT order_customer_id AS cid, COUNT(*) AS lifetime_orders
       FROM order_revenue
       WHERE order_customer_id IS NOT NULL
       GROUP BY cid
@@ -135,12 +140,12 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       GROUP BY cid
     )
     SELECT
-      COUNTIF(f.first_order >= @date_from) AS new_customers,
-      COUNTIF(f.first_order < @date_from)  AS returning_customers,
-      IFNULL(SUM(IF(f.first_order >= @date_from, p.revenue, 0)), 0) AS new_customer_revenue,
-      IFNULL(SUM(IF(f.first_order < @date_from, p.revenue, 0)), 0)  AS returning_customer_revenue
+      COUNTIF(l.lifetime_orders = 1) AS new_customers,
+      COUNTIF(l.lifetime_orders > 1) AS returning_customers,
+      IFNULL(SUM(IF(l.lifetime_orders = 1, p.revenue, 0)), 0) AS new_customer_revenue,
+      IFNULL(SUM(IF(l.lifetime_orders > 1, p.revenue, 0)), 0) AS returning_customer_revenue
     FROM period p
-    JOIN firsts f USING (cid)
+    JOIN lifetime l USING (cid)
   `;
 
   const [rows, custRows] = await Promise.all([
@@ -154,7 +159,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     returning_customer_revenue: 0,
   };
 
-  let totalRevenue = 0, totalOrders = 0;
+  let totalRevenue = 0, totalNetSales = 0, totalOrders = 0;
   let metaSpend = 0, googleSpend = 0, tiktokSpend = 0;
   let metaRevenue = 0, googleRevenue = 0, tiktokRevenue = 0;
 
@@ -164,6 +169,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     const adSpend = Number(r.meta_spend || 0) + Number(r.google_spend || 0) + Number(r.tiktok_spend || 0);
 
     totalRevenue += revenue;
+    totalNetSales += Number(r.net_sales || 0);
     totalOrders += orders;
     metaSpend += Number(r.meta_spend || 0);
     googleSpend += Number(r.google_spend || 0);
@@ -187,7 +193,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       totalRevenue: Math.round(totalRevenue),
       totalOrders,
       totalAdSpend: Math.round(totalAdSpend),
-      aov: totalOrders > 0 ? Math.round((totalRevenue / totalOrders) * 100) / 100 : 0,
+      aov: totalOrders > 0 ? Math.round((totalNetSales / totalOrders) * 100) / 100 : 0,
       mer: totalAdSpend > 0 ? Math.round((totalRevenue / totalAdSpend) * 100) / 100 : 0,
       returns: 0,
       metaSpend: Math.round(metaSpend),

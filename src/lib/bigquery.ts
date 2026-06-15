@@ -82,7 +82,9 @@ export async function tableExists(table: string): Promise<boolean> {
 // shopify_order_status) made both the order count and revenue total
 // further from Shopify's reported figures, so cancelled orders are
 // included here too. Yields one row per order: order_id,
-// order_customer_id, order_date, total_price.
+// order_customer_id, order_date, total_price, net_sales (also each
+// order's first-synced value — AOV based on net_sales matches Shopify's
+// reported AOV much closer than total_price, within ~0.1%).
 //
 // A handful of rows have a null order_id (no duplicate refund rows to
 // match against), so fall back to a per-row key for those rather than
@@ -93,7 +95,8 @@ export function dedupedOrdersCte(ds: string): string {
       COALESCE(CAST(order_id AS STRING), TO_JSON_STRING(STRUCT(date, order_total_price, order_net_sales, order_customer_id))) AS order_id,
       ANY_VALUE(CAST(order_customer_id AS STRING)) AS order_customer_id,
       MIN(DATE(date)) AS order_date,
-      (ARRAY_AGG(COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS total_price
+      (ARRAY_AGG(COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS total_price,
+      (ARRAY_AGG(COALESCE(CAST(order_net_sales AS FLOAT64), CAST(order_total_price AS FLOAT64), 0) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS net_sales
     FROM \`${ds}.shopify_orders\`
     GROUP BY order_id
   `;
