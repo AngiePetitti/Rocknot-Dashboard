@@ -101,48 +101,96 @@ export async function GET(request: NextRequest) {
       LIMIT 5
     `, { from, to });
 
-    // Compare candidate formulas (first/last/sum-of-rows, with/without the
-    // cancelled-order filter) against Shopify's own Orders/Total Sales for
-    // this range, to find which one actually matches.
-    const [formulas] = await runQuery<Record<string, unknown>>(`
+    // Compare AOV candidates (first-synced order_total_price vs
+    // order_net_sales vs order_gross_sales) against Shopify's reported AOV.
+    const [aovCandidates] = await runQuery<Record<string, unknown>>(`
       WITH base AS (
         SELECT order_id, DATE(date) AS d,
                CAST(order_total_price AS FLOAT64) AS total_price,
-               CAST(order_net_sales AS FLOAT64) AS net_sales
+               CAST(order_net_sales AS FLOAT64) AS net_sales,
+               CAST(order_gross_sales AS FLOAT64) AS gross_sales
         FROM \`${ds}.shopify_orders\`
         WHERE order_id IS NOT NULL
       ),
       agg AS (
         SELECT order_id,
                MIN(d) AS order_date,
-               SUM(COALESCE(total_price, net_sales, 0)) AS sum_all,
-               (ARRAY_AGG(COALESCE(total_price, net_sales, 0) ORDER BY d ASC LIMIT 1))[OFFSET(0)] AS first_val,
-               (ARRAY_AGG(COALESCE(total_price, net_sales, 0) ORDER BY d DESC LIMIT 1))[OFFSET(0)] AS last_val
+               (ARRAY_AGG(COALESCE(total_price, net_sales, 0) ORDER BY d ASC LIMIT 1))[OFFSET(0)] AS first_total,
+               (ARRAY_AGG(COALESCE(net_sales, 0) ORDER BY d ASC LIMIT 1))[OFFSET(0)] AS first_net,
+               (ARRAY_AGG(COALESCE(gross_sales, 0) ORDER BY d ASC LIMIT 1))[OFFSET(0)] AS first_gross
         FROM base
         GROUP BY order_id
-      ),
-      cancelled AS (
-        SELECT DISTINCT order_id FROM \`${ds}.shopify_order_status\`
-        WHERE LOWER(TRIM(IFNULL(CAST(order_cancelled_at AS STRING), ''))) NOT IN ('', 'null', 'none', 'nan', '0', 'false')
-      ),
-      in_range AS (
-        SELECT a.*, c.order_id IS NOT NULL AS is_cancelled
-        FROM agg a
-        LEFT JOIN cancelled c ON c.order_id = a.order_id
-        WHERE a.order_date BETWEEN @from AND @to
       )
       SELECT
-        COUNT(*) AS orders_in_range,
-        COUNTIF(NOT is_cancelled) AS orders_in_range_not_cancelled,
-        COUNTIF(is_cancelled) AS cancelled_in_range,
-        ROUND(SUM(first_val), 2) AS sum_first,
-        ROUND(SUM(last_val), 2) AS sum_last,
-        ROUND(SUM(sum_all), 2) AS sum_all_rows,
-        ROUND(SUM(IF(NOT is_cancelled, first_val, 0)), 2) AS sum_first_not_cancelled,
-        ROUND(SUM(IF(NOT is_cancelled, last_val, 0)), 2) AS sum_last_not_cancelled,
-        ROUND(SUM(IF(NOT is_cancelled, sum_all, 0)), 2) AS sum_all_not_cancelled
-      FROM in_range
+        COUNT(*) AS orders,
+        ROUND(SUM(first_total) / COUNT(*), 2) AS aov_total_price,
+        ROUND(SUM(first_net) / COUNT(*), 2) AS aov_net_sales,
+        ROUND(SUM(first_gross) / COUNT(*), 2) AS aov_gross_sales,
+        ROUND(SUM(first_total), 2) AS sum_total,
+        ROUND(SUM(first_net), 2) AS sum_net,
+        ROUND(SUM(first_gross), 2) AS sum_gross
+      FROM agg
+      WHERE order_date BETWEEN @from AND @to
     `, { from, to });
+
+    // New-vs-returning customer diagnostics: replicate the dashboard's
+    // firsts/period logic and surface lifetime-order counts to spot
+    // whether "first order ever" is being computed correctly.
+    const [customerStats] = await runQuery<Record<string, unknown>>(`
+      WITH order_revenue AS (${dedupedOrdersCte(ds)}),
+      firsts AS (
+        SELECT order_customer_id AS cid, MIN(order_date) AS first_order, COUNT(*) AS lifetime_orders
+        FROM order_revenue
+        WHERE order_customer_id IS NOT NULL
+        GROUP BY cid
+      ),
+      period AS (
+        SELECT order_customer_id AS cid, SUM(total_price) AS revenue, COUNT(*) AS orders_in_period
+        FROM order_revenue
+        WHERE order_date BETWEEN @from AND @to AND order_customer_id IS NOT NULL
+        GROUP BY cid
+      )
+      SELECT
+        COUNT(*) AS period_customers,
+        COUNTIF(f.first_order >= @from) AS new_customers,
+        COUNTIF(f.first_order < @from) AS returning_customers,
+        COUNTIF(f.lifetime_orders > 1) AS period_customers_with_gt1_lifetime_orders,
+        COUNTIF(f.first_order < @from AND f.lifetime_orders = 1) AS returning_by_date_but_one_lifetime_order
+      FROM period p
+      JOIN firsts f USING (cid)
+    `, { from, to });
+
+    // Sanity-check order_customer_id coverage/format over time — a format
+    // change between historical and recent syncs would break "first order
+    // ever" lookups and make long-time customers look new.
+    const customerIdByYear = await runQuery<Record<string, unknown>>(`
+      SELECT
+        EXTRACT(YEAR FROM DATE(date)) AS year,
+        COUNT(*) AS rows,
+        COUNT(DISTINCT order_customer_id) AS distinct_customer_ids,
+        COUNTIF(order_customer_id IS NULL) AS null_customer_ids,
+        ANY_VALUE(CAST(order_customer_id AS STRING)) AS sample_id
+      FROM \`${ds}.shopify_orders\`
+      GROUP BY year
+      ORDER BY year
+    `);
+
+    let shopifyCustomersStats: Record<string, unknown> | null = null;
+    let shopifyCustomersSample: Record<string, unknown>[] = [];
+    if (await tableExists('shopify_customers')) {
+      [shopifyCustomersStats] = await runQuery<Record<string, unknown>>(`
+        SELECT
+          COUNT(*) AS total_rows,
+          COUNT(DISTINCT customer_id) AS distinct_customers,
+          COUNTIF(LOWER(CAST(customer_is_returning AS STRING)) IN ('true', '1')) AS flagged_returning
+        FROM \`${ds}.shopify_customers\`
+      `);
+      shopifyCustomersSample = await runQuery<Record<string, unknown>>(`
+        SELECT customer_id, customer_is_returning
+        FROM \`${ds}.shopify_customers\`
+        LIMIT 5
+      `);
+    }
 
     return NextResponse.json({
       range: { from, to },
@@ -151,7 +199,11 @@ export async function GET(request: NextRequest) {
       shopify_order_status: statusStats,
       shopify_order_financials: financialsStats,
       dashboard_calculation: dashboardStats,
-      formulas,
+      aov_candidates: aovCandidates,
+      customer_stats: customerStats,
+      customer_id_by_year: customerIdByYear,
+      shopify_customers: shopifyCustomersStats,
+      shopify_customers_sample: shopifyCustomersSample,
       sample_duplicated_orders: sample,
     });
   } catch (err) {
