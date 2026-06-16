@@ -95,7 +95,16 @@ export async function GET(request: NextRequest) {
       const sample = hasBqProducts ? await runQuery(`
         SELECT * FROM \`${ds}.shopify_products\` LIMIT 3
       `).catch(e => [{ error: String(e) }]) : [];
-      return NextResponse.json({ hasBqProducts, columns: cols, sample, from, to });
+      const withTitle = hasBqProducts ? await runQuery(`
+        SELECT * FROM \`${ds}.shopify_products\` WHERE product_title IS NOT NULL LIMIT 3
+      `).catch(e => [{ error: String(e) }]) : [];
+      const counts = hasBqProducts ? await runQuery(`
+        SELECT COUNT(*) AS total_rows,
+               COUNTIF(product_title IS NOT NULL) AS rows_with_title,
+               COUNTIF(line_item__price > 0) AS rows_with_price
+        FROM \`${ds}.shopify_products\`
+      `).catch(e => [{ error: String(e) }]) : [];
+      return NextResponse.json({ hasBqProducts, columns: cols, sample, withTitle, counts, from, to });
     }
 
     if (hasBqProducts) {
