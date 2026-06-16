@@ -23,8 +23,7 @@ export interface DaySpend {
   tiktok: number;
 }
 
-interface TotalsRow {
-  platform: string;
+interface RawRow {
   spend: number | null;
   revenue: number | null;
   conversions: number | null;
@@ -32,116 +31,144 @@ interface TotalsRow {
   impressions: number | null;
 }
 
-interface DailyRow {
-  date: { value: string } | string;
-  meta: number | null;
-  google: number | null;
-  tiktok: number | null;
+interface DailySpendRow {
+  d: { value: string } | string;
+  spend: number | null;
 }
 
-function dateStr(d: DailyRow['date']): string {
+function dateVal(d: DailySpendRow['d']): string {
   return typeof d === 'string' ? d : d.value;
 }
 
-// Conversions per platform: Meta = omni purchases, Google = conversions,
-// TikTok = onsite purchases — the same counts each ads manager reports.
+function buildPlatform(
+  name: string,
+  color: string,
+  row: RawRow | null,
+): PlatformData | null {
+  const spend = Number(row?.spend || 0);
+  if (spend <= 0) return null;
+  const revenue = Number(row?.revenue || 0);
+  const conversions = Number(row?.conversions || 0);
+  const clicks = Number(row?.clicks || 0);
+  const impressions = Number(row?.impressions || 0);
+  return {
+    platform: name,
+    spend: Math.round(spend * 100) / 100,
+    revenue: Math.round(revenue * 100) / 100,
+    roas: spend > 0 ? Math.round((revenue / spend) * 100) / 100 : 0,
+    impressions: Math.round(impressions),
+    clicks: Math.round(clicks),
+    ctr: impressions > 0 ? Math.round((clicks / impressions) * 10000) / 100 : 0,
+    conversions: Math.round(conversions),
+    costPerConversion: conversions > 0 ? Math.round((spend / conversions) * 100) / 100 : 0,
+    color,
+  };
+}
+
+// Each platform is queried independently so a missing column in one table
+// never crashes another platform's data. New Windsor columns (e.g. impressions
+// added to facebook_ads) are picked up automatically once they exist.
 export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<{ platforms: PlatformData[]; dailySpend: DaySpend[] }> {
   const ds = getDataset();
+  const params = { date_from: dateFrom, date_to: dateTo };
 
-  const totalsSql = `
-    SELECT 'Meta' AS platform,
-           SUM(CAST(spend AS FLOAT64)) AS spend,
-           SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
-           SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS conversions,
-           SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
-           0 AS impressions
+  const metaSql = `
+    SELECT
+      SUM(CAST(spend AS FLOAT64)) AS spend,
+      SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
+      SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS conversions,
+      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      0 AS impressions
     FROM \`${ds}.facebook_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
-    UNION ALL
-    SELECT 'Google',
-           SUM(CAST(spend AS FLOAT64)),
-           SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)),
-           SUM(IFNULL(CAST(conversions AS FLOAT64), 0)),
-           SUM(IFNULL(CAST(clicks AS FLOAT64), 0)),
-           0
+  `;
+
+  // Try with impressions first; fall back without if column doesn't exist yet
+  const metaSqlWithImpressions = metaSql.replace('0 AS impressions', 'SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions');
+
+  const googleSql = `
+    SELECT
+      SUM(CAST(spend AS FLOAT64)) AS spend,
+      SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue,
+      SUM(IFNULL(CAST(conversions AS FLOAT64), 0)) AS conversions,
+      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      0 AS impressions
     FROM \`${ds}.google_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
-    UNION ALL
-    SELECT 'TikTok',
-           SUM(CAST(spend AS FLOAT64)),
-           SUM(IFNULL(CAST(complete_payment_value AS FLOAT64), 0)),
-           SUM(IFNULL(CAST(complete_payment AS FLOAT64), 0)),
-           SUM(IFNULL(CAST(clicks AS FLOAT64), 0)),
-           SUM(IFNULL(CAST(impressions AS FLOAT64), 0))
+  `;
+
+  const googleSqlWithImpressions = googleSql.replace('0 AS impressions', 'SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions');
+
+  // TikTok: complete_payment_value = pixel-tracked website purchases.
+  // Falls back to onsite_total_purchase_value (TikTok Shop) if pixel column missing.
+  const tiktokSql = `
+    SELECT
+      SUM(CAST(spend AS FLOAT64)) AS spend,
+      SUM(IFNULL(CAST(complete_payment_value AS FLOAT64), 0)) AS revenue,
+      SUM(IFNULL(CAST(complete_payment AS FLOAT64), 0)) AS conversions,
+      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
     FROM \`${ds}.tiktok_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
   `;
 
-  const dailySql = `
-    WITH meta AS (
-      SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
-      FROM \`${ds}.facebook_ads\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
-    ),
-    google AS (
-      SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
-      FROM \`${ds}.google_ads\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
-    ),
-    tiktok AS (
-      SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
-      FROM \`${ds}.tiktok_ads\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
-    ),
-    days AS (SELECT d FROM UNNEST(GENERATE_DATE_ARRAY(@date_from, @date_to)) AS d)
-    SELECT FORMAT_DATE('%Y-%m-%d', days.d) AS date,
-           IFNULL(meta.spend, 0)   AS meta,
-           IFNULL(google.spend, 0) AS google,
-           IFNULL(tiktok.spend, 0) AS tiktok
-    FROM days
-    LEFT JOIN meta   ON meta.d = days.d
-    LEFT JOIN google ON google.d = days.d
-    LEFT JOIN tiktok ON tiktok.d = days.d
-    ORDER BY days.d
+  const tiktokSqlFallback = `
+    SELECT
+      SUM(CAST(spend AS FLOAT64)) AS spend,
+      SUM(IFNULL(CAST(onsite_total_purchase_value AS FLOAT64), 0)) AS revenue,
+      SUM(IFNULL(CAST(onsite_total_purchase AS FLOAT64), 0)) AS conversions,
+      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
+    FROM \`${ds}.tiktok_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
   `;
 
-  const params = { date_from: dateFrom, date_to: dateTo };
-  const [totals, daily] = await Promise.all([
-    runQuery<TotalsRow>(totalsSql, params),
-    runQuery<DailyRow>(dailySql, params),
+  const metaDailySql = `
+    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
+    FROM \`${ds}.facebook_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+  `;
+
+  const googleDailySql = `
+    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
+    FROM \`${ds}.google_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+  `;
+
+  const tiktokDailySql = `
+    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
+    FROM \`${ds}.tiktok_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+  `;
+
+  const [metaRows, googleRows, tiktokRows, metaDaily, googleDaily, tiktokDaily] = await Promise.all([
+    runQuery<RawRow>(metaSqlWithImpressions, params).catch(() => runQuery<RawRow>(metaSql, params)).catch(() => null),
+    runQuery<RawRow>(googleSqlWithImpressions, params).catch(() => runQuery<RawRow>(googleSql, params)).catch(() => null),
+    runQuery<RawRow>(tiktokSql, params).catch(() => runQuery<RawRow>(tiktokSqlFallback, params)).catch(() => null),
+    runQuery<DailySpendRow>(metaDailySql, params).catch(() => [] as DailySpendRow[]),
+    runQuery<DailySpendRow>(googleDailySql, params).catch(() => [] as DailySpendRow[]),
+    runQuery<DailySpendRow>(tiktokDailySql, params).catch(() => [] as DailySpendRow[]),
   ]);
 
-  const colors: Record<string, string> = { Meta: '#818cf8', Google: '#34d399', TikTok: '#f472b6' };
   const platforms: PlatformData[] = [];
+  const metaPlatform = buildPlatform('Meta', '#818cf8', metaRows?.[0] ?? null);
+  const googlePlatform = buildPlatform('Google', '#34d399', googleRows?.[0] ?? null);
+  const tiktokPlatform = buildPlatform('TikTok', '#f472b6', tiktokRows?.[0] ?? null);
+  if (metaPlatform) platforms.push(metaPlatform);
+  if (googlePlatform) platforms.push(googlePlatform);
+  if (tiktokPlatform) platforms.push(tiktokPlatform);
 
-  for (const name of ['Meta', 'Google', 'TikTok']) {
-    const r = totals.find(t => t.platform === name);
-    const spend = Number(r?.spend || 0);
-    if (spend <= 0) continue;
-    const revenue = Number(r?.revenue || 0);
-    const conversions = Number(r?.conversions || 0);
-    const clicks = Number(r?.clicks || 0);
-    const impressions = Number(r?.impressions || 0);
-    platforms.push({
-      platform: name,
-      spend: Math.round(spend * 100) / 100,
-      revenue: Math.round(revenue * 100) / 100,
-      roas: spend > 0 ? Math.round((revenue / spend) * 100) / 100 : 0,
-      impressions: Math.round(impressions),
-      clicks: Math.round(clicks),
-      ctr: impressions > 0 ? Math.round((clicks / impressions) * 10000) / 100 : 0,
-      conversions: Math.round(conversions),
-      costPerConversion: conversions > 0 ? Math.round((spend / conversions) * 100) / 100 : 0,
-      color: colors[name],
-    });
-  }
+  // Merge the three daily series into one array spanning the full date range
+  const byDate: Record<string, { meta: number; google: number; tiktok: number }> = {};
+  const ensureDate = (d: string) => { if (!byDate[d]) byDate[d] = { meta: 0, google: 0, tiktok: 0 }; };
 
-  const dailySpend: DaySpend[] = daily.map(r => ({
-    date: dateStr(r.date),
-    meta: Math.round(Number(r.meta || 0)),
-    google: Math.round(Number(r.google || 0)),
-    tiktok: Math.round(Number(r.tiktok || 0)),
-  }));
+  for (const r of metaDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].meta = Math.round(Number(r.spend || 0)); }
+  for (const r of googleDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].google = Math.round(Number(r.spend || 0)); }
+  for (const r of tiktokDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].tiktok = Math.round(Number(r.spend || 0)); }
+
+  const dailySpend: DaySpend[] = Object.entries(byDate)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, v]) => ({ date, ...v }));
 
   return { platforms, dailySpend };
 }
