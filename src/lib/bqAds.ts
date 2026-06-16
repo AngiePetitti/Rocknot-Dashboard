@@ -29,6 +29,7 @@ interface TotalsRow {
   revenue: number | null;
   conversions: number | null;
   clicks: number | null;
+  impressions: number | null;
 }
 
 interface DailyRow {
@@ -52,7 +53,8 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
            SUM(CAST(spend AS FLOAT64)) AS spend,
            SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
            SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS conversions,
-           SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks
+           SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+           SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
     FROM \`${ds}.facebook_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
     UNION ALL
@@ -60,7 +62,8 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
            SUM(CAST(spend AS FLOAT64)),
            SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)),
            SUM(IFNULL(CAST(conversions AS FLOAT64), 0)),
-           SUM(IFNULL(CAST(clicks AS FLOAT64), 0))
+           SUM(IFNULL(CAST(clicks AS FLOAT64), 0)),
+           SUM(IFNULL(CAST(impressions AS FLOAT64), 0))
     FROM \`${ds}.google_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
     UNION ALL
@@ -68,7 +71,8 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
            SUM(CAST(spend AS FLOAT64)),
            SUM(IFNULL(CAST(onsite_total_purchase_value AS FLOAT64), 0)),
            SUM(IFNULL(CAST(onsite_total_purchase AS FLOAT64), 0)),
-           SUM(IFNULL(CAST(clicks AS FLOAT64), 0))
+           SUM(IFNULL(CAST(clicks AS FLOAT64), 0)),
+           SUM(IFNULL(CAST(impressions AS FLOAT64), 0))
     FROM \`${ds}.tiktok_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
   `;
@@ -117,14 +121,15 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     const revenue = Number(r?.revenue || 0);
     const conversions = Number(r?.conversions || 0);
     const clicks = Number(r?.clicks || 0);
+    const impressions = Number(r?.impressions || 0);
     platforms.push({
       platform: name,
       spend: Math.round(spend * 100) / 100,
       revenue: Math.round(revenue * 100) / 100,
       roas: spend > 0 ? Math.round((revenue / spend) * 100) / 100 : 0,
-      impressions: 0,
+      impressions: Math.round(impressions),
       clicks: Math.round(clicks),
-      ctr: 0,
+      ctr: impressions > 0 ? Math.round((clicks / impressions) * 10000) / 100 : 0,
       conversions: Math.round(conversions),
       costPerConversion: conversions > 0 ? Math.round((spend / conversions) * 100) / 100 : 0,
       color: colors[name],
