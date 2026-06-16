@@ -116,7 +116,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     tiktok AS (
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
-             SUM(IFNULL(CAST(onsite_total_purchase_value AS FLOAT64), 0)) AS revenue
+             SUM(COALESCE(CAST(complete_payment_value AS FLOAT64), CAST(onsite_total_purchase_value AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.tiktok_ads\`
       WHERE DATE(date) BETWEEN @date_from AND @date_to
       GROUP BY d
