@@ -1,4 +1,4 @@
-import { runQuery, getDataset, dedupedOrdersCte, tableExists } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte, tableExists, columnExists } from '@/src/lib/bigquery';
 
 // Overview metrics computed from the Windsor→BigQuery tables.
 // Returns the same shape as the Windsor REST aggregation so the
@@ -75,13 +75,13 @@ function financialsOrdersCte(ds: string): string {
 export async function getOverview(dateFrom: string, dateTo: string): Promise<OverviewResult> {
   const ds = getDataset();
 
-  // Use shopify_order_financials for revenue if available (more accurate);
-  // fall back to shopify_orders for clients that haven't set it up yet.
-  const useFinancials = await tableExists('shopify_order_financials');
-  const orderRevenueCte = useFinancials ? financialsOrdersCte(ds) : dedupedOrdersCte(ds);
-
-  // Customer split always uses shopify_orders because shopify_order_financials
-  // does not carry order_customer_id.
+  // Always use shopify_orders (deduplicated) for revenue — shopify_order_financials
+  // can have zero-value rows for same-day orders before Windsor fully syncs them.
+  // shopify_orders.order_net_sales matches Shopify's "Net sales" exactly; adding
+  // order_shipping_price + order_total_tax gives Shopify's "Total sales" exactly.
+  const hasShipping = await columnExists('shopify_orders', 'order_shipping_price');
+  const hasTax = await columnExists('shopify_orders', 'order_total_tax');
+  const orderRevenueCte = dedupedOrdersCte(ds);
   const customerRevenueCte = dedupedOrdersCte(ds);
 
   // One daily rollup joining all sources. Column names verified against the
@@ -90,7 +90,10 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     WITH order_revenue AS (${orderRevenueCte}),
     shopify AS (
       SELECT order_date AS d,
-             SUM(total_price) AS revenue,
+             SUM(net_sales
+               ${hasShipping ? '+ shipping_price' : ''}
+               ${hasTax ? '+ total_tax' : ''}
+             ) AS revenue,
              SUM(net_sales) AS net_sales,
              COUNT(*) AS orders
       FROM order_revenue
