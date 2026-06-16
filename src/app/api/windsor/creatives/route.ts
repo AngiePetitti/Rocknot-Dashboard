@@ -80,7 +80,7 @@ const FIELDS_BY_SOURCE: Record<'facebook' | 'tiktok', string> = {
   facebook: [
     'source', 'ad_name', 'ad_id', 'account_id', 'adset_name', 'campaign',
     'spend', 'impressions', 'clicks',
-    'purchase_roas', 'conversion_values', 'actions_omni_purchase',
+    'action_values_omni_purchase', 'actions_omni_purchase',
   ].join(','),
   tiktok: [
     'source', 'ad_name', 'ad_id', 'account_id', 'adset_name', 'campaign',
@@ -153,14 +153,14 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
     entry.spend += Number(row.spend || 0);
 
     const rawRow = row as Record<string, unknown>;
-    const roasArr = Array.isArray(rawRow.purchase_roas) ? rawRow.purchase_roas as Array<{ value?: string }> : null;
-    const roasVal = roasArr ? Number(roasArr[0]?.value || 0) : 0;
-    const adSpend = Number(row.spend || 0);
-    if (roasVal > 0 && adSpend > 0) {
-      entry.revenue += roasVal * adSpend;
-    } else {
-      entry.revenue += Number(rawRow.onsite_total_purchase_value || row.conversion_values || row.conversion_value || row.revenue || 0);
-    }
+    entry.revenue += Number(
+      rawRow.action_values_omni_purchase ||
+      rawRow.onsite_total_purchase_value ||
+      row.conversion_values ||
+      row.conversion_value ||
+      row.revenue ||
+      0
+    );
 
     entry.impressions += Number(row.impressions || 0);
     entry.clicks += Number(row.clicks || 0);

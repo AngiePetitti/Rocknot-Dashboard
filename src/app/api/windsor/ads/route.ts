@@ -42,7 +42,7 @@ export interface PlatformData {
 // Totals request: no date field — Windsor returns per-ad aggregated rows (avoids row-limit truncation)
 async function fetchSourceTotals(source: 'facebook' | 'google_ads' | 'tiktok', params: Record<string, string>): Promise<WindsorRow[]> {
   const fieldMap = {
-    facebook:   'source,spend,impressions,clicks,purchase_roas',
+    facebook:   'source,spend,impressions,clicks,action_values_omni_purchase,actions_omni_purchase',
     google_ads: 'source,spend,impressions,clicks,conversion_value',
     tiktok:     'source,spend,impressions,clicks,onsite_total_purchase_value,conversion_value',
   };
@@ -80,11 +80,7 @@ function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'Ti
     clicks += Number(row.clicks || 0);
 
     if (platform === 'Meta') {
-      const roasArr = Array.isArray((row as Record<string, unknown>).purchase_roas)
-        ? (row as Record<string, unknown>).purchase_roas as Array<{ value?: string }>
-        : null;
-      const roasVal = roasArr ? Number(roasArr[0]?.value || 0) : 0;
-      revenue += roasVal > 0 ? roasVal * s : 0;
+      revenue += Number((row as Record<string, unknown>).action_values_omni_purchase || 0);
     } else if (platform === 'TikTok') {
       revenue += Number((row as Record<string, unknown>).onsite_total_purchase_value || row.conversion_value || 0);
     } else {
