@@ -10,13 +10,14 @@ export async function GET() {
     return NextResponse.json({ source: 'error', error: 'BigQuery not configured', customerMetrics: null, cohortData: null });
   }
 
-  try {
-    const [customerMetrics, cohortData] = await Promise.all([
-      getCustomerMetrics(),
-      getCohortData(),
-    ]);
-    return NextResponse.json({ source: 'bigquery_live', customerMetrics, cohortData }, { headers: cacheHeaders() });
-  } catch (err) {
-    return NextResponse.json({ source: 'error', error: String(err), customerMetrics: null, cohortData: null });
-  }
+  const [customerMetrics, cohortData] = await Promise.all([
+    getCustomerMetrics().catch(() => null),
+    getCohortData().catch(() => []),
+  ]);
+
+  const hasData = customerMetrics !== null;
+  return NextResponse.json(
+    { source: hasData ? 'bigquery_live' : 'error', customerMetrics, cohortData },
+    { headers: cacheHeaders() },
+  );
 }

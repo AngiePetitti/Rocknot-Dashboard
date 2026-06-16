@@ -108,8 +108,12 @@ export async function GET(request: NextRequest) {
     }
 
     if (hasBqProducts) {
-      const { products, totalRevenue, totalUnits } = await getProductSales(from, to);
-      return NextResponse.json({ source: 'shopify_live', products, totalRevenue, totalUnits }, { headers: cacheHeaders(tfRaw === 'today') });
+      const bqResult = await getProductSales(from, to).catch(() => null);
+      if (bqResult) {
+        const { products, totalRevenue, totalUnits } = bqResult;
+        return NextResponse.json({ source: 'shopify_live', products, totalRevenue, totalUnits }, { headers: cacheHeaders(tfRaw === 'today') });
+      }
+      // BigQuery table exists but query failed (e.g. missing column) — fall through to ShopifyQL
     }
 
     const result = await runShopifyQL(

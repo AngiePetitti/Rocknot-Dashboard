@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
     const range = rangeForTf(tfRaw, dateFrom, dateTo);
     const [overview, ads] = await Promise.all([
       getOverview(range.from, range.to),
-      getAdsOverview(range.from, range.to),
+      getAdsOverview(range.from, range.to).catch(() => ({ platforms: [], dailySpend: [] })),
     ]);
 
     const totalRevenue = overview.metrics.totalRevenue;
