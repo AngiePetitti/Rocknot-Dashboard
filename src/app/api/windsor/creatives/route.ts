@@ -85,7 +85,7 @@ const FIELDS_BY_SOURCE: Record<'facebook' | 'tiktok', string> = {
   tiktok: [
     'source', 'ad_name', 'ad_id', 'account_id', 'adset_name', 'campaign',
     'spend', 'impressions', 'clicks',
-    'conversion_value', 'revenue', 'conversions',
+    'onsite_total_purchase_value', 'conversion_value', 'revenue', 'conversions',
   ].join(','),
 };
 
@@ -159,7 +159,7 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
     if (roasVal > 0 && adSpend > 0) {
       entry.revenue += roasVal * adSpend;
     } else {
-      entry.revenue += Number(row.conversion_values || row.conversion_value || row.revenue || 0);
+      entry.revenue += Number(rawRow.onsite_total_purchase_value || row.conversion_values || row.conversion_value || row.revenue || 0);
     }
 
     entry.impressions += Number(row.impressions || 0);

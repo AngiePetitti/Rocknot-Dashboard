@@ -44,7 +44,7 @@ async function fetchSourceTotals(source: 'facebook' | 'google_ads' | 'tiktok', p
   const fieldMap = {
     facebook:   'source,spend,impressions,clicks,ctr,purchase_roas',
     google_ads: 'source,spend,impressions,clicks,ctr,conversion_value',
-    tiktok:     'source,spend,impressions,clicks,ctr,conversion_value',
+    tiktok:     'source,spend,impressions,clicks,ctr,onsite_total_purchase_value,conversion_value',
   };
   try {
     const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields: fieldMap[source], _renderer: 'json', ...params });
@@ -85,6 +85,8 @@ function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'Ti
         : null;
       const roasVal = roasArr ? Number(roasArr[0]?.value || 0) : 0;
       revenue += roasVal > 0 ? roasVal * s : 0;
+    } else if (platform === 'TikTok') {
+      revenue += Number((row as Record<string, unknown>).onsite_total_purchase_value || row.conversion_value || 0);
     } else {
       revenue += Number(row.conversion_value || 0);
     }
