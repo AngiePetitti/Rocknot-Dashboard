@@ -75,29 +75,28 @@ function financialsOrdersCte(ds: string): string {
 export async function getOverview(dateFrom: string, dateTo: string): Promise<OverviewResult> {
   const ds = getDataset();
 
-  // Always use shopify_orders (deduplicated) for revenue — shopify_order_financials
-  // can have zero-value rows for same-day orders before Windsor fully syncs them.
-  // shopify_orders.order_net_sales matches Shopify's "Net sales" exactly; adding
-  // order_shipping_price + order_total_tax gives Shopify's "Total sales" exactly.
+  // Direct sum from shopify_orders matches Shopify's "Total sales" methodology:
+  // Shopify attributes refund adjustments to the date they occur (not original
+  // order date), so SUM(net_sales) WHERE date IN range = Shopify's Net sales exactly.
+  // Total sales = net_sales + shipping + taxes. Use columnExists to safely add
+  // shipping/tax once Windsor backfills those fields.
   const hasShipping = await columnExists('shopify_orders', 'order_shipping_price');
   const hasTax = await columnExists('shopify_orders', 'order_total_tax');
-  const orderRevenueCte = dedupedOrdersCte(ds);
   const customerRevenueCte = dedupedOrdersCte(ds);
 
-  // One daily rollup joining all sources. Column names verified against the
-  // actual Windsor-created BigQuery schema (rocknot dataset, Jun 2026).
   const sql = `
-    WITH order_revenue AS (${orderRevenueCte}),
-    shopify AS (
-      SELECT order_date AS d,
-             SUM(net_sales
-               ${hasShipping ? '+ shipping_price' : ''}
-               ${hasTax ? '+ total_tax' : ''}
+    WITH shopify AS (
+      SELECT DATE(date) AS d,
+             SUM(
+               CAST(order_net_sales AS FLOAT64)
+               ${hasShipping ? '+ IFNULL(CAST(order_shipping_price AS FLOAT64), 0)' : ''}
+               ${hasTax ? '+ IFNULL(CAST(order_total_tax AS FLOAT64), 0)' : ''}
              ) AS revenue,
-             SUM(net_sales) AS net_sales,
-             COUNT(*) AS orders
-      FROM order_revenue
-      WHERE order_date BETWEEN @date_from AND @date_to
+             SUM(CAST(order_net_sales AS FLOAT64)) AS net_sales,
+             COUNT(DISTINCT order_id) AS orders
+      FROM \`${ds}.shopify_orders\`
+      WHERE DATE(date) BETWEEN @date_from AND @date_to
+        AND order_id IS NOT NULL
       GROUP BY d
     ),
     meta AS (
