@@ -108,9 +108,7 @@ export function dedupedOrdersCte(ds: string): string {
       ANY_VALUE(CAST(order_customer_id AS STRING)) AS order_customer_id,
       MIN(DATE(date)) AS order_date,
       (ARRAY_AGG(COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS total_price,
-      (ARRAY_AGG(COALESCE(CAST(order_net_sales AS FLOAT64), CAST(order_total_price AS FLOAT64), 0) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS net_sales,
-      (ARRAY_AGG(IFNULL(CAST(order_shipping_price AS FLOAT64), 0) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS shipping_price,
-      (ARRAY_AGG(IFNULL(CAST(order_total_tax AS FLOAT64), 0) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS total_tax
+      (ARRAY_AGG(COALESCE(CAST(order_net_sales AS FLOAT64), CAST(order_total_price AS FLOAT64), 0) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS net_sales
     FROM \`${ds}.shopify_orders\`
     GROUP BY order_id
   `;
