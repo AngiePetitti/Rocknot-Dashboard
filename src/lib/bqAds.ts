@@ -69,8 +69,8 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     UNION ALL
     SELECT 'TikTok',
            SUM(CAST(spend AS FLOAT64)),
-           SUM(COALESCE(CAST(complete_payment_value AS FLOAT64), CAST(onsite_total_purchase_value AS FLOAT64), 0)),
-           SUM(COALESCE(CAST(complete_payment AS FLOAT64), CAST(onsite_total_purchase AS FLOAT64), 0)),
+           SUM(IFNULL(CAST(onsite_total_purchase_value AS FLOAT64), 0)),
+           SUM(IFNULL(CAST(onsite_total_purchase AS FLOAT64), 0)),
            SUM(IFNULL(CAST(clicks AS FLOAT64), 0)),
            SUM(IFNULL(CAST(impressions AS FLOAT64), 0))
     FROM \`${ds}.tiktok_ads\`
