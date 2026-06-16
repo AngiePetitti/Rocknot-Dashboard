@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isBigQueryConfigured, tableExists } from '@/src/lib/bigquery';
+import { getProductSales } from '@/src/lib/bqProducts';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 
 export const dynamic = 'force-dynamic';
@@ -77,6 +79,12 @@ export async function GET(request: NextRequest) {
 
   try {
     const { from, to } = rangeForTf(tfRaw, dateFrom, dateTo);
+
+    // BigQuery path — uses Windsor-synced shopify_products table
+    if (isBigQueryConfigured() && await tableExists('shopify_products')) {
+      const { products, totalRevenue, totalUnits } = await getProductSales(from, to);
+      return NextResponse.json({ source: 'shopify_live', products, totalRevenue, totalUnits }, { headers: cacheHeaders(tfRaw === 'today') });
+    }
 
     const result = await runShopifyQL(
       `FROM sales SHOW net_sales, net_quantity BY product_title, product_type SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 50`
