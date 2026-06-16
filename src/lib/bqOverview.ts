@@ -1,4 +1,4 @@
-import { runQuery, getDataset, dedupedOrdersCte } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte, tableExists } from '@/src/lib/bigquery';
 
 // Overview metrics computed from the Windsor→BigQuery tables.
 // Returns the same shape as the Windsor REST aggregation so the
@@ -53,10 +53,36 @@ function dateStr(d: DailyRow['date']): string {
   return typeof d === 'string' ? d : d.value;
 }
 
+// Revenue CTE using shopify_order_financials: one row per order, taking the
+// LAST-synced total_price/net_sales (reflects current refund state), attributed
+// to the order's placement date (MIN(date)). Validated Jun 2026: matches
+// Shopify's "Total sales" within ~0.6% vs ~5.7% off with the first-synced
+// approach on shopify_orders. Falls back to dedupedOrdersCte if the table
+// doesn't exist (new client onboarding).
+function financialsOrdersCte(ds: string): string {
+  return `
+    SELECT
+      order_id,
+      MIN(DATE(date)) AS order_date,
+      (ARRAY_AGG(CAST(order_total_price AS FLOAT64) ORDER BY date DESC LIMIT 1))[OFFSET(0)] AS total_price,
+      (ARRAY_AGG(CAST(order_net_sales   AS FLOAT64) ORDER BY date DESC LIMIT 1))[OFFSET(0)] AS net_sales
+    FROM \`${ds}.shopify_order_financials\`
+    WHERE order_id IS NOT NULL
+    GROUP BY order_id
+  `;
+}
+
 export async function getOverview(dateFrom: string, dateTo: string): Promise<OverviewResult> {
   const ds = getDataset();
 
-  const orderRevenueCte = dedupedOrdersCte(ds);
+  // Use shopify_order_financials for revenue if available (more accurate);
+  // fall back to shopify_orders for clients that haven't set it up yet.
+  const useFinancials = await tableExists('shopify_order_financials');
+  const orderRevenueCte = useFinancials ? financialsOrdersCte(ds) : dedupedOrdersCte(ds);
+
+  // Customer split always uses shopify_orders because shopify_order_financials
+  // does not carry order_customer_id.
+  const customerRevenueCte = dedupedOrdersCte(ds);
 
   // One daily rollup joining all sources. Column names verified against the
   // actual Windsor-created BigQuery schema (rocknot dataset, Jun 2026).
@@ -124,7 +150,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // period (sales = all of their orders placed during the period). Guest
   // checkouts have no customer id and are excluded, as in Shopify's report.
   const customerSql = `
-    WITH order_revenue AS (${orderRevenueCte}),
+    WITH order_revenue AS (${customerRevenueCte}),
     firsts AS (
       SELECT order_customer_id AS cid,
              MIN(order_date) AS first_order,
