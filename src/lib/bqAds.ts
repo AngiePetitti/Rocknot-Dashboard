@@ -72,7 +72,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
            SUM(IFNULL(CAST(onsite_total_purchase_value AS FLOAT64), 0)),
            SUM(IFNULL(CAST(onsite_total_purchase AS FLOAT64), 0)),
            SUM(IFNULL(CAST(clicks AS FLOAT64), 0)),
-           SUM(IFNULL(CAST(impressions AS FLOAT64), 0))
+           0
     FROM \`${ds}.tiktok_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
   `;
