@@ -81,7 +81,24 @@ export async function GET(request: NextRequest) {
     const { from, to } = rangeForTf(tfRaw, dateFrom, dateTo);
 
     // BigQuery path — uses Windsor-synced shopify_products table
-    if (isBigQueryConfigured() && await tableExists('shopify_products')) {
+    const hasBqProducts = isBigQueryConfigured() && await tableExists('shopify_products');
+
+    if (searchParams.get('debug') === 'true' && isBigQueryConfigured()) {
+      const { runQuery, getDataset } = await import('@/src/lib/bigquery');
+      const ds = getDataset();
+      const cols = hasBqProducts ? await runQuery(`
+        SELECT column_name, data_type
+        FROM \`${ds}\`.INFORMATION_SCHEMA.COLUMNS
+        WHERE table_name = 'shopify_products'
+        ORDER BY ordinal_position
+      `).catch(e => [{ error: String(e) }]) : [];
+      const sample = hasBqProducts ? await runQuery(`
+        SELECT * FROM \`${ds}.shopify_products\` LIMIT 3
+      `).catch(e => [{ error: String(e) }]) : [];
+      return NextResponse.json({ hasBqProducts, columns: cols, sample, from, to });
+    }
+
+    if (hasBqProducts) {
       const { products, totalRevenue, totalUnits } = await getProductSales(from, to);
       return NextResponse.json({ source: 'shopify_live', products, totalRevenue, totalUnits }, { headers: cacheHeaders(tfRaw === 'today') });
     }
