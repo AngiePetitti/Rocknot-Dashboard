@@ -10,8 +10,8 @@ export interface ProductSales {
 }
 
 interface ProductRow {
-  product_title: string | null;
-  product_type: string | null;
+  line_item__title: string | null;
+  line_item__product_type: string | null;
   total_quantity: number | null;
   total_revenue: number | null;
 }
@@ -25,15 +25,15 @@ export async function getProductSales(dateFrom: string, dateTo: string): Promise
 
   const sql = `
     SELECT
-      product_title,
-      product_type,
+      line_item__title,
+      line_item__product_type,
       SUM(CAST(line_item__quantity AS FLOAT64))  AS total_quantity,
       SUM(CAST(line_item__price   AS FLOAT64))  AS total_revenue
     FROM \`${ds}.shopify_products\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
-      AND product_title IS NOT NULL
-      AND product_title != ''
-    GROUP BY product_title, product_type
+      AND line_item__title IS NOT NULL
+      AND line_item__title != ''
+    GROUP BY line_item__title, line_item__product_type
     HAVING total_revenue > 0
     ORDER BY total_revenue DESC
     LIMIT 50
@@ -43,8 +43,8 @@ export async function getProductSales(dateFrom: string, dateTo: string): Promise
 
   const products: ProductSales[] = rows.map((r, i) => ({
     id: String(i),
-    name: r.product_title || 'Unknown',
-    category: r.product_type || 'Other',
+    name: r.line_item__title || 'Unknown',
+    category: r.line_item__product_type || 'Other',
     unitsSold: Math.round(Number(r.total_quantity || 0)),
     revenue: Math.round(Number(r.total_revenue || 0)),
     percentOfTotal: 0,
