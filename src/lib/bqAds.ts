@@ -54,7 +54,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
            SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
            SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS conversions,
            SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
-           SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
+           0 AS impressions
     FROM \`${ds}.facebook_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
     UNION ALL
@@ -63,16 +63,16 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
            SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)),
            SUM(IFNULL(CAST(conversions AS FLOAT64), 0)),
            SUM(IFNULL(CAST(clicks AS FLOAT64), 0)),
-           SUM(IFNULL(CAST(impressions AS FLOAT64), 0))
+           0
     FROM \`${ds}.google_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
     UNION ALL
     SELECT 'TikTok',
            SUM(CAST(spend AS FLOAT64)),
-           SUM(IFNULL(CAST(onsite_total_purchase_value AS FLOAT64), 0)),
-           SUM(IFNULL(CAST(onsite_total_purchase AS FLOAT64), 0)),
+           SUM(IFNULL(CAST(complete_payment_value AS FLOAT64), 0)),
+           SUM(IFNULL(CAST(complete_payment AS FLOAT64), 0)),
            SUM(IFNULL(CAST(clicks AS FLOAT64), 0)),
-           0
+           SUM(IFNULL(CAST(impressions AS FLOAT64), 0))
     FROM \`${ds}.tiktok_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
   `;

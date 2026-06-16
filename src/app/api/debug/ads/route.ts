@@ -20,7 +20,6 @@ export async function GET() {
     runQuery(`
       SELECT
         SUM(CAST(spend AS FLOAT64)) AS spend,
-        SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions,
         SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
         SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS action_values_omni_purchase,
         SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS actions_omni_purchase
@@ -30,7 +29,6 @@ export async function GET() {
     runQuery(`
       SELECT
         SUM(CAST(spend AS FLOAT64)) AS spend,
-        SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions,
         SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
         SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS conversion_value,
         SUM(IFNULL(CAST(conversions AS FLOAT64), 0)) AS conversions
