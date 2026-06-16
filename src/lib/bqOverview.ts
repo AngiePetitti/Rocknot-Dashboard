@@ -1,8 +1,4 @@
-import { runQuery, getDataset, dedupedOrdersCte, tableExists, columnExists } from '@/src/lib/bigquery';
-
-// Overview metrics computed from the Windsor→BigQuery tables.
-// Returns the same shape as the Windsor REST aggregation so the
-// frontend needs no changes when BigQuery is enabled.
+import { runQuery, getDataset, dedupedOrdersCte } from '@/src/lib/bigquery';
 
 export interface OverviewResult {
   metrics: {
@@ -53,44 +49,22 @@ function dateStr(d: DailyRow['date']): string {
   return typeof d === 'string' ? d : d.value;
 }
 
-// Revenue CTE using shopify_order_financials: one row per order, taking the
-// LAST-synced total_price/net_sales (reflects current refund state), attributed
-// to the order's placement date (MIN(date)). Validated Jun 2026: matches
-// Shopify's "Total sales" within ~0.6% vs ~5.7% off with the first-synced
-// approach on shopify_orders. Falls back to dedupedOrdersCte if the table
-// doesn't exist (new client onboarding).
-function financialsOrdersCte(ds: string): string {
-  return `
-    SELECT
-      order_id,
-      MIN(DATE(date)) AS order_date,
-      (ARRAY_AGG(CAST(order_total_price AS FLOAT64) ORDER BY date DESC LIMIT 1))[OFFSET(0)] AS total_price,
-      (ARRAY_AGG(CAST(order_net_sales   AS FLOAT64) ORDER BY date DESC LIMIT 1))[OFFSET(0)] AS net_sales
-    FROM \`${ds}.shopify_order_financials\`
-    WHERE order_id IS NOT NULL
-    GROUP BY order_id
-  `;
-}
-
 export async function getOverview(dateFrom: string, dateTo: string): Promise<OverviewResult> {
   const ds = getDataset();
+  const params = { date_from: dateFrom, date_to: dateTo };
 
-  // Direct sum from shopify_orders matches Shopify's "Total sales" methodology:
-  // Shopify attributes refund adjustments to the date they occur (not original
-  // order date), so SUM(net_sales) WHERE date IN range = Shopify's Net sales exactly.
-  // Total sales = net_sales + shipping + taxes. Use columnExists to safely add
-  // shipping/tax once Windsor backfills those fields.
-  const hasShipping = await columnExists('shopify_orders', 'order_shipping_price');
-  const hasTax = await columnExists('shopify_orders', 'order_total_tax');
-  const customerRevenueCte = dedupedOrdersCte(ds);
-
-  const sql = `
+  // Direct sum from shopify_orders matches Shopify's "Total sales" methodology.
+  // Shopify attributes refund adjustments to the date they occur, so
+  // SUM(order_net_sales) WHERE date IN range = Shopify Net sales exactly.
+  // Total sales = net_sales + shipping + taxes.
+  // Try with shipping+tax columns first; fall back to net_sales only if they
+  // don't exist yet (Windsor backfill still running).
+  const buildSql = (includeShippingTax: boolean) => `
     WITH shopify AS (
       SELECT DATE(date) AS d,
              SUM(
                CAST(order_net_sales AS FLOAT64)
-               ${hasShipping ? '+ IFNULL(CAST(order_shipping_price AS FLOAT64), 0)' : ''}
-               ${hasTax ? '+ IFNULL(CAST(order_total_tax AS FLOAT64), 0)' : ''}
+               ${includeShippingTax ? '+ IFNULL(CAST(order_shipping_price AS FLOAT64), 0) + IFNULL(CAST(order_total_tax AS FLOAT64), 0)' : ''}
              ) AS revenue,
              SUM(CAST(order_net_sales AS FLOAT64)) AS net_sales,
              COUNT(DISTINCT order_id) AS orders
@@ -145,14 +119,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     ORDER BY days.d
   `;
 
-  // Customer counts match Shopify's "New customer sales over time" report:
-  // "new" = customers whose first-ever order falls in this period (sales =
-  // just that first order, matching Shopify's Orders==Customers for the New
-  // segment), "returning" = customers whose first-ever order was before this
-  // period (sales = all of their orders placed during the period). Guest
-  // checkouts have no customer id and are excluded, as in Shopify's report.
   const customerSql = `
-    WITH order_revenue AS (${customerRevenueCte}),
+    WITH order_revenue AS (${dedupedOrdersCte(ds)}),
     firsts AS (
       SELECT order_customer_id AS cid,
              MIN(order_date) AS first_order,
@@ -178,9 +146,11 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   `;
 
   const [rows, custRows] = await Promise.all([
-    runQuery<DailyRow>(sql, { date_from: dateFrom, date_to: dateTo }),
-    runQuery<CustomerRow>(customerSql, { date_from: dateFrom, date_to: dateTo }),
+    runQuery<DailyRow>(buildSql(true), params)
+      .catch(() => runQuery<DailyRow>(buildSql(false), params)),
+    runQuery<CustomerRow>(customerSql, params),
   ]);
+
   const cust = custRows[0] ?? {
     new_customers: 0,
     returning_customers: 0,
