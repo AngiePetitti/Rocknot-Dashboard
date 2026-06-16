@@ -42,9 +42,9 @@ export interface PlatformData {
 // Totals request: no date field — Windsor returns per-ad aggregated rows (avoids row-limit truncation)
 async function fetchSourceTotals(source: 'facebook' | 'google_ads' | 'tiktok', params: Record<string, string>): Promise<WindsorRow[]> {
   const fieldMap = {
-    facebook:   'source,spend,impressions,clicks,ctr,purchase_roas',
-    google_ads: 'source,spend,impressions,clicks,ctr,conversion_value',
-    tiktok:     'source,spend,impressions,clicks,ctr,onsite_total_purchase_value,conversion_value',
+    facebook:   'source,spend,impressions,clicks,purchase_roas',
+    google_ads: 'source,spend,impressions,clicks,conversion_value',
+    tiktok:     'source,spend,impressions,clicks,onsite_total_purchase_value,conversion_value',
   };
   try {
     const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields: fieldMap[source], _renderer: 'json', ...params });

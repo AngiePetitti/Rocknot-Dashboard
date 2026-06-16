@@ -158,7 +158,7 @@ function aggregateRows(rows: WindsorRow[]) {
         byDate[date].googleRevenue += Number(row.conversion_value || row.revenue || 0);
         byDate[date].googleSpend += spend;
       } else if (src.includes('tiktok')) {
-        byDate[date].tiktokRevenue += Number(row.conversion_value || row.revenue || 0);
+        byDate[date].tiktokRevenue += Number((row as Record<string, unknown>).onsite_total_purchase_value || row.conversion_value || row.revenue || 0);
         byDate[date].tiktokSpend += spend;
       }
     }
