@@ -10,7 +10,7 @@ interface InventoryItem {
   product: string;
   variant: string;
   currentStock: number;
-  unitsSold30d: number;
+  unitsSold90d: number;
   dailyVelocity: number;
   daysRemaining: number | null;
   sellThroughRate: number;
@@ -26,7 +26,7 @@ const STATUS_CONFIG = {
 };
 
 type FilterStatus = 'all' | 'out_of_stock' | 'critical' | 'low' | 'healthy';
-type SortKey = 'daysRemaining' | 'currentStock' | 'unitsSold30d' | 'sellThroughRate' | 'reorderQty';
+type SortKey = 'daysRemaining' | 'currentStock' | 'unitsSold90d' | 'sellThroughRate' | 'reorderQty';
 
 export default function InventoryContent() {
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -91,7 +91,7 @@ export default function InventoryContent() {
     <div>
       <Header
         title="Inventory & Reorder"
-        subtitle="Stock levels, velocity, and reorder recommendations · last 30 days velocity"
+        subtitle="Stock levels, velocity, and reorder recommendations · 90-day velocity · 90-day supply target"
       />
 
       {status === 'error' && (
@@ -100,6 +100,15 @@ export default function InventoryContent() {
           <span>Inventory data unavailable — Shopify query failed.</span>
         </div>
       )}
+
+      {/* Supply target callout */}
+      <div className="flex items-center gap-3 bg-violet-50 border border-violet-100 rounded-xl px-4 py-2.5 mb-5 text-xs text-violet-700">
+        <span className="text-base">📦</span>
+        <span>
+          <strong>90-day supply target</strong> — velocity based on last 90 days of sales.
+          Reorder Qty = units needed to bring stock back to 90 days of supply at current pace.
+        </span>
+      </div>
 
       {/* Metric cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -191,9 +200,9 @@ export default function InventoryContent() {
                     className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600"
                   >Stock{arrow('currentStock')}</th>
                   <th
-                    onClick={() => handleSort('unitsSold30d')}
+                    onClick={() => handleSort('unitsSold90d')}
                     className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600"
-                  >Sold 30d{arrow('unitsSold30d')}</th>
+                  >Sold 90d{arrow('unitsSold90d')}</th>
                   <th
                     onClick={() => handleSort('daysRemaining')}
                     className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600"
@@ -221,7 +230,7 @@ export default function InventoryContent() {
                           ? <span className="text-red-500 font-bold">0</span>
                           : item.currentStock.toLocaleString()}
                       </td>
-                      <td className="py-2.5 px-3 text-right text-xs text-gray-600">{item.unitsSold30d.toLocaleString()}</td>
+                      <td className="py-2.5 px-3 text-right text-xs text-gray-600">{item.unitsSold90d.toLocaleString()}</td>
                       <td className="py-2.5 px-3 text-right text-xs font-semibold">
                         {item.daysRemaining === null
                           ? <span className="text-gray-300">—</span>
@@ -265,7 +274,7 @@ export default function InventoryContent() {
           </div>
         )}
         <p className="text-xs text-gray-400 mt-3">
-          Reorder Qty = units needed to reach 45 days of supply at current 30-day velocity.
+          Reorder Qty = units needed to reach 90 days of supply at current 90-day average daily velocity.
         </p>
       </Card>
     </div>

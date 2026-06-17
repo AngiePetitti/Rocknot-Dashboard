@@ -11,7 +11,7 @@ export interface InventoryItem {
   product: string;
   variant: string;
   currentStock: number;
-  unitsSold30d: number;
+  unitsSold90d: number;
   dailyVelocity: number;
   daysRemaining: number | null; // null = no recent sales (velocity = 0)
   sellThroughRate: number;
@@ -60,15 +60,17 @@ export async function GET() {
   }
 
   try {
-    // 30-day window for velocity. We exclude variants with absurdly high
-    // stock counts (e.g. non-physical "Return" products) via the HAVING clause.
+    // 90-day window for velocity — longer lookback smooths seasonal spikes.
+    // We exclude variants with absurdly high stock counts (e.g. non-physical
+    // "Return" products) via the HAVING clause.
+    const SUPPLY_TARGET_DAYS = 90;
     const SINCE = (() => {
       const d = new Date();
-      d.setDate(d.getDate() - 30);
+      d.setDate(d.getDate() - 90);
       return d.toISOString().split('T')[0];
     })();
     const UNTIL = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    const PERIOD_DAYS = 30;
+    const PERIOD_DAYS = 90;
 
     const { rows, cell } = await runShopifyQL(
       `FROM inventory
@@ -94,9 +96,9 @@ export async function GET() {
           : null;
         const status = statusFor(currentStock, daysRemaining);
 
-        // Suggest enough stock to cover 45 days at current velocity, minus what's on hand.
+        // Suggest enough stock to cover 90 days at current velocity, minus what's on hand.
         const reorderQty = dailyVelocity > 0
-          ? Math.max(0, Math.round(dailyVelocity * 45) - Math.max(currentStock, 0))
+          ? Math.max(0, Math.round(dailyVelocity * SUPPLY_TARGET_DAYS) - Math.max(currentStock, 0))
           : 0;
 
         return {
@@ -104,7 +106,7 @@ export async function GET() {
           product,
           variant: variant === 'Default Title' ? '' : variant,
           currentStock,
-          unitsSold30d: unitsSold,
+          unitsSold90d: unitsSold,
           dailyVelocity,
           daysRemaining,
           sellThroughRate,
@@ -113,7 +115,7 @@ export async function GET() {
         };
       })
       // Only show SKUs that have stock or recent sales
-      .filter(item => item.currentStock > 0 || item.unitsSold30d > 0);
+      .filter(item => item.currentStock > 0 || item.unitsSold90d > 0);
 
     const outOfStock = items.filter(i => i.status === 'out_of_stock').length;
     const critical = items.filter(i => i.status === 'critical').length;
