@@ -192,7 +192,11 @@ export default function AdsContent() {
                   </div>
                   <div>
                     <p className="text-gray-400 uppercase font-semibold mb-0.5">ROAS</p>
-                    <p className="font-bold" style={{ color: p.roas >= 3.5 ? '#22c55e' : '#ef4444' }}>{formatROAS(p.roas)}</p>
+                    {p.revenue > 0 ? (
+                      <p className="font-bold" style={{ color: p.roas >= 3.5 ? '#22c55e' : '#ef4444' }}>{formatROAS(p.roas)}</p>
+                    ) : (
+                      <p className="font-bold text-gray-400" title="No purchase value reported for this platform">—</p>
+                    )}
                   </div>
                   <div>
                     <p className="text-gray-400 uppercase font-semibold mb-0.5">Conversions</p>
@@ -208,7 +212,7 @@ export default function AdsContent() {
                   </div>
                   <div>
                     <p className="text-gray-400 uppercase font-semibold mb-0.5">Revenue</p>
-                    <p className="font-bold text-gray-800">{formatCurrency(p.revenue)}</p>
+                    <p className="font-bold text-gray-800">{p.revenue > 0 ? formatCurrency(p.revenue) : <span className="text-gray-400" title="No purchase value reported for this platform">—</span>}</p>
                   </div>
                 </div>
               </Card>
@@ -329,9 +333,13 @@ export default function AdsContent() {
                         <td className="py-2.5 px-3 text-center whitespace-nowrap"><PlatformBadge platform={ad.platform} /></td>
                         <td className="py-2.5 px-3 text-center whitespace-nowrap text-gray-600">{formatCurrency(ad.spend)}</td>
                         <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                          <span className="font-bold" style={{ color: ad.roas >= 3.5 ? '#22c55e' : '#ef4444' }}>
-                            {formatROAS(ad.roas)}
-                          </span>
+                          {ad.revenue > 0 ? (
+                            <span className="font-bold" style={{ color: ad.roas >= 3.5 ? '#22c55e' : '#ef4444' }}>
+                              {formatROAS(ad.roas)}
+                            </span>
+                          ) : (
+                            <span className="font-bold text-gray-400" title="No purchase value reported">—</span>
+                          )}
                         </td>
                         <td className="py-2.5 px-3 text-center whitespace-nowrap text-gray-600">{formatPercent(ad.ctr)}</td>
                         <td className="py-2.5 px-3 text-center whitespace-nowrap text-gray-600">{(ad.conversions ?? 0).toLocaleString()}</td>
