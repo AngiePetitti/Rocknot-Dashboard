@@ -54,8 +54,10 @@ interface ShopifyDay {
   orders: number;
 }
 
-const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
-const SHOPIFY_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com';
+// Trim env values: Vercel copy-paste often leaves a trailing newline, which
+// corrupts the auth header (401) and the request host.
+const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
+const SHOPIFY_DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com').trim();
 
 async function fetchShopifyDaily(from: string, to: string): Promise<ShopifyDay[]> {
   if (!SHOPIFY_TOKEN) return [];

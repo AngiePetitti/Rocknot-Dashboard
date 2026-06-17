@@ -5,8 +5,8 @@ import { cacheHeaders } from '@/src/lib/cacheHeaders';
 
 export const dynamic = 'force-dynamic';
 
-const TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
-const DOMAIN = process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com';
+const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
+const DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com').trim();
 
 export interface ProductSales {
   id: string;
