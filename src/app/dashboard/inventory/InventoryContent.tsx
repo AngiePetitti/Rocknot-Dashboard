@@ -107,6 +107,7 @@ export default function InventoryContent() {
         <span>
           <strong>90-day supply target</strong> — velocity based on last 90 days of sales.
           Reorder Qty = units needed to bring stock back to 90 days of supply at current pace.
+          Products without Shopify inventory tracking (e.g. handbags) are excluded.
         </span>
       </div>
 
@@ -115,7 +116,7 @@ export default function InventoryContent() {
         <MetricCard
           title="Out of Stock"
           value={status === 'loading' ? '—' : counts.outOfStock.toString()}
-          subtitle="0 units remaining"
+          subtitle="Tracked SKUs sold to zero"
           accentColor="#fca5a5"
         />
         <MetricCard

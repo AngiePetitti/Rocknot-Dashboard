@@ -77,7 +77,7 @@ export async function GET() {
        SHOW ending_inventory_units, inventory_units_sold, sell_through_rate
        GROUP BY product_title, product_variant_title
        SINCE ${SINCE} UNTIL ${UNTIL}
-       HAVING ending_inventory_units < 50000
+       HAVING ending_inventory_units > 0 AND ending_inventory_units < 50000
        ORDER BY inventory_units_sold DESC
        LIMIT 250`
     );
@@ -114,10 +114,15 @@ export async function GET() {
           reorderQty,
         };
       })
-      // Only show SKUs that have stock or recent sales
-      .filter(item => item.currentStock > 0 || item.unitsSold90d > 0);
+      // Only show SKUs with positive tracked stock. Items where Shopify
+      // inventory tracking is disabled (handbags, bundles) report 0 or null
+      // ending_inventory_units — excluding them avoids false "Out of Stock"
+      // badges for products that were never tracked in the first place.
+      .filter(item => item.currentStock > 0);
 
-    const outOfStock = items.filter(i => i.status === 'out_of_stock').length;
+    // Count as "out of stock" only items that had real sales in the window
+    // AND hit zero — not untracked items that simply report 0.
+    const outOfStock = items.filter(i => i.status === 'out_of_stock' && i.unitsSold90d > 0).length;
     const critical = items.filter(i => i.status === 'critical').length;
     const low = items.filter(i => i.status === 'low').length;
     const healthy = items.filter(i => i.status === 'healthy').length;
