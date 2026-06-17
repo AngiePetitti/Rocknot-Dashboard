@@ -120,7 +120,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     tiktok AS (
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
-             SUM(IFNULL(CAST(complete_payment_value AS FLOAT64), 0)) AS revenue
+             SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.tiktok_ads\`
       WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
     ),
@@ -167,9 +167,17 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     JOIN firsts f USING (cid)
   `;
 
+  // Fallback to the legacy TikTok revenue column if total_complete_payment_rate
+  // hasn't been backfilled into the table yet, so a missing column there doesn't
+  // zero out Meta/Google spend in this combined query.
+  const adsSqlLegacyTiktok = adsSql.replace(
+    'SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue',
+    'SUM(IFNULL(CAST(complete_payment_value AS FLOAT64), 0)) AS revenue'
+  );
+
   const [shopifyDays, adsRows, custRows] = await Promise.all([
     fetchShopifyDaily(dateFrom, dateTo).catch(() => [] as ShopifyDay[]),
-    runQuery<AdsRow>(adsSql, params).catch(() => [] as AdsRow[]),
+    runQuery<AdsRow>(adsSql, params).catch(() => runQuery<AdsRow>(adsSqlLegacyTiktok, params)).catch(() => [] as AdsRow[]),
     runQuery<CustomerRow>(customerSql, params).catch(() => [] as CustomerRow[]),
   ]);
 
