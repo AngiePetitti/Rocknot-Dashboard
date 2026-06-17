@@ -490,21 +490,6 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Override new vs returning customer revenue split with live Shopify data.
-    // Windsor's /all endpoint lags by up to an hour; ShopifyQL is always live.
-    if (!latestAvailableDate) {
-      const shopifySplit = await fetchShopifyCustomerSplit(currentParams.date_from, currentParams.date_to).catch(() => null);
-      if (shopifySplit) {
-        const splitTotal = shopifySplit.newCustomers + shopifySplit.returningCustomers;
-        current.metrics.newCustomers = shopifySplit.newCustomers;
-        current.metrics.returningCustomers = shopifySplit.returningCustomers;
-        current.metrics.newCustomerRevenue = Math.round(shopifySplit.newRevenue);
-        current.metrics.returningCustomerRevenue = Math.round(shopifySplit.returningRevenue);
-        current.metrics.pctNew = splitTotal > 0 ? Math.round((shopifySplit.newCustomers / splitTotal) * 1000) / 10 : 0;
-        current.metrics.pctReturning = splitTotal > 0 ? Math.round((shopifySplit.returningCustomers / splitTotal) * 1000) / 10 : 0;
-      }
-    }
-
     // For "today", replace Meta numbers with the Graph API's live figures.
     // Always trust the Graph API over Windsor — Windsor can both under-report
     // (sync delay) and over-report (intraday re-sync duplicates).
@@ -535,6 +520,21 @@ export async function GET(request: NextRequest) {
       current.metrics.returningCustomers = retCust;
       current.metrics.pctNew = splitTotal > 0 ? Math.round((newCust / splitTotal) * 1000) / 10 : 0;
       current.metrics.pctReturning = splitTotal > 0 ? Math.round((retCust / splitTotal) * 1000) / 10 : 0;
+    }
+
+    // Override with live Shopify customer split — must run AFTER the Windsor
+    // splitDays overlay above, otherwise Windsor's stale data overwrites it.
+    if (!latestAvailableDate) {
+      const shopifySplit = await fetchShopifyCustomerSplit(currentParams.date_from, currentParams.date_to).catch(() => null);
+      if (shopifySplit) {
+        const splitTotal = shopifySplit.newCustomers + shopifySplit.returningCustomers;
+        current.metrics.newCustomers = shopifySplit.newCustomers;
+        current.metrics.returningCustomers = shopifySplit.returningCustomers;
+        current.metrics.newCustomerRevenue = Math.round(shopifySplit.newRevenue);
+        current.metrics.returningCustomerRevenue = Math.round(shopifySplit.returningRevenue);
+        current.metrics.pctNew = splitTotal > 0 ? Math.round((shopifySplit.newCustomers / splitTotal) * 1000) / 10 : 0;
+        current.metrics.pctReturning = splitTotal > 0 ? Math.round((shopifySplit.returningCustomers / splitTotal) * 1000) / 10 : 0;
+      }
     }
 
     let priorPeriod = null;

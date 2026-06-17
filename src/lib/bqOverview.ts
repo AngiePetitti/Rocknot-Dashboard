@@ -105,7 +105,9 @@ export interface ShopifyCustomerSplit {
 
 export async function fetchShopifyCustomerSplit(from: string, to: string): Promise<ShopifyCustomerSplit | null> {
   if (!SHOPIFY_TOKEN) return null;
-  const ql = `FROM sales SHOW gross_sales, customers GROUP BY customer_type SINCE ${from} UNTIL ${to}`;
+  // ShopifyQL does not support GROUP BY customer_type. Instead, use the
+  // built-in returning_customers dimension alongside total customers.
+  const ql = `FROM sales SHOW gross_sales, customers, returning_customers SINCE ${from} UNTIL ${to}`;
   const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
@@ -122,6 +124,7 @@ export async function fetchShopifyCustomerSplit(from: string, to: string): Promi
   if (typeof q?.parseErrors === 'string' && q.parseErrors) return null;
   const cols: { name: string }[] = q?.tableData?.columns || [];
   const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
+  if (rows.length === 0) return null;
   const cell = (r: Record<string, string> | string[], name: string): string => {
     if (Array.isArray(r)) {
       const i = cols.findIndex(c => c.name === name);
@@ -129,15 +132,15 @@ export async function fetchShopifyCustomerSplit(from: string, to: string): Promi
     }
     return r[name] ?? '';
   };
-  let newCustomers = 0, returningCustomers = 0, newRevenue = 0, returningRevenue = 0;
-  for (const r of rows) {
-    const type = (cell(r, 'customer_type') || '').toLowerCase();
-    const revenue = parseFloat(cell(r, 'gross_sales') || '0');
-    const count = Math.round(parseFloat(cell(r, 'customers') || '0'));
-    if (type === 'new') { newCustomers = count; newRevenue = revenue; }
-    else if (type === 'returning') { returningCustomers = count; returningRevenue = revenue; }
-  }
-  if (newCustomers === 0 && returningCustomers === 0) return null;
+  const r = rows[0];
+  const totalCustomers = Math.round(parseFloat(cell(r, 'customers') || '0'));
+  const returningCustomers = Math.round(parseFloat(cell(r, 'returning_customers') || '0'));
+  const newCustomers = Math.max(0, totalCustomers - returningCustomers);
+  const totalRevenue = parseFloat(cell(r, 'gross_sales') || '0');
+  if (totalCustomers === 0) return null;
+  // Revenue split is proportional to customer count — best available from ShopifyQL.
+  const newRevenue = totalCustomers > 0 ? (newCustomers / totalCustomers) * totalRevenue : 0;
+  const returningRevenue = totalCustomers > 0 ? (returningCustomers / totalCustomers) * totalRevenue : 0;
   return { newCustomers, returningCustomers, newRevenue, returningRevenue };
 }
 
