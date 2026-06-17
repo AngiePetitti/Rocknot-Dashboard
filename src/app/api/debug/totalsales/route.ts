@@ -27,7 +27,8 @@ export async function GET(request: NextRequest) {
       ROUND(SUM(CAST(order_net_sales AS FLOAT64)), 2) AS sum_net_sales,
       ROUND(SUM(IFNULL(CAST(order_total_shipping_price AS FLOAT64), 0)), 2) AS sum_shipping,
       ROUND(SUM(IFNULL(CAST(order_total_tax_amount AS FLOAT64), 0)), 2) AS sum_tax,
-      ROUND(SUM(CAST(order_net_sales AS FLOAT64)) + SUM(IFNULL(CAST(order_total_shipping_price AS FLOAT64), 0)) + SUM(IFNULL(CAST(order_total_tax_amount AS FLOAT64), 0)), 2) AS computed_total_sales,
+      ROUND(SUM(IFNULL(CAST(order_total_shipping_refunded_price AS FLOAT64), 0)), 2) AS sum_refunded_shipping,
+      ROUND(SUM(CAST(order_net_sales AS FLOAT64)) + SUM(IFNULL(CAST(order_total_shipping_price AS FLOAT64), 0)) + SUM(IFNULL(CAST(order_total_tax_amount AS FLOAT64), 0)) - SUM(IFNULL(CAST(order_total_shipping_refunded_price AS FLOAT64), 0)), 2) AS computed_total_sales,
       COUNTIF(order_total_shipping_price IS NULL) AS null_shipping_rows,
       COUNTIF(order_total_tax_amount IS NULL) AS null_tax_rows
     FROM \`${ds}.shopify_orders\`
