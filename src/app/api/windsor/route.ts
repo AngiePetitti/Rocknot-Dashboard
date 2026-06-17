@@ -105,6 +105,8 @@ interface AggregatedMetrics {
   tiktokRevenue: number;
   newCustomers: number;
   returningCustomers: number;
+  newCustomerRevenue: number;
+  returningCustomerRevenue: number;
   pctNew: number;
   pctReturning: number;
 }
@@ -217,6 +219,8 @@ function aggregateRows(rows: WindsorRow[]) {
     tiktokRevenue: Math.round(totalTikTokRevenue),
     newCustomers: totalNewCust,
     returningCustomers: totalRetCust,
+    newCustomerRevenue: 0,
+    returningCustomerRevenue: 0,
     pctNew: totalOrders > 0 ? Math.round((totalNewCust / totalOrders) * 1000) / 10 : 0,
     pctReturning: totalOrders > 0 ? Math.round((totalRetCust / totalOrders) * 1000) / 10 : 0,
   };
