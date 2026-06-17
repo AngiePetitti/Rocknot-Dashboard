@@ -53,56 +53,75 @@ export async function getCustomerMetrics(dateFrom: string, dateTo: string): Prom
   const ds = getDataset();
   const params = { date_from: dateFrom, date_to: dateTo };
 
-  const rows = await runQuery<SummaryRow>(`
-    WITH order_revenue AS (${dedupedOrdersCte(ds)}),
-    ranked AS (
-      SELECT order_customer_id AS customer_id,
-             total_price AS revenue,
-             order_date,
-             ROW_NUMBER() OVER (PARTITION BY order_customer_id ORDER BY order_date) AS seq
-      FROM order_revenue
-      WHERE order_customer_id IS NOT NULL
-    ),
-    -- Lifetime totals per customer (across all history, not just the period).
-    lifetime AS (
-      SELECT customer_id, COUNT(*) AS lifetime_orders, SUM(revenue) AS lifetime_revenue
-      FROM ranked GROUP BY customer_id
-    ),
-    -- Customers who placed at least one order within the selected period.
-    active AS (
-      SELECT DISTINCT customer_id FROM ranked
-      WHERE order_date BETWEEN @date_from AND @date_to
-    ),
-    -- AOV by lifetime order sequence, for orders placed within the period.
-    seq_aov AS (
-      SELECT
-        AVG(IF(seq = 1, revenue, NULL))  AS first_avg,
-        AVG(IF(seq = 2, revenue, NULL))  AS second_avg,
-        AVG(IF(seq >= 3, revenue, NULL)) AS third_plus_avg
-      FROM ranked
-      WHERE order_date BETWEEN @date_from AND @date_to
-    ),
-    -- Real tier breakdown among active customers, by lifetime order count.
-    tiers AS (
-      SELECT
-        COUNT(*) AS active_customers,
-        COUNTIF(l.lifetime_orders = 1)  AS one_order,
-        COUNTIF(l.lifetime_orders = 2)  AS two_orders,
-        COUNTIF(l.lifetime_orders >= 3) AS three_plus,
-        AVG(l.lifetime_revenue) AS avg_ltv,
-        AVG(IF(l.lifetime_orders = 1,  l.lifetime_revenue, NULL)) AS ltv_one,
-        AVG(IF(l.lifetime_orders = 2,  l.lifetime_revenue, NULL)) AS ltv_two,
-        AVG(IF(l.lifetime_orders >= 3, l.lifetime_revenue, NULL)) AS ltv_three_plus
-      FROM active a JOIN lifetime l USING (customer_id)
-    )
-    SELECT * FROM seq_aov, tiers
-  `, params);
+  const [rows, allTimeRows] = await Promise.all([
+    runQuery<SummaryRow>(`
+      WITH order_revenue AS (${dedupedOrdersCte(ds)}),
+      ranked AS (
+        SELECT order_customer_id AS customer_id,
+               total_price AS revenue,
+               order_date,
+               ROW_NUMBER() OVER (PARTITION BY order_customer_id ORDER BY order_date) AS seq
+        FROM order_revenue
+        WHERE order_customer_id IS NOT NULL
+      ),
+      -- Lifetime totals per customer (across all history, not just the period).
+      lifetime AS (
+        SELECT customer_id, COUNT(*) AS lifetime_orders, SUM(revenue) AS lifetime_revenue
+        FROM ranked GROUP BY customer_id
+      ),
+      -- Customers who placed at least one order within the selected period.
+      active AS (
+        SELECT DISTINCT customer_id FROM ranked
+        WHERE order_date BETWEEN @date_from AND @date_to
+      ),
+      -- AOV by lifetime order sequence, for orders placed within the period.
+      seq_aov AS (
+        SELECT
+          AVG(IF(seq = 1, revenue, NULL))  AS first_avg,
+          AVG(IF(seq = 2, revenue, NULL))  AS second_avg,
+          AVG(IF(seq >= 3, revenue, NULL)) AS third_plus_avg
+        FROM ranked
+        WHERE order_date BETWEEN @date_from AND @date_to
+      ),
+      -- Real tier breakdown among active customers, by lifetime order count.
+      tiers AS (
+        SELECT
+          COUNT(*) AS active_customers,
+          COUNTIF(l.lifetime_orders = 1)  AS one_order,
+          COUNTIF(l.lifetime_orders = 2)  AS two_orders,
+          COUNTIF(l.lifetime_orders >= 3) AS three_plus,
+          AVG(l.lifetime_revenue) AS avg_ltv,
+          AVG(IF(l.lifetime_orders = 1,  l.lifetime_revenue, NULL)) AS ltv_one,
+          AVG(IF(l.lifetime_orders = 2,  l.lifetime_revenue, NULL)) AS ltv_two,
+          AVG(IF(l.lifetime_orders >= 3, l.lifetime_revenue, NULL)) AS ltv_three_plus
+        FROM active a JOIN lifetime l USING (customer_id)
+      )
+      SELECT * FROM seq_aov, tiers
+    `, params),
+
+    // All-time avgLTV across every customer ever — not scoped to the period.
+    runQuery<{ avg_ltv: number | null }>(`
+      WITH order_revenue AS (${dedupedOrdersCte(ds)}),
+      lifetime AS (
+        SELECT order_customer_id AS customer_id,
+               SUM(total_price) AS lifetime_revenue
+        FROM order_revenue
+        WHERE order_customer_id IS NOT NULL
+        GROUP BY customer_id
+      )
+      SELECT AVG(lifetime_revenue) AS avg_ltv FROM lifetime
+    `).catch(() => null),
+  ]);
 
   const r = rows[0];
   const round2 = (v: number | null | undefined) => Math.round(Number(v || 0) * 100) / 100;
 
+  // Use the all-time LTV (every customer ever). If that query failed, fall
+  // back to the period-scoped avg for the active customers in the window.
+  const allTimeLTV = allTimeRows?.[0]?.avg_ltv;
+
   return {
-    avgLTV: round2(r?.avg_ltv),
+    avgLTV: round2(allTimeLTV ?? r?.avg_ltv),
     firstOrderAvg: round2(r?.first_avg),
     secondOrderAvg: round2(r?.second_avg),
     thirdPlusOrderAvg: round2(r?.third_plus_avg),
