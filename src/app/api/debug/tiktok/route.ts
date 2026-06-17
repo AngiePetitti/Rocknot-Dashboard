@@ -31,7 +31,8 @@ export async function GET() {
   const base = {
     api_key: WINDSOR_API_KEY,
     _renderer: 'json',
-    date_preset: 'last_7d',
+    date_preset: 'last_30d',
+    select_accounts: '7331079299845357570',
   };
 
   const results: Record<string, unknown> = {};
@@ -60,5 +61,5 @@ export async function GET() {
     }
   }
 
-  return NextResponse.json({ source: 'windsor_tiktok_live', dateRange: 'last_7d', results });
+  return NextResponse.json({ source: 'windsor_tiktok_live', dateRange: 'last_30d', results });
 }
