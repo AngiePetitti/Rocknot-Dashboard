@@ -9,6 +9,7 @@ interface InventoryItem {
   id: string;
   product: string;
   variant: string;
+  category: string;
   currentStock: number;
   unitsSold90d: number;
   dailyVelocity: number;
@@ -30,9 +31,11 @@ type SortKey = 'daysRemaining' | 'currentStock' | 'unitsSold90d' | 'sellThroughR
 
 export default function InventoryContent() {
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
   const [counts, setCounts] = useState({ outOfStock: 0, critical: 0, low: 0, healthy: 0 });
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
+  const [filterCategory, setFilterCategory] = useState<string>('all');
   const [sortKey, setSortKey] = useState<SortKey>('daysRemaining');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [search, setSearch] = useState('');
@@ -44,6 +47,7 @@ export default function InventoryContent() {
       .then(data => {
         if (data.source === 'shopify_live') {
           setItems(data.items || []);
+          setCategories(data.categories || []);
           setCounts({
             outOfStock: data.outOfStock ?? 0,
             critical: data.critical ?? 0,
@@ -65,7 +69,9 @@ export default function InventoryContent() {
   const arrow = (key: SortKey) => sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
 
   const filtered = useMemo(() => {
-    let result = filterStatus === 'all' ? items : items.filter(i => i.status === filterStatus);
+    let result = items;
+    if (filterStatus !== 'all') result = result.filter(i => i.status === filterStatus);
+    if (filterCategory !== 'all') result = result.filter(i => i.category === filterCategory);
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(i =>
@@ -73,7 +79,6 @@ export default function InventoryContent() {
       );
     }
     return [...result].sort((a, b) => {
-      // null daysRemaining (no velocity) sorts to the bottom for daysRemaining
       if (sortKey === 'daysRemaining') {
         if (a.daysRemaining === null && b.daysRemaining === null) return 0;
         if (a.daysRemaining === null) return 1;
@@ -83,7 +88,7 @@ export default function InventoryContent() {
       const bv = b[sortKey] ?? 0;
       return sortDir === 'asc' ? (av as number) - (bv as number) : (bv as number) - (av as number);
     });
-  }, [items, filterStatus, search, sortKey, sortDir]);
+  }, [items, filterStatus, filterCategory, search, sortKey, sortDir]);
 
   const urgentItems = items.filter(i => i.status === 'out_of_stock' || i.status === 'critical');
 
@@ -102,8 +107,8 @@ export default function InventoryContent() {
       )}
 
       {/* Supply target callout */}
-      <div className="flex items-center gap-3 bg-violet-50 border border-violet-100 rounded-xl px-4 py-2.5 mb-5 text-xs text-violet-700">
-        <span className="text-base">📦</span>
+      <div className="flex items-start gap-3 bg-violet-50 border border-violet-100 rounded-xl px-4 py-2.5 mb-5 text-xs text-violet-700">
+        <span className="text-base mt-0.5">📦</span>
         <span>
           <strong>90-day supply target</strong> — velocity based on last 90 days of sales.
           Reorder Qty = units needed to bring stock back to 90 days of supply at current pace.
@@ -159,17 +164,46 @@ export default function InventoryContent() {
         </div>
       )}
 
-      {/* Table */}
       <Card accentColor="#fdba74">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
-          <h2 className="text-sm font-bold text-gray-700 flex-1">Inventory Levels & Reorder Forecast</h2>
-          <input
-            type="text"
-            placeholder="Search product or variant…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="text-xs border border-gray-200 rounded-lg px-3 py-1.5 w-full sm:w-48 focus:outline-none focus:border-violet-300"
-          />
+        {/* Search + filters */}
+        <div className="flex flex-col gap-3 mb-4">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-bold text-gray-700 flex-1">Inventory Levels & Reorder Forecast</h2>
+            <input
+              type="text"
+              placeholder="Search…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="text-xs border border-gray-200 rounded-lg px-3 py-1.5 w-32 sm:w-44 focus:outline-none focus:border-violet-300"
+            />
+          </div>
+
+          {/* Category filter */}
+          <div className="flex gap-1.5 flex-wrap">
+            <button
+              onClick={() => setFilterCategory('all')}
+              className="text-xs px-2.5 py-1 rounded-full border transition-colors"
+              style={filterCategory === 'all'
+                ? { background: '#818cf8', color: '#fff', borderColor: '#818cf8' }
+                : { background: '#f8fafc', color: '#94a3b8', borderColor: '#e2e8f0' }}
+            >
+              All Categories
+            </button>
+            {categories.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setFilterCategory(cat)}
+                className="text-xs px-2.5 py-1 rounded-full border transition-colors"
+                style={filterCategory === cat
+                  ? { background: '#818cf8', color: '#fff', borderColor: '#818cf8' }
+                  : { background: '#f8fafc', color: '#94a3b8', borderColor: '#e2e8f0' }}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          {/* Status filter */}
           <div className="flex gap-1.5 flex-wrap">
             {(['all', 'out_of_stock', 'critical', 'low', 'healthy'] as FilterStatus[]).map(s => (
               <button
@@ -177,11 +211,15 @@ export default function InventoryContent() {
                 onClick={() => setFilterStatus(s)}
                 className="text-xs px-2.5 py-1 rounded-full border transition-colors"
                 style={filterStatus === s
-                  ? { background: '#818cf8', color: '#fff', borderColor: '#818cf8' }
-                  : { background: '#f8fafc', color: '#94a3b8', borderColor: '#e2e8f0' }
-                }
+                  ? { background: '#374151', color: '#fff', borderColor: '#374151' }
+                  : { background: '#f8fafc', color: '#94a3b8', borderColor: '#e2e8f0' }}
               >
-                {s === 'all' ? 'All' : STATUS_CONFIG[s].label}
+                {s === 'all' ? 'All Status' : STATUS_CONFIG[s].label}
+                {s !== 'all' && counts[s === 'out_of_stock' ? 'outOfStock' : s as keyof typeof counts] > 0 && (
+                  <span className="ml-1 opacity-70">
+                    ({counts[s === 'out_of_stock' ? 'outOfStock' : s as keyof typeof counts]})
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -190,89 +228,146 @@ export default function InventoryContent() {
         {status === 'loading' ? (
           <p className="text-xs text-gray-400 py-8 text-center">Loading inventory…</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4">Product</th>
-                  <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4">Variant</th>
-                  <th
-                    onClick={() => handleSort('currentStock')}
-                    className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600"
-                  >Stock{arrow('currentStock')}</th>
-                  <th
-                    onClick={() => handleSort('unitsSold90d')}
-                    className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600"
-                  >Sold 90d{arrow('unitsSold90d')}</th>
-                  <th
-                    onClick={() => handleSort('daysRemaining')}
-                    className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600"
-                  >Days Left{arrow('daysRemaining')}</th>
-                  <th
-                    onClick={() => handleSort('sellThroughRate')}
-                    className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600"
-                  >Sell-Through{arrow('sellThroughRate')}</th>
-                  <th
-                    onClick={() => handleSort('reorderQty')}
-                    className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600"
-                  >Reorder Qty{arrow('reorderQty')}</th>
-                  <th className="text-center text-xs font-semibold text-gray-400 uppercase pb-2 pl-3">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(item => {
-                  const cfg = STATUS_CONFIG[item.status];
-                  return (
-                    <tr key={item.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                      <td className="py-2.5 pr-4 font-medium text-gray-800 text-xs max-w-[160px] truncate">{item.product}</td>
-                      <td className="py-2.5 pr-4 text-xs text-gray-500">{item.variant || <span className="text-gray-300">—</span>}</td>
-                      <td className="py-2.5 px-3 text-right text-xs font-semibold text-gray-800">
-                        {item.currentStock <= 0
-                          ? <span className="text-red-500 font-bold">0</span>
-                          : item.currentStock.toLocaleString()}
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-xs text-gray-600">{item.unitsSold90d.toLocaleString()}</td>
-                      <td className="py-2.5 px-3 text-right text-xs font-semibold">
-                        {item.daysRemaining === null
-                          ? <span className="text-gray-300">—</span>
-                          : item.currentStock <= 0
-                          ? <span className="text-red-500">0</span>
-                          : <span style={{ color: item.daysRemaining < 7 ? '#ef4444' : item.daysRemaining < 14 ? '#eab308' : '#374151' }}>
-                              {item.daysRemaining}
-                            </span>
-                        }
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-xs text-gray-600">
-                        {item.sellThroughRate > 0 ? `${item.sellThroughRate}%` : '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-xs font-semibold">
-                        {item.reorderQty > 0
-                          ? <span className="text-violet-600">{item.reorderQty.toLocaleString()}</span>
-                          : <span className="text-gray-300">—</span>
-                        }
-                      </td>
-                      <td className="py-2.5 pl-3 text-center">
-                        <span
-                          className="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
-                          style={{ background: cfg.bg, color: cfg.text }}
+          <>
+            {/* ── Mobile cards (hidden on md+) ── */}
+            <div className="flex flex-col gap-3 md:hidden">
+              {filtered.map(item => {
+                const cfg = STATUS_CONFIG[item.status];
+                return (
+                  <div key={item.id} className="border border-gray-100 rounded-xl p-3 bg-white">
+                    {/* Header row: name + status badge */}
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-800 leading-tight">{item.product}</p>
+                        {item.variant && (
+                          <p className="text-xs text-gray-500 mt-0.5">{item.variant}</p>
+                        )}
+                      </div>
+                      <span
+                        className="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0"
+                        style={{ background: cfg.bg, color: cfg.text }}
+                      >
+                        <span className="inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle" style={{ background: cfg.dot }} />
+                        {cfg.label}
+                      </span>
+                    </div>
+
+                    {/* Category pill */}
+                    {item.category && (
+                      <span className="inline-block text-xs bg-gray-100 text-gray-500 rounded-full px-2 py-0.5 mb-2">
+                        {item.category}
+                      </span>
+                    )}
+
+                    {/* Stats grid */}
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="bg-gray-50 rounded-lg py-2">
+                        <p className="text-xs text-gray-400 mb-0.5">In Stock</p>
+                        <p className="text-sm font-bold text-gray-800">{item.currentStock}</p>
+                      </div>
+                      <div className="bg-gray-50 rounded-lg py-2">
+                        <p className="text-xs text-gray-400 mb-0.5">Days Left</p>
+                        <p
+                          className="text-sm font-bold"
+                          style={{
+                            color: item.daysRemaining === null ? '#94a3b8'
+                              : item.daysRemaining < 7 ? '#ef4444'
+                              : item.daysRemaining < 14 ? '#eab308'
+                              : '#16a34a'
+                          }}
                         >
-                          <span className="inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle" style={{ background: cfg.dot }} />
-                          {cfg.label}
-                        </span>
+                          {item.daysRemaining === null ? '—' : item.daysRemaining}
+                        </p>
+                      </div>
+                      <div className="bg-gray-50 rounded-lg py-2">
+                        <p className="text-xs text-gray-400 mb-0.5">Reorder</p>
+                        <p className="text-sm font-bold" style={{ color: item.reorderQty > 0 ? '#818cf8' : '#94a3b8' }}>
+                          {item.reorderQty > 0 ? item.reorderQty : '—'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Secondary info */}
+                    <div className="flex gap-3 mt-2 text-xs text-gray-400">
+                      <span>Sold 90d: <strong className="text-gray-600">{item.unitsSold90d}</strong></span>
+                      <span>Sell-through: <strong className="text-gray-600">{item.sellThroughRate > 0 ? `${item.sellThroughRate}%` : '—'}</strong></span>
+                    </div>
+                  </div>
+                );
+              })}
+              {filtered.length === 0 && (
+                <p className="text-xs text-gray-400 text-center py-6">No items match the current filter.</p>
+              )}
+            </div>
+
+            {/* ── Desktop table (hidden on mobile) ── */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-3">Product</th>
+                    <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-3">Variant</th>
+                    <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-3">Category</th>
+                    <th onClick={() => handleSort('currentStock')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Stock{arrow('currentStock')}</th>
+                    <th onClick={() => handleSort('unitsSold90d')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Sold 90d{arrow('unitsSold90d')}</th>
+                    <th onClick={() => handleSort('daysRemaining')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Days Left{arrow('daysRemaining')}</th>
+                    <th onClick={() => handleSort('sellThroughRate')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Sell-Through{arrow('sellThroughRate')}</th>
+                    <th onClick={() => handleSort('reorderQty')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Reorder Qty{arrow('reorderQty')}</th>
+                    <th className="text-center text-xs font-semibold text-gray-400 uppercase pb-2 pl-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(item => {
+                    const cfg = STATUS_CONFIG[item.status];
+                    return (
+                      <tr key={item.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                        <td className="py-2.5 pr-3 font-medium text-gray-800 text-xs">{item.product}</td>
+                        <td className="py-2.5 pr-3 text-xs text-gray-500">{item.variant || <span className="text-gray-300">—</span>}</td>
+                        <td className="py-2.5 pr-3 text-xs">
+                          <span className="bg-gray-100 text-gray-500 rounded-full px-2 py-0.5">{item.category}</span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-xs font-semibold text-gray-800">{item.currentStock.toLocaleString()}</td>
+                        <td className="py-2.5 px-3 text-right text-xs text-gray-600">{item.unitsSold90d.toLocaleString()}</td>
+                        <td className="py-2.5 px-3 text-right text-xs font-semibold">
+                          {item.daysRemaining === null
+                            ? <span className="text-gray-300">—</span>
+                            : <span style={{ color: item.daysRemaining < 7 ? '#ef4444' : item.daysRemaining < 14 ? '#eab308' : '#374151' }}>
+                                {item.daysRemaining}
+                              </span>
+                          }
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-xs text-gray-600">
+                          {item.sellThroughRate > 0 ? `${item.sellThroughRate}%` : '—'}
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-xs font-semibold">
+                          {item.reorderQty > 0
+                            ? <span className="text-violet-600">{item.reorderQty.toLocaleString()}</span>
+                            : <span className="text-gray-300">—</span>
+                          }
+                        </td>
+                        <td className="py-2.5 pl-3 text-center">
+                          <span
+                            className="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                            style={{ background: cfg.bg, color: cfg.text }}
+                          >
+                            <span className="inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle" style={{ background: cfg.dot }} />
+                            {cfg.label}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filtered.length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="py-8 text-center text-xs text-gray-400">
+                        No items match the current filter.
                       </td>
                     </tr>
-                  );
-                })}
-                {filtered.length === 0 && status === 'ok' && (
-                  <tr>
-                    <td colSpan={8} className="py-8 text-center text-xs text-gray-400">
-                      No items match the current filter.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
         <p className="text-xs text-gray-400 mt-3">
           Reorder Qty = units needed to reach 90 days of supply at current 90-day average daily velocity.

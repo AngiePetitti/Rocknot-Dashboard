@@ -10,6 +10,7 @@ export interface InventoryItem {
   id: string;
   product: string;
   variant: string;
+  category: string;
   currentStock: number;
   unitsSold90d: number;
   dailyVelocity: number;
@@ -75,7 +76,7 @@ export async function GET() {
     const { rows, cell } = await runShopifyQL(
       `FROM inventory
        SHOW ending_inventory_units, inventory_units_sold, sell_through_rate
-       GROUP BY product_title, product_variant_title
+       GROUP BY product_title, product_variant_title, product_type
        SINCE ${SINCE} UNTIL ${UNTIL}
        HAVING ending_inventory_units > 0 AND ending_inventory_units < 50000
        ORDER BY inventory_units_sold DESC
@@ -86,6 +87,7 @@ export async function GET() {
       .map((r, i) => {
         const product = cell(r, 'product_title') || 'Unknown';
         const variant = cell(r, 'product_variant_title') || '';
+        const category = cell(r, 'product_type') || 'Other';
         const currentStock = Math.round(parseFloat(cell(r, 'ending_inventory_units') || '0'));
         const unitsSold = Math.round(parseFloat(cell(r, 'inventory_units_sold') || '0'));
         const sellThroughRate = Math.round(parseFloat(cell(r, 'sell_through_rate') || '0') * 1000) / 10;
@@ -105,6 +107,7 @@ export async function GET() {
           id: String(i),
           product,
           variant: variant === 'Default Title' ? '' : variant,
+          category,
           currentStock,
           unitsSold90d: unitsSold,
           dailyVelocity,
@@ -127,8 +130,10 @@ export async function GET() {
     const low = items.filter(i => i.status === 'low').length;
     const healthy = items.filter(i => i.status === 'healthy').length;
 
+    const categories = Array.from(new Set(items.map(i => i.category))).filter(Boolean).sort();
+
     return NextResponse.json(
-      { source: 'shopify_live', items, outOfStock, critical, low, healthy },
+      { source: 'shopify_live', items, outOfStock, critical, low, healthy, categories },
       { headers: cacheHeaders(false) }
     );
   } catch (err) {
