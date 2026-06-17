@@ -5,6 +5,9 @@ export const dynamic = 'force-dynamic';
 
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 const META_AD_ACCOUNT_ID = process.env.META_AD_ACCOUNT_ID || '165092079662754';
+// Bare numeric Rocknot account id, used to exclude other clients' Meta
+// accounts that share this Windsor workspace.
+const ROCKNOT_META_ACCOUNT_ID = META_AD_ACCOUNT_ID.trim().replace('act_', '');
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr);
@@ -98,7 +101,12 @@ async function fetchCreatives(source: 'facebook' | 'tiktok', params: Record<stri
   // this is the main latency cost on a date-range switch.
   const res = await fetch(url, isToday ? { cache: 'no-store' } : { next: { revalidate: 1800 } });
   const json = await res.json();
-  return { rows: json.data || [], raw: json };
+  let rows = (json.data || []) as CreativeRow[];
+  // Facebook feed can contain multiple clients' accounts; keep Rocknot only.
+  if (source === 'facebook') {
+    rows = rows.filter(r => String(r.account_id ?? '').replace('act_', '') === ROCKNOT_META_ACCOUNT_ID);
+  }
+  return { rows, raw: json };
 }
 
 function buildAdUrl(platform: 'Meta' | 'TikTok', adId: string, accountId: string): string | null {
@@ -195,7 +203,7 @@ async function fetchWindsorAdUrls(
 ): Promise<{ urls: Record<string, string>; error: string | null }> {
   const qs = new URLSearchParams({
     api_key: WINDSOR_API_KEY!,
-    fields: ['ad_id', ...fields].join(','),
+    fields: ['ad_id', 'account_id', ...fields].join(','),
     _renderer: 'json',
     ...params,
   });
@@ -205,6 +213,8 @@ async function fetchWindsorAdUrls(
     if (json.error) return { urls: {}, error: String(json.error) };
     const urls: Record<string, string> = {};
     for (const row of (json.data || []) as Array<Record<string, unknown>>) {
+      // Facebook feed is multi-client; ignore non-Rocknot accounts.
+      if (source === 'facebook' && String(row.account_id ?? '').replace('act_', '') !== ROCKNOT_META_ACCOUNT_ID) continue;
       const id = String(row.ad_id || '');
       if (!id || urls[id]) continue;
       for (const f of fields) {

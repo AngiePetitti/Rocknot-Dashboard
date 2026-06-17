@@ -72,6 +72,9 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   const ds = getDataset();
   const params = { date_from: dateFrom, date_to: dateTo };
 
+  // Scope Meta to the Rocknot ad account only. Other clients connected to the
+  // same Windsor workspace land in the shared facebook_ads table under a
+  // different account_name and must never appear in this dashboard.
   const metaSql = `
     SELECT
       SUM(CAST(spend AS FLOAT64)) AS spend,
@@ -81,6 +84,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       0 AS impressions
     FROM \`${ds}.facebook_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
+      AND LOWER(account_name) = 'rocknot'
   `;
 
   // Try with impressions first; fall back without if column doesn't exist yet
@@ -126,7 +130,9 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   const metaDailySql = `
     SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
     FROM \`${ds}.facebook_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
+      AND LOWER(account_name) = 'rocknot'
+    GROUP BY d
   `;
 
   const googleDailySql = `

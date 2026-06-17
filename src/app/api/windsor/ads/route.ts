@@ -7,6 +7,9 @@ import { cacheHeaders } from '@/src/lib/cacheHeaders';
 export const dynamic = 'force-dynamic';
 
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
+// Rocknot's Meta ad account. Other clients connected to the same Windsor
+// workspace are returned by the facebook feed too and must be excluded.
+const ROCKNOT_META_ACCOUNT_ID = (process.env.META_AD_ACCOUNT_ID || '165092079662754').trim().replace('act_', '');
 
 
 interface WindsorRow {
@@ -42,7 +45,7 @@ export interface PlatformData {
 // Totals request: no date field — Windsor returns per-ad aggregated rows (avoids row-limit truncation)
 async function fetchSourceTotals(source: 'facebook' | 'google_ads' | 'tiktok', params: Record<string, string>): Promise<WindsorRow[]> {
   const fieldMap = {
-    facebook:   'source,spend,impressions,clicks,action_values_omni_purchase,actions_omni_purchase',
+    facebook:   'account_id,source,spend,impressions,clicks,action_values_omni_purchase,actions_omni_purchase',
     google_ads: 'source,spend,impressions,clicks,conversion_value',
     tiktok:     'source,spend,impressions,clicks,onsite_total_purchase_value,conversion_value',
   };
@@ -51,20 +54,27 @@ async function fetchSourceTotals(source: 'facebook' | 'google_ads' | 'tiktok', p
     const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = await res.json();
-    return (json.data || []) as WindsorRow[];
+    return onlyRocknot(source, (json.data || []) as WindsorRow[]);
   } catch {
     return [];
   }
 }
 
+// Facebook feed can contain multiple clients' accounts; keep Rocknot only.
+function onlyRocknot(source: string, rows: WindsorRow[]): WindsorRow[] {
+  if (source !== 'facebook') return rows;
+  return rows.filter(r => String(r.account_id ?? '').replace('act_', '') === ROCKNOT_META_ACCOUNT_ID);
+}
+
 // Daily request: only date+spend — Windsor returns ~1 row per day (small row count for chart)
 async function fetchSourceDaily(source: 'facebook' | 'google_ads' | 'tiktok', params: Record<string, string>): Promise<WindsorRow[]> {
   try {
-    const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields: 'date,source,spend', _renderer: 'json', ...params });
+    const fields = source === 'facebook' ? 'date,account_id,source,spend' : 'date,source,spend';
+    const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
     const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = await res.json();
-    return (json.data || []) as WindsorRow[];
+    return onlyRocknot(source, (json.data || []) as WindsorRow[]);
   } catch {
     return [];
   }

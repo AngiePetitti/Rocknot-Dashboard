@@ -106,7 +106,9 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
              SUM(CAST(spend AS FLOAT64)) AS spend,
              SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.facebook_ads\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+      WHERE DATE(date) BETWEEN @date_from AND @date_to
+        AND LOWER(account_name) = 'rocknot'
+      GROUP BY d
     ),
     google AS (
       SELECT DATE(date) AS d,
