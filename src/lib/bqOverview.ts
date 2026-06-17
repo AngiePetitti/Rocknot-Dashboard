@@ -96,6 +96,51 @@ export async function fetchShopifyDaily(from: string, to: string): Promise<Shopi
   }));
 }
 
+export interface ShopifyCustomerSplit {
+  newCustomers: number;
+  returningCustomers: number;
+  newRevenue: number;
+  returningRevenue: number;
+}
+
+export async function fetchShopifyCustomerSplit(from: string, to: string): Promise<ShopifyCustomerSplit | null> {
+  if (!SHOPIFY_TOKEN) return null;
+  const ql = `FROM sales SHOW gross_sales, customers GROUP BY customer_type SINCE ${from} UNTIL ${to}`;
+  const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
+    body: JSON.stringify({
+      query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) {
+        tableData { rows columns { name } }
+        parseErrors
+      }}`,
+    }),
+    cache: 'no-store',
+  });
+  const json = await res.json();
+  const q = json?.data?.shopifyqlQuery;
+  if (typeof q?.parseErrors === 'string' && q.parseErrors) return null;
+  const cols: { name: string }[] = q?.tableData?.columns || [];
+  const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
+  const cell = (r: Record<string, string> | string[], name: string): string => {
+    if (Array.isArray(r)) {
+      const i = cols.findIndex(c => c.name === name);
+      return i >= 0 ? (r[i] ?? '') : '';
+    }
+    return r[name] ?? '';
+  };
+  let newCustomers = 0, returningCustomers = 0, newRevenue = 0, returningRevenue = 0;
+  for (const r of rows) {
+    const type = (cell(r, 'customer_type') || '').toLowerCase();
+    const revenue = parseFloat(cell(r, 'gross_sales') || '0');
+    const count = Math.round(parseFloat(cell(r, 'customers') || '0'));
+    if (type === 'new') { newCustomers = count; newRevenue = revenue; }
+    else if (type === 'returning') { returningCustomers = count; returningRevenue = revenue; }
+  }
+  if (newCustomers === 0 && returningCustomers === 0) return null;
+  return { newCustomers, returningCustomers, newRevenue, returningRevenue };
+}
+
 export async function getOverview(dateFrom: string, dateTo: string): Promise<OverviewResult> {
   const ds = getDataset();
   const params = { date_from: dateFrom, date_to: dateTo };

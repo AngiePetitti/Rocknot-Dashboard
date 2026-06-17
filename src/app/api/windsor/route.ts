@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Timeframe } from '@/src/lib/mockData';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
-import { getOverview, fetchShopifyDaily } from '@/src/lib/bqOverview';
+import { getOverview, fetchShopifyDaily, fetchShopifyCustomerSplit } from '@/src/lib/bqOverview';
 import { fetchMetaToday } from '@/src/lib/metaLive';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 
@@ -487,6 +487,21 @@ export async function GET(request: NextRequest) {
             current.revenueData = [{ date: currentParams.date_from, revenue: Math.round(liveRevenue), orders: liveOrders, adSpend: current.metrics.totalAdSpend }];
           }
         }
+      }
+    }
+
+    // Override new vs returning customer revenue split with live Shopify data.
+    // Windsor's /all endpoint lags by up to an hour; ShopifyQL is always live.
+    if (!latestAvailableDate) {
+      const shopifySplit = await fetchShopifyCustomerSplit(currentParams.date_from, currentParams.date_to).catch(() => null);
+      if (shopifySplit) {
+        const splitTotal = shopifySplit.newCustomers + shopifySplit.returningCustomers;
+        current.metrics.newCustomers = shopifySplit.newCustomers;
+        current.metrics.returningCustomers = shopifySplit.returningCustomers;
+        current.metrics.newCustomerRevenue = Math.round(shopifySplit.newRevenue);
+        current.metrics.returningCustomerRevenue = Math.round(shopifySplit.returningRevenue);
+        current.metrics.pctNew = splitTotal > 0 ? Math.round((shopifySplit.newCustomers / splitTotal) * 1000) / 10 : 0;
+        current.metrics.pctReturning = splitTotal > 0 ? Math.round((shopifySplit.returningCustomers / splitTotal) * 1000) / 10 : 0;
       }
     }
 
