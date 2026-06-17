@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Timeframe } from '@/src/lib/mockData';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
-import { getOverview } from '@/src/lib/bqOverview';
+import { getOverview, fetchShopifyDaily } from '@/src/lib/bqOverview';
 import { fetchMetaToday } from '@/src/lib/metaLive';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 
@@ -464,6 +464,31 @@ export async function GET(request: NextRequest) {
     }
 
     const current = aggregateRows(currentRows);
+
+    // For today/yesterday, override Shopify revenue/orders with a direct
+    // ShopifyQL query — Windsor's sync delay means the /all endpoint lags
+    // by up to an hour, while Shopify's own API is always live.
+    if (!latestAvailableDate) {
+      const shopifyLive = await fetchShopifyDaily(currentParams.date_from, currentParams.date_to).catch(() => []);
+      if (shopifyLive.length > 0) {
+        const liveRevenue = shopifyLive.reduce((s, d) => s + d.totalSales, 0);
+        const liveOrders = shopifyLive.reduce((s, d) => s + d.orders, 0);
+        const liveNetSales = shopifyLive.reduce((s, d) => s + d.netSales, 0);
+        if (liveRevenue > 0 || liveOrders > 0) {
+          current.metrics.totalRevenue = Math.round(liveRevenue);
+          current.metrics.totalOrders = liveOrders;
+          current.metrics.aov = liveOrders > 0 ? Math.round((liveNetSales / liveOrders) * 100) / 100 : 0;
+          current.metrics.mer = current.metrics.totalAdSpend > 0
+            ? Math.round((liveRevenue / current.metrics.totalAdSpend) * 100) / 100 : 0;
+          if (current.revenueData.length > 0) {
+            current.revenueData[0].revenue = Math.round(liveRevenue);
+            current.revenueData[0].orders = liveOrders;
+          } else {
+            current.revenueData = [{ date: currentParams.date_from, revenue: Math.round(liveRevenue), orders: liveOrders, adSpend: current.metrics.totalAdSpend }];
+          }
+        }
+      }
+    }
 
     // For "today", replace Meta numbers with the Graph API's live figures.
     // Always trust the Graph API over Windsor — Windsor can both under-report

@@ -60,7 +60,7 @@ interface ShopifyDay {
 const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 const SHOPIFY_DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com').trim();
 
-async function fetchShopifyDaily(from: string, to: string): Promise<ShopifyDay[]> {
+export async function fetchShopifyDaily(from: string, to: string): Promise<ShopifyDay[]> {
   if (!SHOPIFY_TOKEN) return [];
   const ql = `FROM sales SHOW orders, net_sales, total_sales TIMESERIES day SINCE ${from} UNTIL ${to}`;
   const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
