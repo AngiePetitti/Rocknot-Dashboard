@@ -156,6 +156,10 @@ function aggregateRows(rows: WindsorRow[]) {
       byDate[date].adSpend += spend;
 
       if (src.includes('facebook') || src.includes('meta')) {
+        // Only include the Rocknot ad account — other accounts in the same
+        // Windsor workspace would otherwise inflate today's Meta spend.
+        const accountName = String((row as Record<string, unknown>).account_name || '').toLowerCase();
+        if (accountName && !accountName.includes('rocknot')) continue;
         const roasArr = Array.isArray((row as Record<string, unknown>).purchase_roas)
           ? (row as Record<string, unknown>).purchase_roas as Array<{ value?: string }>
           : null;
@@ -221,7 +225,7 @@ function aggregateRows(rows: WindsorRow[]) {
 }
 
 // Ad platform fields
-const META_FIELDS = ['date', 'source', 'spend', 'impressions', 'clicks', 'ctr', 'purchase_roas', 'conversions'].join(',');
+const META_FIELDS = ['date', 'source', 'account_name', 'spend', 'impressions', 'clicks', 'ctr', 'purchase_roas', 'conversions'].join(',');
 const GOOGLE_FIELDS = ['date', 'source', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value'].join(',');
 // Shopify fields via Windsor /all endpoint — order-level fields only.
 // Do not mix with Customer-endpoint fields (e.g. customer_is_returning) —
