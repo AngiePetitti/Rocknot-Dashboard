@@ -109,11 +109,14 @@ export async function GET(request: NextRequest) {
 
     if (hasBqProducts) {
       const bqResult = await getProductSales(from, to).catch(() => null);
-      if (bqResult) {
+      // Only use BigQuery if it actually returned products. The shopify_products
+      // table can be empty/stale (e.g. not synced for recent days), in which case
+      // we fall through to ShopifyQL — the source of truth that always has data.
+      if (bqResult && bqResult.products.length > 0) {
         const { products, totalRevenue, totalUnits } = bqResult;
         return NextResponse.json({ source: 'shopify_live', products, totalRevenue, totalUnits }, { headers: cacheHeaders(tfRaw === 'today') });
       }
-      // BigQuery table exists but query failed (e.g. missing column) — fall through to ShopifyQL
+      // BigQuery table empty or query failed — fall through to ShopifyQL
     }
 
     const result = await runShopifyQL(
