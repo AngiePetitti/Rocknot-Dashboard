@@ -1,6 +1,7 @@
 import { runQuery, getDataset, dedupedOrdersCte } from '@/src/lib/bigquery';
 
 export interface OverviewResult {
+  adsError?: string;
   metrics: {
     totalRevenue: number;
     totalOrders: number;
@@ -172,9 +173,12 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   `;
 
 
+  let adsQueryError: string | undefined;
   const [shopifyDays, adsRows, custRows] = await Promise.all([
     fetchShopifyDaily(dateFrom, dateTo).catch(() => [] as ShopifyDay[]),
-    runQuery<AdsRow>(adsSql, params).catch(() => runQuery<AdsRow>(adsSqlLegacyTiktok, params)).catch(() => [] as AdsRow[]),
+    runQuery<AdsRow>(adsSql, params)
+      .catch(() => runQuery<AdsRow>(adsSqlLegacyTiktok, params))
+      .catch((err: unknown) => { adsQueryError = String(err); return [] as AdsRow[]; }),
     runQuery<CustomerRow>(customerSql, params).catch(() => [] as CustomerRow[]),
   ]);
 
@@ -248,5 +252,6 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     },
     revenueData,
     revenueSource: totalRevenue > 0 ? 'shopify' : 'none',
+    ...(adsQueryError ? { adsError: adsQueryError } : {}),
   };
 }

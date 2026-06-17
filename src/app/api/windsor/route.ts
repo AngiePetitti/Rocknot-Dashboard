@@ -399,6 +399,7 @@ export async function GET(request: NextRequest) {
         revenueSource: overview.revenueSource,
         metrics: overview.metrics,
         revenueData: overview.revenueData,
+        ...(overview.adsError ? { adsError: overview.adsError } : {}),
         ...(bqPrior ? { priorPeriod: bqPrior, priorLabel: bqPriorLabel } : {}),
       }, { headers: cacheHeaders(false) });
     }

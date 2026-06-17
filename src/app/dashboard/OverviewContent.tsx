@@ -74,6 +74,7 @@ export default function OverviewContent() {
   const [shopifyDataLag, setShopifyDataLag] = useState<boolean>(false);
   const [shopifyLatestDate, setShopifyLatestDate] = useState<string | null>(null);
   const [revenueSource, setRevenueSource] = useState<'shopify' | 'none' | null>(null);
+  const [adsError, setAdsError] = useState<string | null>(null);
 
   function buildLivePlatformSpend(m: LiveMetrics): PlatformSpend[] | null {
     if (!m.metaSpend && !m.googleSpend && !m.tiktokSpend) return null;
@@ -106,6 +107,7 @@ export default function OverviewContent() {
     setShopifyDataLag(false);
     setShopifyLatestDate(null);
     setRevenueSource(null);
+    setAdsError(null);
     setLiveSource('loading');
 
     const params = new URLSearchParams({ tf: tfRaw });
@@ -130,6 +132,7 @@ export default function OverviewContent() {
         setRevenueData(data.revenueData || []);
         if (data.priorPeriod) { setPriorPeriod(data.priorPeriod); setPriorLabel(data.priorLabel || ''); }
         setLivePlatformSpend(buildLivePlatformSpend(m));
+        setAdsError(data.adsError || null);
         setDataLag(!!data.dataLag);
         setLatestAvailableDate(data.latestAvailableDate || null);
         setShopifyDataLag(!!data.shopifyDataLag);
@@ -242,6 +245,13 @@ export default function OverviewContent() {
             Shopify data hasn&apos;t synced for {tf === 'today' ? "today" : "yesterday"} yet — showing revenue/orders from the most recent available day:{' '}
             <strong>{shopifyLatestDate}</strong>. Ad spend above reflects the actual selected period.
           </span>
+        </div>
+      )}
+
+      {adsError && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-red-700">
+          <span>⚠</span>
+          <span>Ad spend data unavailable — BigQuery query failed. Revenue and order data are unaffected. Check the API logs for details.</span>
         </div>
       )}
 
