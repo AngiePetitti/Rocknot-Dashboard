@@ -59,12 +59,20 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // Total sales = net_sales + shipping + taxes.
   // Try with shipping+tax columns first; fall back to net_sales only if they
   // don't exist yet (Windsor backfill still running).
-  const buildSql = (includeShippingTax: boolean) => `
+  // Total Sales = net_sales + shipping + tax. Shipping must net out refunded
+  // shipping: Windsor re-emits the original shipping price on refund rows, so
+  // a raw sum double-counts shipping on days with shipping refunds. We try the
+  // fullest formula first and fall back as columns become available:
+  //   2 = net + shipping + tax - refunded_shipping  (exact)
+  //   1 = net + shipping + tax                       (shipping over-counts on refund days)
+  //   0 = net only                                   (columns not synced yet)
+  const buildSql = (level: 0 | 1 | 2) => `
     WITH shopify AS (
       SELECT DATE(date) AS d,
              SUM(
                CAST(order_net_sales AS FLOAT64)
-               ${includeShippingTax ? '+ IFNULL(CAST(order_total_shipping_price AS FLOAT64), 0) + IFNULL(CAST(order_total_tax_amount AS FLOAT64), 0)' : ''}
+               ${level >= 1 ? '+ IFNULL(CAST(order_total_shipping_price AS FLOAT64), 0) + IFNULL(CAST(order_total_tax_amount AS FLOAT64), 0)' : ''}
+               ${level >= 2 ? '- IFNULL(CAST(order_total_shipping_refunded_price AS FLOAT64), 0)' : ''}
              ) AS revenue,
              SUM(CAST(order_net_sales AS FLOAT64)) AS net_sales,
              COUNT(DISTINCT order_id) AS orders
@@ -146,8 +154,9 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   `;
 
   const [rows, custRows] = await Promise.all([
-    runQuery<DailyRow>(buildSql(true), params)
-      .catch(() => runQuery<DailyRow>(buildSql(false), params)),
+    runQuery<DailyRow>(buildSql(2), params)
+      .catch(() => runQuery<DailyRow>(buildSql(1), params))
+      .catch(() => runQuery<DailyRow>(buildSql(0), params)),
     runQuery<CustomerRow>(customerSql, params),
   ]);
 
