@@ -77,11 +77,33 @@ export default function ProductsContent() {
 
   const topProduct = products[0];
 
+  // The chart always shows the top revenue products in API (revenue-desc) order.
   const barData = products.slice(0, 8).map((p, i) => ({
     name: p.name.slice(0, 20),
     revenue: p.revenue,
     color: PRODUCT_COLORS[i],
   }));
+
+  // Sortable table. Defaults to revenue high→low (the API order). Clicking a
+  // numeric column sorts high→low; clicking again toggles low→high.
+  type SortKey = 'unitsSold' | 'revenue' | 'grossProfit' | 'grossMargin' | 'percentOfTotal';
+  const [sortKey, setSortKey] = useState<SortKey>('revenue');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(d => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  };
+
+  const sortedProducts = [...products].sort((a, b) =>
+    sortDir === 'desc' ? b[sortKey] - a[sortKey] : a[sortKey] - b[sortKey]
+  );
+
+  const sortArrow = (key: SortKey) => (sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : '');
 
   return (
     <div>
@@ -180,15 +202,15 @@ export default function ProductsContent() {
                 <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4">Rank</th>
                 <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4">Product</th>
                 <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4">Category</th>
-                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Units Sold</th>
-                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Revenue</th>
-                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Gross Profit</th>
-                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Gross Margin</th>
-                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-4">% of Total</th>
+                <th onClick={() => handleSort('unitsSold')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4 cursor-pointer select-none hover:text-gray-600">Units Sold{sortArrow('unitsSold')}</th>
+                <th onClick={() => handleSort('revenue')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4 cursor-pointer select-none hover:text-gray-600">Revenue{sortArrow('revenue')}</th>
+                <th onClick={() => handleSort('grossProfit')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4 cursor-pointer select-none hover:text-gray-600">Gross Profit{sortArrow('grossProfit')}</th>
+                <th onClick={() => handleSort('grossMargin')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4 cursor-pointer select-none hover:text-gray-600">Gross Margin{sortArrow('grossMargin')}</th>
+                <th onClick={() => handleSort('percentOfTotal')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-4 cursor-pointer select-none hover:text-gray-600">% of Total{sortArrow('percentOfTotal')}</th>
               </tr>
             </thead>
             <tbody>
-              {products.map((product, i) => (
+              {sortedProducts.map((product, i) => (
                 <tr key={product.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                   <td className="py-3 pr-4">
                     <span
