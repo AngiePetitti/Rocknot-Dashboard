@@ -117,7 +117,7 @@ export async function GET(request: NextRequest) {
     }
 
     const result = await runShopifyQL(
-      `FROM sales SHOW net_sales, net_quantity BY product_title, product_type SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 50`
+      `FROM sales SHOW net_sales, orders GROUP BY product_title, product_type SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 50`
     );
 
     if (typeof result?.parseErrors === 'string' && result.parseErrors) {
@@ -141,7 +141,7 @@ export async function GET(request: NextRequest) {
         id: String(i),
         name: cell(r, 'product_title') || 'Unknown',
         category: cell(r, 'product_type') || 'Other',
-        unitsSold: Math.round(parseFloat(cell(r, 'net_quantity') || '0')),
+        unitsSold: Math.round(parseFloat(cell(r, 'orders') || '0')),
         revenue: Math.round(parseFloat(cell(r, 'net_sales') || '0')),
         percentOfTotal: 0,
       }))
