@@ -64,7 +64,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       SELECT DATE(date) AS d,
              SUM(
                CAST(order_net_sales AS FLOAT64)
-               ${includeShippingTax ? '+ IFNULL(CAST(order_shipping_price AS FLOAT64), 0) + IFNULL(CAST(order_total_tax AS FLOAT64), 0)' : ''}
+               ${includeShippingTax ? '+ IFNULL(CAST(order_total_shipping_price AS FLOAT64), 0) + IFNULL(CAST(order_total_tax_amount AS FLOAT64), 0)' : ''}
              ) AS revenue,
              SUM(CAST(order_net_sales AS FLOAT64)) AS net_sales,
              COUNT(DISTINCT order_id) AS orders
