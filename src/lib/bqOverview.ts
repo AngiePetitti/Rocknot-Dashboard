@@ -25,11 +25,8 @@ export interface OverviewResult {
   revenueSource: 'shopify' | 'none';
 }
 
-interface DailyRow {
-  date: { value: string } | string;
-  revenue: number | null;
-  net_sales: number | null;
-  orders: number | null;
+interface AdsRow {
+  date: string;
   meta_spend: number | null;
   google_spend: number | null;
   tiktok_spend: number | null;
@@ -45,88 +42,94 @@ interface CustomerRow {
   returning_customer_revenue: number | null;
 }
 
-function dateStr(d: DailyRow['date']): string {
-  return typeof d === 'string' ? d : d.value;
+// Per-day Shopify numbers come straight from ShopifyQL — the same source as
+// Shopify's own "Total sales" report. This is the ONLY way to match Shopify's
+// figures exactly: returns/refunds are attributed to the original order date by
+// Shopify and are not reconstructable from Windsor's BigQuery order rows (which
+// record refund adjustments on separate rows dated to the refund day).
+interface ShopifyDay {
+  date: string;
+  totalSales: number;
+  netSales: number;
+  orders: number;
+}
+
+const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
+const SHOPIFY_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com';
+
+async function fetchShopifyDaily(from: string, to: string): Promise<ShopifyDay[]> {
+  if (!SHOPIFY_TOKEN) return [];
+  const ql = `FROM sales SHOW orders, net_sales, total_sales TIMESERIES day SINCE ${from} UNTIL ${to}`;
+  const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/graphql.json`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
+    body: JSON.stringify({
+      query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) {
+        tableData { rowData columns { name } }
+        parseErrors { code message }
+      }}`,
+    }),
+    cache: 'no-store',
+  });
+  const json = await res.json();
+  const q = json?.data?.shopifyqlQuery;
+  if (q?.parseErrors?.length) throw new Error(q.parseErrors[0].message);
+  const cols: { name: string }[] = q?.tableData?.columns || [];
+  const rows: string[][] = q?.tableData?.rowData || [];
+  const idx = (n: string) => cols.findIndex(c => c.name === n);
+  const dayI = idx('day'), ordI = idx('orders'), netI = idx('net_sales'), totI = idx('total_sales');
+  return rows.map(r => ({
+    date: (r[dayI] || '').split('T')[0],
+    orders: Math.round(parseFloat(r[ordI] || '0')),
+    netSales: parseFloat(r[netI] || '0'),
+    totalSales: parseFloat(r[totI] || '0'),
+  }));
 }
 
 export async function getOverview(dateFrom: string, dateTo: string): Promise<OverviewResult> {
   const ds = getDataset();
   const params = { date_from: dateFrom, date_to: dateTo };
 
-  // Direct sum from shopify_orders matches Shopify's "Total sales" methodology.
-  // Shopify attributes refund adjustments to the date they occur, so
-  // SUM(order_net_sales) WHERE date IN range = Shopify Net sales exactly.
-  // Total sales = net_sales + shipping + taxes.
-  // Try with shipping+tax columns first; fall back to net_sales only if they
-  // don't exist yet (Windsor backfill still running).
-  // Total Sales = net_sales + shipping + tax. Shipping must net out refunded
-  // shipping: Windsor re-emits the original shipping price on refund rows, so
-  // a raw sum double-counts shipping on days with shipping refunds. We try the
-  // fullest formula first and fall back as columns become available:
-  //   2 = net + shipping + tax - refunded_shipping  (exact)
-  //   1 = net + shipping + tax                       (shipping over-counts on refund days)
-  //   0 = net only                                   (columns not synced yet)
-  const buildSql = (level: 0 | 1 | 2) => `
-    WITH shopify AS (
-      SELECT DATE(date) AS d,
-             SUM(
-               CAST(order_net_sales AS FLOAT64)
-               ${level >= 1 ? '+ IFNULL(CAST(order_total_shipping_price AS FLOAT64), 0) + IFNULL(CAST(order_total_tax_amount AS FLOAT64), 0)' : ''}
-               ${level >= 2 ? '- IFNULL(CAST(order_total_shipping_refunded_price AS FLOAT64), 0)' : ''}
-             ) AS revenue,
-             SUM(CAST(order_net_sales AS FLOAT64)) AS net_sales,
-             COUNT(DISTINCT order_id) AS orders
-      FROM \`${ds}.shopify_orders\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to
-        AND order_id IS NOT NULL
-      GROUP BY d
-    ),
-    meta AS (
+  // Ad spend + platform-attributed revenue from BigQuery (Windsor-synced).
+  const adsSql = `
+    WITH meta AS (
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
              SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.facebook_ads\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to
-      GROUP BY d
+      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
     ),
     google AS (
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
              SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.google_ads\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to
-      GROUP BY d
+      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
     ),
     tiktok AS (
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
-             SUM(IFNULL(CAST(onsite_total_purchase_value AS FLOAT64), 0)) AS revenue
+             SUM(IFNULL(CAST(complete_payment_value AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.tiktok_ads\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to
-      GROUP BY d
+      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
     ),
-    days AS (
-      SELECT d FROM UNNEST(GENERATE_DATE_ARRAY(@date_from, @date_to)) AS d
-    )
+    days AS (SELECT d FROM UNNEST(GENERATE_DATE_ARRAY(@date_from, @date_to)) AS d)
     SELECT
       FORMAT_DATE('%Y-%m-%d', days.d) AS date,
-      IFNULL(shopify.revenue, 0)              AS revenue,
-      IFNULL(shopify.net_sales, 0)            AS net_sales,
-      IFNULL(shopify.orders, 0)               AS orders,
-      IFNULL(meta.spend, 0)                   AS meta_spend,
-      IFNULL(google.spend, 0)                 AS google_spend,
-      IFNULL(tiktok.spend, 0)                 AS tiktok_spend,
-      IFNULL(meta.revenue, 0)                 AS meta_revenue,
-      IFNULL(google.revenue, 0)               AS google_revenue,
-      IFNULL(tiktok.revenue, 0)               AS tiktok_revenue
+      IFNULL(meta.spend, 0)     AS meta_spend,
+      IFNULL(google.spend, 0)   AS google_spend,
+      IFNULL(tiktok.spend, 0)   AS tiktok_spend,
+      IFNULL(meta.revenue, 0)   AS meta_revenue,
+      IFNULL(google.revenue, 0) AS google_revenue,
+      IFNULL(tiktok.revenue, 0) AS tiktok_revenue
     FROM days
-    LEFT JOIN shopify   ON shopify.d = days.d
-    LEFT JOIN meta      ON meta.d = days.d
-    LEFT JOIN google    ON google.d = days.d
-    LEFT JOIN tiktok    ON tiktok.d = days.d
+    LEFT JOIN meta   ON meta.d = days.d
+    LEFT JOIN google ON google.d = days.d
+    LEFT JOIN tiktok ON tiktok.d = days.d
     ORDER BY days.d
   `;
 
+  // New vs returning customer split (placement-date attribution from BigQuery).
   const customerSql = `
     WITH order_revenue AS (${dedupedOrdersCte(ds)}),
     firsts AS (
@@ -153,11 +156,10 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     JOIN firsts f USING (cid)
   `;
 
-  const [rows, custRows] = await Promise.all([
-    runQuery<DailyRow>(buildSql(2), params)
-      .catch(() => runQuery<DailyRow>(buildSql(1), params))
-      .catch(() => runQuery<DailyRow>(buildSql(0), params)),
-    runQuery<CustomerRow>(customerSql, params),
+  const [shopifyDays, adsRows, custRows] = await Promise.all([
+    fetchShopifyDaily(dateFrom, dateTo).catch(() => [] as ShopifyDay[]),
+    runQuery<AdsRow>(adsSql, params).catch(() => [] as AdsRow[]),
+    runQuery<CustomerRow>(customerSql, params).catch(() => [] as CustomerRow[]),
   ]);
 
   const cust = custRows[0] ?? {
@@ -167,26 +169,37 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     returning_customer_revenue: 0,
   };
 
+  const shopifyByDate: Record<string, ShopifyDay> = {};
+  for (const s of shopifyDays) shopifyByDate[s.date] = s;
+
   let totalRevenue = 0, totalNetSales = 0, totalOrders = 0;
   let metaSpend = 0, googleSpend = 0, tiktokSpend = 0;
   let metaRevenue = 0, googleRevenue = 0, tiktokRevenue = 0;
 
-  const revenueData = rows.map(r => {
-    const revenue = Number(r.revenue || 0);
-    const orders = Number(r.orders || 0);
-    const adSpend = Number(r.meta_spend || 0) + Number(r.google_spend || 0) + Number(r.tiktok_spend || 0);
+  // The ads query always emits one row per day across the full range, so it
+  // drives the daily series; Shopify figures are overlaid by date.
+  const dayDates = adsRows.length > 0 ? adsRows.map(r => r.date) : shopifyDays.map(s => s.date);
+  const adsByDate: Record<string, AdsRow> = {};
+  for (const a of adsRows) adsByDate[a.date] = a;
+
+  const revenueData = dayDates.map(date => {
+    const a = adsByDate[date];
+    const s = shopifyByDate[date];
+    const revenue = s ? s.totalSales : 0;
+    const orders = s ? s.orders : 0;
+    const adSpend = Number(a?.meta_spend || 0) + Number(a?.google_spend || 0) + Number(a?.tiktok_spend || 0);
 
     totalRevenue += revenue;
-    totalNetSales += Number(r.net_sales || 0);
+    totalNetSales += s ? s.netSales : 0;
     totalOrders += orders;
-    metaSpend += Number(r.meta_spend || 0);
-    googleSpend += Number(r.google_spend || 0);
-    tiktokSpend += Number(r.tiktok_spend || 0);
-    metaRevenue += Number(r.meta_revenue || 0);
-    googleRevenue += Number(r.google_revenue || 0);
-    tiktokRevenue += Number(r.tiktok_revenue || 0);
+    metaSpend += Number(a?.meta_spend || 0);
+    googleSpend += Number(a?.google_spend || 0);
+    tiktokSpend += Number(a?.tiktok_spend || 0);
+    metaRevenue += Number(a?.meta_revenue || 0);
+    googleRevenue += Number(a?.google_revenue || 0);
+    tiktokRevenue += Number(a?.tiktok_revenue || 0);
 
-    return { date: dateStr(r.date), revenue: Math.round(revenue), orders, adSpend: Math.round(adSpend) };
+    return { date, revenue: Math.round(revenue), orders, adSpend: Math.round(adSpend) };
   });
 
   const totalAdSpend = metaSpend + googleSpend + tiktokSpend;
