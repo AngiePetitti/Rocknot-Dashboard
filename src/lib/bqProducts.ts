@@ -6,6 +6,9 @@ export interface ProductSales {
   category: string;
   unitsSold: number;
   revenue: number;
+  cogs: number;
+  grossProfit: number;
+  grossMargin: number;
   percentOfTotal: number;
 }
 
@@ -47,6 +50,11 @@ export async function getProductSales(dateFrom: string, dateTo: string): Promise
     category: r.line_item__product_type || 'Other',
     unitsSold: Math.round(Number(r.total_quantity || 0)),
     revenue: Math.round(Number(r.total_revenue || 0)),
+    // COGS/profit aren't synced into the BigQuery products table; the route
+    // falls through to ShopifyQL (which has cost data) when this path is empty.
+    cogs: 0,
+    grossProfit: 0,
+    grossMargin: 0,
     percentOfTotal: 0,
   }));
 

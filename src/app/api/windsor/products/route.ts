@@ -14,6 +14,9 @@ export interface ProductSales {
   category: string;
   unitsSold: number;
   revenue: number;
+  cogs: number;
+  grossProfit: number;
+  grossMargin: number;
   percentOfTotal: number;
 }
 
@@ -120,7 +123,7 @@ export async function GET(request: NextRequest) {
     }
 
     const result = await runShopifyQL(
-      `FROM sales SHOW net_sales, orders GROUP BY product_title, product_type SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 50`
+      `FROM sales SHOW net_sales, orders, cost_of_goods_sold, gross_profit GROUP BY product_title, product_type SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 50`
     );
 
     if (typeof result?.parseErrors === 'string' && result.parseErrors) {
@@ -140,14 +143,22 @@ export async function GET(request: NextRequest) {
     };
 
     const products: ProductSales[] = rows
-      .map((r, i) => ({
-        id: String(i),
-        name: cell(r, 'product_title') || 'Unknown',
-        category: cell(r, 'product_type') || 'Other',
-        unitsSold: Math.round(parseFloat(cell(r, 'orders') || '0')),
-        revenue: Math.round(parseFloat(cell(r, 'net_sales') || '0')),
-        percentOfTotal: 0,
-      }))
+      .map((r, i) => {
+        const revenue = Math.round(parseFloat(cell(r, 'net_sales') || '0'));
+        const cogs = Math.round(parseFloat(cell(r, 'cost_of_goods_sold') || '0'));
+        const grossProfit = Math.round(parseFloat(cell(r, 'gross_profit') || '0'));
+        return {
+          id: String(i),
+          name: cell(r, 'product_title') || 'Unknown',
+          category: cell(r, 'product_type') || 'Other',
+          unitsSold: Math.round(parseFloat(cell(r, 'orders') || '0')),
+          revenue,
+          cogs,
+          grossProfit,
+          grossMargin: revenue > 0 ? Math.round((grossProfit / revenue) * 1000) / 10 : 0,
+          percentOfTotal: 0,
+        };
+      })
       .filter(p => p.name && p.name !== 'Unknown' && p.revenue > 0);
 
     const totalRevenue = products.reduce((s, p) => s + p.revenue, 0);

@@ -26,6 +26,9 @@ interface ProductSales {
   category: string;
   unitsSold: number;
   revenue: number;
+  cogs: number;
+  grossProfit: number;
+  grossMargin: number;
   percentOfTotal: number;
 }
 
@@ -172,6 +175,8 @@ export default function ProductsContent() {
                 <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4">Category</th>
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Units Sold</th>
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Revenue</th>
+                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Gross Profit</th>
+                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Gross Margin</th>
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-4">% of Total</th>
               </tr>
             </thead>
@@ -194,6 +199,21 @@ export default function ProductsContent() {
                   </td>
                   <td className="py-3 px-4 text-right text-gray-600">{product.unitsSold.toLocaleString()}</td>
                   <td className="py-3 px-4 text-right font-semibold text-gray-800">{formatCurrency(product.revenue)}</td>
+                  <td className="py-3 px-4 text-right font-semibold text-gray-800">
+                    {product.grossProfit > 0 ? formatCurrency(product.grossProfit) : '—'}
+                  </td>
+                  <td className="py-3 px-4 text-right">
+                    {product.grossProfit > 0 ? (
+                      <span
+                        className="font-semibold"
+                        style={{ color: product.grossMargin >= 50 ? '#22c55e' : product.grossMargin >= 30 ? '#374151' : '#ef4444' }}
+                      >
+                        {formatPercent(product.grossMargin)}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400" title="No cost-per-item set for this product">—</span>
+                    )}
+                  </td>
                   <td className="py-3 pl-4 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
