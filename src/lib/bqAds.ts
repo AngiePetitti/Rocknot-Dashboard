@@ -1,4 +1,4 @@
-import { runQuery, getDataset, dedupedFacebookAdsCte, dedupedGoogleAdsCte, dedupedTiktokAdsCte, dedupedTiktokAdsCteLegacy } from '@/src/lib/bigquery';
+import { runQuery, getDataset } from '@/src/lib/bigquery';
 
 // Ad Performance tab data from the Windsor→BigQuery tables.
 // Mirrors the shape returned by /api/windsor/ads so the frontend is unchanged.
@@ -72,56 +72,44 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   const ds = getDataset();
   const params = { date_from: dateFrom, date_to: dateTo };
 
-  // Each platform query deduplicates by (date, ad_id) before summing — Windsor
-  // re-syncs intraday and inserts duplicate rows, which inflates today's spend.
   const metaSql = `
-    WITH deduped AS (${dedupedFacebookAdsCte(ds)})
     SELECT
-      SUM(spend) AS spend,
-      SUM(revenue) AS revenue,
-      0 AS conversions,
-      0 AS clicks,
-      0 AS impressions
-    FROM deduped
-    WHERE d BETWEEN @date_from AND @date_to
+      SUM(CAST(spend AS FLOAT64)) AS spend,
+      SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
+      SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS conversions,
+      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
+    FROM \`${ds}.facebook_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
       AND LOWER(account_name) = 'rocknot'
   `;
 
   const googleSql = `
-    WITH deduped AS (${dedupedGoogleAdsCte(ds)})
     SELECT
-      SUM(spend) AS spend,
-      SUM(revenue) AS revenue,
-      SUM(conversions) AS conversions,
-      SUM(clicks) AS clicks,
-      SUM(impressions) AS impressions
-    FROM deduped
-    WHERE d BETWEEN @date_from AND @date_to
+      SUM(CAST(spend AS FLOAT64)) AS spend,
+      SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue,
+      SUM(IFNULL(CAST(conversions AS FLOAT64), 0)) AS conversions,
+      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
+    FROM \`${ds}.google_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
   `;
 
   const tiktokSql = `
-    WITH deduped AS (${dedupedTiktokAdsCte(ds)})
     SELECT
-      SUM(spend) AS spend,
-      SUM(revenue) AS revenue,
-      SUM(conversions) AS conversions,
-      SUM(clicks) AS clicks,
-      SUM(impressions) AS impressions
-    FROM deduped
-    WHERE d BETWEEN @date_from AND @date_to
+      SUM(CAST(spend AS FLOAT64)) AS spend,
+      SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue,
+      SUM(IFNULL(CAST(complete_payment AS FLOAT64), 0)) AS conversions,
+      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
+    FROM \`${ds}.tiktok_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
   `;
 
-  const tiktokSqlLegacy = `
-    WITH deduped AS (${dedupedTiktokAdsCteLegacy(ds)})
-    SELECT
-      SUM(spend) AS spend,
-      SUM(revenue) AS revenue,
-      SUM(conversions) AS conversions,
-      SUM(clicks) AS clicks,
-      SUM(impressions) AS impressions
-    FROM deduped
-    WHERE d BETWEEN @date_from AND @date_to
-  `;
+  const tiktokSqlLegacy = tiktokSql.replace(
+    'SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue',
+    'SUM(IFNULL(CAST(complete_payment_value AS FLOAT64), 0)) AS revenue'
+  );
 
   const tiktokSqlFallback = `
     SELECT
@@ -135,28 +123,23 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   `;
 
   const metaDailySql = `
-    WITH deduped AS (${dedupedFacebookAdsCte(ds)})
-    SELECT d, SUM(spend) AS spend
-    FROM deduped
-    WHERE d BETWEEN @date_from AND @date_to
+    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
+    FROM \`${ds}.facebook_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
       AND LOWER(account_name) = 'rocknot'
     GROUP BY d
   `;
 
   const googleDailySql = `
-    WITH deduped AS (${dedupedGoogleAdsCte(ds)})
-    SELECT d, SUM(spend) AS spend
-    FROM deduped
-    WHERE d BETWEEN @date_from AND @date_to
-    GROUP BY d
+    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
+    FROM \`${ds}.google_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
   `;
 
   const tiktokDailySql = `
-    WITH deduped AS (${dedupedTiktokAdsCte(ds)})
-    SELECT d, SUM(spend) AS spend
-    FROM deduped
-    WHERE d BETWEEN @date_from AND @date_to
-    GROUP BY d
+    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
+    FROM \`${ds}.tiktok_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
   `;
 
   const [metaRows, googleRows, tiktokRows, metaDaily, googleDaily, tiktokDaily] = await Promise.all([

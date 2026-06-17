@@ -83,52 +83,6 @@ export async function tableExists(table: string): Promise<boolean> {
   }
 }
 
-export function dedupedFacebookAdsCte(ds: string): string {
-  return `
-    SELECT
-      DATE(date) AS d,
-      account_name,
-      SUM(CAST(spend AS FLOAT64)) AS spend,
-      SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
-    FROM \`${ds}.facebook_ads\`
-    GROUP BY d, account_name
-  `;
-}
-
-export function dedupedGoogleAdsCte(ds: string): string {
-  return `
-    SELECT
-      DATE(date) AS d,
-      SUM(CAST(spend AS FLOAT64)) AS spend,
-      SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue,
-      SUM(IFNULL(CAST(conversions AS FLOAT64), 0)) AS conversions,
-      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
-      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
-    FROM \`${ds}.google_ads\`
-    GROUP BY d
-  `;
-}
-
-export function dedupedTiktokAdsCte(ds: string): string {
-  return `
-    SELECT
-      DATE(date) AS d,
-      SUM(CAST(spend AS FLOAT64)) AS spend,
-      SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue,
-      SUM(IFNULL(CAST(complete_payment AS FLOAT64), 0)) AS conversions,
-      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
-      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
-    FROM \`${ds}.tiktok_ads\`
-    GROUP BY d
-  `;
-}
-
-export function dedupedTiktokAdsCteLegacy(ds: string): string {
-  return dedupedTiktokAdsCte(ds).replace(
-    'SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue',
-    'SUM(IFNULL(CAST(complete_payment_value AS FLOAT64), 0)) AS revenue'
-  );
-}
 
 // Windsor writes one row per order per sync-relevant date: the original
 // order row (full price, on the order date), plus an extra row on each

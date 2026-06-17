@@ -1,4 +1,4 @@
-import { runQuery, getDataset, dedupedOrdersCte, dedupedFacebookAdsCte, dedupedGoogleAdsCte, dedupedTiktokAdsCte, dedupedTiktokAdsCteLegacy } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte } from '@/src/lib/bigquery';
 
 export interface OverviewResult {
   metrics: {
@@ -99,37 +99,29 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const ds = getDataset();
   const params = { date_from: dateFrom, date_to: dateTo };
 
-  // Ad spend + platform-attributed revenue from BigQuery (Windsor-synced).
-  // Each platform CTE deduplicates by (date, ad_id) first — Windsor re-syncs
-  // intraday and inserts duplicate rows, so a plain SUM over-counts today's spend.
   const adsSql = `
-    WITH meta_raw AS (${dedupedFacebookAdsCte(ds)}),
-    meta AS (
-      SELECT d,
-             SUM(spend) AS spend,
-             SUM(revenue) AS revenue
-      FROM meta_raw
-      WHERE d BETWEEN @date_from AND @date_to
+    WITH meta AS (
+      SELECT DATE(date) AS d,
+             SUM(CAST(spend AS FLOAT64)) AS spend,
+             SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
+      FROM \`${ds}.facebook_ads\`
+      WHERE DATE(date) BETWEEN @date_from AND @date_to
         AND LOWER(account_name) = 'rocknot'
       GROUP BY d
     ),
-    google_raw AS (${dedupedGoogleAdsCte(ds)}),
     google AS (
-      SELECT d,
-             SUM(spend) AS spend,
-             SUM(revenue) AS revenue
-      FROM google_raw
-      WHERE d BETWEEN @date_from AND @date_to
-      GROUP BY d
+      SELECT DATE(date) AS d,
+             SUM(CAST(spend AS FLOAT64)) AS spend,
+             SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue
+      FROM \`${ds}.google_ads\`
+      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
     ),
-    tiktok_raw AS (${dedupedTiktokAdsCte(ds)}),
     tiktok AS (
-      SELECT d,
-             SUM(spend) AS spend,
-             SUM(revenue) AS revenue
-      FROM tiktok_raw
-      WHERE d BETWEEN @date_from AND @date_to
-      GROUP BY d
+      SELECT DATE(date) AS d,
+             SUM(CAST(spend AS FLOAT64)) AS spend,
+             SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue
+      FROM \`${ds}.tiktok_ads\`
+      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
     ),
     days AS (SELECT d FROM UNNEST(GENERATE_DATE_ARRAY(@date_from, @date_to)) AS d)
     SELECT
@@ -146,6 +138,11 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     LEFT JOIN tiktok ON tiktok.d = days.d
     ORDER BY days.d
   `;
+
+  const adsSqlLegacyTiktok = adsSql.replace(
+    'SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue',
+    'SUM(IFNULL(CAST(complete_payment_value AS FLOAT64), 0)) AS revenue'
+  );
 
   // New vs returning customer split (placement-date attribution from BigQuery).
   const customerSql = `
@@ -174,11 +171,6 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     JOIN firsts f USING (cid)
   `;
 
-  // Fallback: replace the tiktok_raw CTE with the legacy revenue column.
-  const adsSqlLegacyTiktok = adsSql.replace(
-    `tiktok_raw AS (${dedupedTiktokAdsCte(ds)})`,
-    `tiktok_raw AS (${dedupedTiktokAdsCteLegacy(ds)})`
-  );
 
   const [shopifyDays, adsRows, custRows] = await Promise.all([
     fetchShopifyDaily(dateFrom, dateTo).catch(() => [] as ShopifyDay[]),
