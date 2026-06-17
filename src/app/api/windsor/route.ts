@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Timeframe } from '@/src/lib/mockData';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getOverview, fetchShopifyDaily, fetchShopifyCustomerSplit } from '@/src/lib/bqOverview';
-import { fetchMetaToday } from '@/src/lib/metaLive';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 
 export const dynamic = 'force-dynamic';
@@ -490,25 +489,6 @@ export async function GET(request: NextRequest) {
           } else {
             current.revenueData = [{ date: currentParams.date_from, revenue: Math.round(liveRevenue), orders: liveOrders, adSpend: current.metrics.totalAdSpend }];
           }
-        }
-      }
-    }
-
-    // For "today", replace Meta numbers with the Graph API's live figures.
-    // Always trust the Graph API over Windsor — Windsor can both under-report
-    // (sync delay) and over-report (intraday re-sync duplicates).
-    if (tfRaw === 'today' && !latestAvailableDate) {
-      const metaLive = await fetchMetaToday();
-      if (metaLive && metaLive.spend > 0) {
-        const spendDelta = metaLive.spend - current.metrics.metaSpend;
-        current.metrics.metaSpend = Math.round(metaLive.spend * 100) / 100;
-        current.metrics.metaRevenue = Math.round(metaLive.revenue * 100) / 100;
-        current.metrics.totalAdSpend = Math.round((current.metrics.totalAdSpend + spendDelta) * 100) / 100;
-        current.metrics.mer = current.metrics.totalAdSpend > 0
-          ? Math.round((current.metrics.totalRevenue / current.metrics.totalAdSpend) * 100) / 100
-          : 0;
-        if (current.revenueData.length === 1) {
-          current.revenueData[0].adSpend = Math.round(current.metrics.totalAdSpend);
         }
       }
     }
