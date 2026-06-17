@@ -307,8 +307,11 @@ async function fetchFromWindsor(endpoint: string, fields: string, params: Record
 }
 
 async function fetchAllRows(params: Record<string, string>): Promise<WindsorRow[]> {
+  // Try tiktok_ads endpoint first, then tiktok, then legacy revenue field
   const tiktokResult = await fetchFromWindsor('tiktok_ads', TIKTOK_FIELDS, params)
+    .then(r => r.rowCount > 0 ? r : fetchFromWindsor('tiktok', TIKTOK_FIELDS, params))
     .then(r => r.rowCount > 0 ? r : fetchFromWindsor('tiktok_ads', TIKTOK_FIELDS_LEGACY, params))
+    .then(r => r.rowCount > 0 ? r : fetchFromWindsor('tiktok', TIKTOK_FIELDS_LEGACY, params))
     .catch(() => ({ rows: [] as WindsorRow[], rowCount: 0 }));
 
   const [meta, google, shopify] = await Promise.all([

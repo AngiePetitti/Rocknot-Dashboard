@@ -83,20 +83,15 @@ export async function tableExists(table: string): Promise<boolean> {
   }
 }
 
-// Windsor re-syncs ad tables intraday, inserting duplicate rows for the same
-// (date, ad_id). Without dedup, summing spend over today double/triple-counts.
-// This CTE picks one row per (date, ad_id) using MAX to handle any metric drift
-// across re-syncs, then the caller aggregates further (e.g. SUM by day).
 export function dedupedFacebookAdsCte(ds: string): string {
   return `
     SELECT
       DATE(date) AS d,
-      CAST(ad_id AS STRING) AS ad_id,
       account_name,
-      MAX(CAST(spend AS FLOAT64)) AS spend,
-      MAX(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
+      SUM(CAST(spend AS FLOAT64)) AS spend,
+      SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
     FROM \`${ds}.facebook_ads\`
-    GROUP BY d, ad_id, account_name
+    GROUP BY d, account_name
   `;
 }
 
@@ -104,14 +99,13 @@ export function dedupedGoogleAdsCte(ds: string): string {
   return `
     SELECT
       DATE(date) AS d,
-      CAST(ad_id AS STRING) AS ad_id,
-      MAX(CAST(spend AS FLOAT64)) AS spend,
-      MAX(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue,
-      MAX(IFNULL(CAST(conversions AS FLOAT64), 0)) AS conversions,
-      MAX(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
-      MAX(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
+      SUM(CAST(spend AS FLOAT64)) AS spend,
+      SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue,
+      SUM(IFNULL(CAST(conversions AS FLOAT64), 0)) AS conversions,
+      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
     FROM \`${ds}.google_ads\`
-    GROUP BY d, ad_id
+    GROUP BY d
   `;
 }
 
@@ -119,21 +113,20 @@ export function dedupedTiktokAdsCte(ds: string): string {
   return `
     SELECT
       DATE(date) AS d,
-      CAST(ad_id AS STRING) AS ad_id,
-      MAX(CAST(spend AS FLOAT64)) AS spend,
-      MAX(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue,
-      MAX(IFNULL(CAST(complete_payment AS FLOAT64), 0)) AS conversions,
-      MAX(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
-      MAX(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
+      SUM(CAST(spend AS FLOAT64)) AS spend,
+      SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue,
+      SUM(IFNULL(CAST(complete_payment AS FLOAT64), 0)) AS conversions,
+      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
     FROM \`${ds}.tiktok_ads\`
-    GROUP BY d, ad_id
+    GROUP BY d
   `;
 }
 
 export function dedupedTiktokAdsCteLegacy(ds: string): string {
   return dedupedTiktokAdsCte(ds).replace(
-    'MAX(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue',
-    'MAX(IFNULL(CAST(complete_payment_value AS FLOAT64), 0)) AS revenue'
+    'SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue',
+    'SUM(IFNULL(CAST(complete_payment_value AS FLOAT64), 0)) AS revenue'
   );
 }
 
