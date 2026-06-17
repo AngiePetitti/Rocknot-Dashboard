@@ -17,27 +17,34 @@ export async function GET(request: NextRequest) {
   }
 
   const ql = `FROM sales SHOW orders, net_sales, total_sales TIMESERIES day SINCE ${from} UNTIL ${to}`;
-  try {
-    const res = await fetch(`https://${DOMAIN}/admin/api/2024-01/graphql.json`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
-      body: JSON.stringify({
-        query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) {
-          tableData { rowData columns { name } }
-          parseErrors { code message }
-        }}`,
-      }),
-      cache: 'no-store',
-    });
-    const json = await res.json();
-    return NextResponse.json({
-      hasToken: true,
-      tokenPrefix: TOKEN.slice(0, 8),
-      domain: DOMAIN,
-      httpStatus: res.status,
-      raw: json,
-    });
-  } catch (e) {
-    return NextResponse.json({ hasToken: true, domain: DOMAIN, error: String(e) });
+  const body = JSON.stringify({
+    query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) {
+      tableData { rowData columns { name } }
+      parseErrors { code message }
+    }}`,
+  });
+
+  const attempts: Array<{ version: string; header: string }> = [
+    { version: '2024-01', header: 'X-Shopify-Access-Token' },
+    { version: '2026-04', header: 'X-Shopify-Access-Token' },
+    { version: '2024-01', header: 'Authorization' },
+    { version: '2026-04', header: 'Authorization' },
+  ];
+
+  const results: Record<string, unknown>[] = [];
+  for (const a of attempts) {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      headers[a.header] = a.header === 'Authorization' ? `Bearer ${TOKEN}` : TOKEN;
+      const res = await fetch(`https://${DOMAIN}/admin/api/${a.version}/graphql.json`, {
+        method: 'POST', headers, body, cache: 'no-store',
+      });
+      const json = await res.json();
+      results.push({ ...a, status: res.status, ok: !!json?.data?.shopifyqlQuery?.tableData, raw: json });
+    } catch (e) {
+      results.push({ ...a, error: String(e) });
+    }
   }
+
+  return NextResponse.json({ hasToken: true, tokenPrefix: TOKEN.slice(0, 8), domain: DOMAIN, results });
 }
