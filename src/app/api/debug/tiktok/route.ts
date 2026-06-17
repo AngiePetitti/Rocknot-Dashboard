@@ -36,5 +36,26 @@ export async function GET(request: NextRequest) {
     `, { from, to }).then(r => (r[0] as { total: unknown })?.total).catch(() => 'no_column');
   }
 
-  return NextResponse.json({ from, to, columns: cols, sums });
+  // Direct ROAS / cost-per-purchase columns TikTok may populate instead of value.
+  const roasAgg = await runQuery(`
+    SELECT
+      ROUND(SUM(CAST(spend AS FLOAT64)), 2) AS spend,
+      ROUND(SUM(CAST(complete_payment AS FLOAT64)), 2) AS complete_payment,
+      ROUND(SUM(CAST(onsite_purchases_roas AS FLOAT64)), 4) AS sum_onsite_roas,
+      ROUND(AVG(CAST(onsite_purchases_roas AS FLOAT64)), 4) AS avg_onsite_roas,
+      ROUND(SUM(CAST(onsite_cost_per_purchase AS FLOAT64)), 2) AS sum_onsite_cpp
+    FROM \`${ds}.tiktok_ads\`
+    WHERE DATE(date) BETWEEN @from AND @to
+  `, { from, to }).catch(e => [{ error: String(e) }]);
+
+  // Sample the rows that actually recorded a payment.
+  const sample = await runQuery(`
+    SELECT date, campaign, spend, complete_payment, complete_payment_value,
+           onsite_purchases_roas, onsite_cost_per_purchase
+    FROM \`${ds}.tiktok_ads\`
+    WHERE DATE(date) BETWEEN @from AND @to AND CAST(complete_payment AS FLOAT64) > 0
+    LIMIT 10
+  `, { from, to }).catch(e => [{ error: String(e) }]);
+
+  return NextResponse.json({ from, to, columns: cols, sums, roasAgg, sample });
 }
