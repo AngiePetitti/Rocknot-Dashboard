@@ -47,7 +47,7 @@ async function fetchSourceTotals(source: 'facebook' | 'google_ads' | 'tiktok', p
   const fieldMap = {
     facebook:   'account_id,source,spend,impressions,clicks,action_values_omni_purchase,actions_omni_purchase',
     google_ads: 'source,spend,impressions,clicks,conversion_value',
-    tiktok:     'source,spend,impressions,clicks,onsite_total_purchase_value,conversion_value',
+    tiktok:     'source,spend,impressions,clicks,complete_payment,total_complete_payment_rate,onsite_total_purchase_value,conversion_value',
   };
   try {
     const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields: fieldMap[source], _renderer: 'json', ...params });
@@ -92,7 +92,10 @@ function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'Ti
     if (platform === 'Meta') {
       revenue += Number((row as Record<string, unknown>).action_values_omni_purchase || 0);
     } else if (platform === 'TikTok') {
-      revenue += Number((row as Record<string, unknown>).onsite_total_purchase_value || row.conversion_value || 0);
+      const tk = row as Record<string, unknown>;
+      // total_complete_payment_rate is TikTok's total purchase value (Windsor's
+      // misleading name); complete_payment_value is empty for this account.
+      revenue += Number(tk.total_complete_payment_rate || tk.onsite_total_purchase_value || row.conversion_value || 0);
     } else {
       revenue += Number(row.conversion_value || 0);
     }

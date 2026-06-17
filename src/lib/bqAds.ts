@@ -103,9 +103,23 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
 
   const googleSqlWithImpressions = googleSql.replace('0 AS impressions', 'SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions');
 
-  // TikTok: complete_payment_value = pixel-tracked website purchases.
-  // Falls back to onsite_total_purchase_value (TikTok Shop) if pixel column missing.
+  // TikTok purchase value lives in total_complete_payment_rate (Windsor's
+  // confusingly-named "total complete payment value" — confirmed: it equals
+  // value_per_complete_payment × complete_payment count). complete_payment_value
+  // is empty for this account. Try the real value column first; fall back to the
+  // older columns if it isn't synced into the table yet.
   const tiktokSql = `
+    SELECT
+      SUM(CAST(spend AS FLOAT64)) AS spend,
+      SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue,
+      SUM(IFNULL(CAST(complete_payment AS FLOAT64), 0)) AS conversions,
+      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
+    FROM \`${ds}.tiktok_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
+  `;
+
+  const tiktokSqlLegacy = `
     SELECT
       SUM(CAST(spend AS FLOAT64)) AS spend,
       SUM(IFNULL(CAST(complete_payment_value AS FLOAT64), 0)) AS revenue,
@@ -150,7 +164,10 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   const [metaRows, googleRows, tiktokRows, metaDaily, googleDaily, tiktokDaily] = await Promise.all([
     runQuery<RawRow>(metaSqlWithImpressions, params).catch(() => runQuery<RawRow>(metaSql, params)).catch(() => null),
     runQuery<RawRow>(googleSqlWithImpressions, params).catch(() => runQuery<RawRow>(googleSql, params)).catch(() => null),
-    runQuery<RawRow>(tiktokSql, params).catch(() => runQuery<RawRow>(tiktokSqlFallback, params)).catch(() => null),
+    runQuery<RawRow>(tiktokSql, params)
+      .catch(() => runQuery<RawRow>(tiktokSqlLegacy, params))
+      .catch(() => runQuery<RawRow>(tiktokSqlFallback, params))
+      .catch(() => null),
     runQuery<DailySpendRow>(metaDailySql, params).catch(() => [] as DailySpendRow[]),
     runQuery<DailySpendRow>(googleDailySql, params).catch(() => [] as DailySpendRow[]),
     runQuery<DailySpendRow>(tiktokDailySql, params).catch(() => [] as DailySpendRow[]),

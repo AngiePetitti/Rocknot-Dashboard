@@ -88,6 +88,7 @@ const FIELDS_BY_SOURCE: Record<'facebook' | 'tiktok', string> = {
   tiktok: [
     'source', 'ad_name', 'ad_id', 'account_id', 'adset_name', 'campaign',
     'spend', 'impressions', 'clicks',
+    'total_complete_payment_rate', 'complete_payment',
     'onsite_total_purchase_value', 'conversion_value', 'revenue', 'conversions',
   ].join(','),
 };
@@ -163,6 +164,7 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
     const rawRow = row as Record<string, unknown>;
     entry.revenue += Number(
       rawRow.action_values_omni_purchase ||
+      rawRow.total_complete_payment_rate ||
       rawRow.onsite_total_purchase_value ||
       row.conversion_values ||
       row.conversion_value ||
@@ -172,7 +174,7 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
 
     entry.impressions += Number(row.impressions || 0);
     entry.clicks += Number(row.clicks || 0);
-    entry.conversions += Number(rawRow.actions_omni_purchase || rawRow.conversions || 0);
+    entry.conversions += Number(rawRow.actions_omni_purchase || rawRow.complete_payment || rawRow.conversions || 0);
   }
 
   return Object.values(byAd).map(c => ({
