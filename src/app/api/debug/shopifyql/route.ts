@@ -19,16 +19,13 @@ export async function GET(request: NextRequest) {
   const ql = `FROM sales SHOW orders, net_sales, total_sales TIMESERIES day SINCE ${from} UNTIL ${to}`;
   const body = JSON.stringify({
     query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) {
-      tableData { rowData columns { name } }
-      parseErrors { code message }
+      tableData { rows columns { name } }
+      parseErrors
     }}`,
   });
 
   const attempts: Array<{ version: string; header: string }> = [
-    { version: '2024-01', header: 'X-Shopify-Access-Token' },
     { version: '2026-04', header: 'X-Shopify-Access-Token' },
-    { version: '2024-01', header: 'Authorization' },
-    { version: '2026-04', header: 'Authorization' },
   ];
 
   const results: Record<string, unknown>[] = [];

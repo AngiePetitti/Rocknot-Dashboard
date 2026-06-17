@@ -62,22 +62,22 @@ const SHOPIFY_DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshop
 async function fetchShopifyDaily(from: string, to: string): Promise<ShopifyDay[]> {
   if (!SHOPIFY_TOKEN) return [];
   const ql = `FROM sales SHOW orders, net_sales, total_sales TIMESERIES day SINCE ${from} UNTIL ${to}`;
-  const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/graphql.json`, {
+  const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
     body: JSON.stringify({
       query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) {
-        tableData { rowData columns { name } }
-        parseErrors { code message }
+        tableData { rows columns { name } }
+        parseErrors
       }}`,
     }),
     cache: 'no-store',
   });
   const json = await res.json();
   const q = json?.data?.shopifyqlQuery;
-  if (q?.parseErrors?.length) throw new Error(q.parseErrors[0].message);
+  if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
   const cols: { name: string }[] = q?.tableData?.columns || [];
-  const rows: string[][] = q?.tableData?.rowData || [];
+  const rows: string[][] = q?.tableData?.rows || [];
   const idx = (n: string) => cols.findIndex(c => c.name === n);
   const dayI = idx('day'), ordI = idx('orders'), netI = idx('net_sales'), totI = idx('total_sales');
   return rows.map(r => ({

@@ -28,7 +28,7 @@ const UNTIL_MAP: Record<Timeframe, string> = {
 };
 
 async function runShopifyQL(query: string) {
-  const res = await fetch(`https://${DOMAIN}/admin/api/2024-01/graphql.json`, {
+  const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -37,10 +37,10 @@ async function runShopifyQL(query: string) {
     body: JSON.stringify({
       query: `{ shopifyqlQuery(query: ${JSON.stringify(query)}) {
         tableData {
-          rowData
+          rows
           columns { name dataType }
         }
-        parseErrors { code message range { start { line column } } }
+        parseErrors
       }}`,
     }),
     next: { revalidate: 0 }, // always fresh
@@ -73,11 +73,11 @@ export async function GET(request: NextRequest) {
       `FROM sales SHOW net_sales, orders TIMESERIES day SINCE -${trendDays}d UNTIL today`
     );
 
-    if (summary?.parseErrors?.length) {
-      throw new Error(summary.parseErrors[0].message);
+    if (typeof summary?.parseErrors === 'string' && summary.parseErrors) {
+      throw new Error(summary.parseErrors);
     }
 
-    const row = summary?.tableData?.rowData?.[0] || [];
+    const row = summary?.tableData?.rowData?.[0] || summary?.tableData?.rows?.[0] || [];
     const cols = summary?.tableData?.columns || [];
     const get = (name: string) => {
       const idx = cols.findIndex((c: {name: string}) => c.name === name);
@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
     const returns = Math.abs(get('returns'));
 
     // Build daily revenue array from trend data
-    const trendRows = trend?.tableData?.rowData || [];
+    const trendRows = trend?.tableData?.rows || [];
     const trendCols = trend?.tableData?.columns || [];
     const dayIdx = trendCols.findIndex((c: {name: string}) => c.name === 'day');
     const revenueIdx = trendCols.findIndex((c: {name: string}) => c.name === 'net_sales');

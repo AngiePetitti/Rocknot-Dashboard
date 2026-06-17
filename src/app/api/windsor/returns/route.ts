@@ -45,7 +45,7 @@ function rangeForTf(tfRaw: string, dateFrom: string, dateTo: string): { from: st
 }
 
 async function runShopifyQL(query: string) {
-  const res = await fetch(`https://${DOMAIN}/admin/api/2024-01/graphql.json`, {
+  const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -54,10 +54,10 @@ async function runShopifyQL(query: string) {
     body: JSON.stringify({
       query: `{ shopifyqlQuery(query: ${JSON.stringify(query)}) {
         tableData {
-          rowData
+          rows
           columns { name dataType }
         }
-        parseErrors { code message }
+        parseErrors
       }}`,
     }),
     next: { revalidate: 0 },
@@ -98,19 +98,19 @@ export async function GET(request: NextRequest) {
     ]);
 
     for (const r of [summary, trend, byProduct]) {
-      if (r?.parseErrors?.length) {
-        throw new Error(r.parseErrors[0].message);
+      if (typeof r?.parseErrors === 'string' && r.parseErrors) {
+        throw new Error(r.parseErrors);
       }
     }
 
     const sCols = summary?.tableData?.columns || [];
-    const sRow = summary?.tableData?.rowData?.[0] || [];
+    const sRow = summary?.tableData?.rows?.[0] || [];
     const grossSales = parseFloat(sRow[colIndex(sCols, 'gross_sales')] || '0');
     const totalReturns = Math.abs(parseFloat(sRow[colIndex(sCols, 'returns')] || '0'));
     const returnRate = grossSales > 0 ? Math.round((totalReturns / grossSales) * 1000) / 10 : 0;
 
     const tCols = trend?.tableData?.columns || [];
-    const tRows: string[][] = trend?.tableData?.rowData || [];
+    const tRows: string[][] = trend?.tableData?.rows || [];
     const dayIdx = colIndex(tCols, 'day');
     const returnsIdx = colIndex(tCols, 'returns');
     const trendData: ReturnTrendPoint[] = tRows.map(r => ({
@@ -119,7 +119,7 @@ export async function GET(request: NextRequest) {
     }));
 
     const pCols = byProduct?.tableData?.columns || [];
-    const pRows: string[][] = byProduct?.tableData?.rowData || [];
+    const pRows: string[][] = byProduct?.tableData?.rows || [];
     const titleIdx = colIndex(pCols, 'product_title');
     const pReturnsIdx = colIndex(pCols, 'returns');
     const topReturnedProducts: ReturnedProduct[] = pRows

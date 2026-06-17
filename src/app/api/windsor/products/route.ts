@@ -46,7 +46,7 @@ function rangeForTf(tfRaw: string, dateFrom: string, dateTo: string): { from: st
 }
 
 async function runShopifyQL(query: string) {
-  const res = await fetch(`https://${DOMAIN}/admin/api/2024-01/graphql.json`, {
+  const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -55,10 +55,10 @@ async function runShopifyQL(query: string) {
     body: JSON.stringify({
       query: `{ shopifyqlQuery(query: ${JSON.stringify(query)}) {
         tableData {
-          rowData
+          rows
           columns { name dataType }
         }
-        parseErrors { code message }
+        parseErrors
       }}`,
     }),
     next: { revalidate: 0 },
@@ -120,12 +120,12 @@ export async function GET(request: NextRequest) {
       `FROM sales SHOW net_sales, net_quantity BY product_title, product_type SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 50`
     );
 
-    if (result?.parseErrors?.length) {
-      throw new Error(result.parseErrors[0].message);
+    if (typeof result?.parseErrors === 'string' && result.parseErrors) {
+      throw new Error(result.parseErrors);
     }
 
     const cols = result?.tableData?.columns || [];
-    const rows: string[][] = result?.tableData?.rowData || [];
+    const rows: string[][] = result?.tableData?.rows || [];
     const idx = (name: string) => cols.findIndex((c: { name: string }) => c.name === name);
     const titleIdx = idx('product_title');
     const typeIdx = idx('product_type');
