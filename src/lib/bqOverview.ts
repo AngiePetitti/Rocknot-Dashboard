@@ -77,14 +77,21 @@ async function fetchShopifyDaily(from: string, to: string): Promise<ShopifyDay[]
   const q = json?.data?.shopifyqlQuery;
   if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
   const cols: { name: string }[] = q?.tableData?.columns || [];
-  const rows: string[][] = q?.tableData?.rows || [];
-  const idx = (n: string) => cols.findIndex(c => c.name === n);
-  const dayI = idx('day'), ordI = idx('orders'), netI = idx('net_sales'), totI = idx('total_sales');
+  // The live Admin API returns each row as an object keyed by column name;
+  // some clients/versions return positional arrays. Support both.
+  const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
+  const cell = (r: Record<string, string> | string[], name: string): string => {
+    if (Array.isArray(r)) {
+      const i = cols.findIndex(c => c.name === name);
+      return i >= 0 ? (r[i] ?? '') : '';
+    }
+    return r[name] ?? '';
+  };
   return rows.map(r => ({
-    date: (r[dayI] || '').split('T')[0],
-    orders: Math.round(parseFloat(r[ordI] || '0')),
-    netSales: parseFloat(r[netI] || '0'),
-    totalSales: parseFloat(r[totI] || '0'),
+    date: (cell(r, 'day') || '').split('T')[0],
+    orders: Math.round(parseFloat(cell(r, 'orders') || '0')),
+    netSales: parseFloat(cell(r, 'net_sales') || '0'),
+    totalSales: parseFloat(cell(r, 'total_sales') || '0'),
   }));
 }
 

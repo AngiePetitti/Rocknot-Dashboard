@@ -77,11 +77,14 @@ export async function GET(request: NextRequest) {
       throw new Error(summary.parseErrors);
     }
 
-    const row = summary?.tableData?.rowData?.[0] || summary?.tableData?.rows?.[0] || [];
+    const row = summary?.tableData?.rows?.[0] || [];
     const cols = summary?.tableData?.columns || [];
     const get = (name: string) => {
-      const idx = cols.findIndex((c: {name: string}) => c.name === name);
-      return idx >= 0 ? parseFloat(row[idx] || '0') : 0;
+      if (Array.isArray(row)) {
+        const idx = cols.findIndex((c: {name: string}) => c.name === name);
+        return idx >= 0 ? parseFloat(row[idx] || '0') : 0;
+      }
+      return parseFloat((row as Record<string, string>)[name] || '0');
     };
 
     const netSales = get('net_sales');
@@ -90,17 +93,21 @@ export async function GET(request: NextRequest) {
     const returns = Math.abs(get('returns'));
 
     // Build daily revenue array from trend data
-    const trendRows = trend?.tableData?.rows || [];
+    const trendRows: Array<Record<string, string> | string[]> = trend?.tableData?.rows || [];
     const trendCols = trend?.tableData?.columns || [];
-    const dayIdx = trendCols.findIndex((c: {name: string}) => c.name === 'day');
-    const revenueIdx = trendCols.findIndex((c: {name: string}) => c.name === 'net_sales');
-    const ordersIdx = trendCols.findIndex((c: {name: string}) => c.name === 'orders');
+    const tCell = (r: Record<string, string> | string[], name: string): string => {
+      if (Array.isArray(r)) {
+        const i = trendCols.findIndex((c: {name: string}) => c.name === name);
+        return i >= 0 ? (r[i] ?? '') : '';
+      }
+      return r[name] ?? '';
+    };
 
-    const revenueData = trendRows.map((r: string[]) => ({
-      date: r[dayIdx]?.split('T')[0] || '',
-      revenue: Math.round(parseFloat(r[revenueIdx] || '0')),
-      orders: parseInt(r[ordersIdx] || '0'),
-      adSpend: Math.round(parseFloat(r[revenueIdx] || '0') / 3.5), // estimated until ad APIs connected
+    const revenueData = trendRows.map((r) => ({
+      date: tCell(r, 'day')?.split('T')[0] || '',
+      revenue: Math.round(parseFloat(tCell(r, 'net_sales') || '0')),
+      orders: parseInt(tCell(r, 'orders') || '0'),
+      adSpend: Math.round(parseFloat(tCell(r, 'net_sales') || '0') / 3.5), // estimated until ad APIs connected
     }));
 
     // Merge with historical data for chart continuity

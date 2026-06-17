@@ -125,20 +125,24 @@ export async function GET(request: NextRequest) {
     }
 
     const cols = result?.tableData?.columns || [];
-    const rows: string[][] = result?.tableData?.rows || [];
-    const idx = (name: string) => cols.findIndex((c: { name: string }) => c.name === name);
-    const titleIdx = idx('product_title');
-    const typeIdx = idx('product_type');
-    const salesIdx = idx('net_sales');
-    const qtyIdx = idx('net_quantity');
+    // Live Admin API returns rows as objects keyed by column name; support
+    // positional arrays too for safety.
+    const rows: Array<Record<string, string> | string[]> = result?.tableData?.rows || [];
+    const cell = (r: Record<string, string> | string[], name: string): string => {
+      if (Array.isArray(r)) {
+        const i = cols.findIndex((c: { name: string }) => c.name === name);
+        return i >= 0 ? (r[i] ?? '') : '';
+      }
+      return r[name] ?? '';
+    };
 
     const products: ProductSales[] = rows
       .map((r, i) => ({
         id: String(i),
-        name: r[titleIdx] || 'Unknown',
-        category: r[typeIdx] || 'Other',
-        unitsSold: Math.round(parseFloat(r[qtyIdx] || '0')),
-        revenue: Math.round(parseFloat(r[salesIdx] || '0')),
+        name: cell(r, 'product_title') || 'Unknown',
+        category: cell(r, 'product_type') || 'Other',
+        unitsSold: Math.round(parseFloat(cell(r, 'net_quantity') || '0')),
+        revenue: Math.round(parseFloat(cell(r, 'net_sales') || '0')),
         percentOfTotal: 0,
       }))
       .filter(p => p.name && p.name !== 'Unknown' && p.revenue > 0);

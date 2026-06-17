@@ -66,8 +66,14 @@ async function runShopifyQL(query: string) {
   return json?.data?.shopifyqlQuery;
 }
 
-function colIndex(cols: { name: string }[], name: string): number {
-  return cols.findIndex(c => c.name === name);
+// Live Admin API returns rows as objects keyed by column name; support
+// positional arrays too for safety.
+function cell(cols: { name: string }[], r: Record<string, string> | string[], name: string): string {
+  if (Array.isArray(r)) {
+    const i = cols.findIndex(c => c.name === name);
+    return i >= 0 ? (r[i] ?? '') : '';
+  }
+  return r?.[name] ?? '';
 }
 
 export async function GET(request: NextRequest) {
@@ -105,27 +111,23 @@ export async function GET(request: NextRequest) {
 
     const sCols = summary?.tableData?.columns || [];
     const sRow = summary?.tableData?.rows?.[0] || [];
-    const grossSales = parseFloat(sRow[colIndex(sCols, 'gross_sales')] || '0');
-    const totalReturns = Math.abs(parseFloat(sRow[colIndex(sCols, 'returns')] || '0'));
+    const grossSales = parseFloat(cell(sCols, sRow, 'gross_sales') || '0');
+    const totalReturns = Math.abs(parseFloat(cell(sCols, sRow, 'returns') || '0'));
     const returnRate = grossSales > 0 ? Math.round((totalReturns / grossSales) * 1000) / 10 : 0;
 
     const tCols = trend?.tableData?.columns || [];
-    const tRows: string[][] = trend?.tableData?.rows || [];
-    const dayIdx = colIndex(tCols, 'day');
-    const returnsIdx = colIndex(tCols, 'returns');
+    const tRows: Array<Record<string, string> | string[]> = trend?.tableData?.rows || [];
     const trendData: ReturnTrendPoint[] = tRows.map(r => ({
-      date: (r[dayIdx] || '').split('T')[0],
-      returns: Math.round(Math.abs(parseFloat(r[returnsIdx] || '0'))),
+      date: (cell(tCols, r, 'day') || '').split('T')[0],
+      returns: Math.round(Math.abs(parseFloat(cell(tCols, r, 'returns') || '0'))),
     }));
 
     const pCols = byProduct?.tableData?.columns || [];
-    const pRows: string[][] = byProduct?.tableData?.rows || [];
-    const titleIdx = colIndex(pCols, 'product_title');
-    const pReturnsIdx = colIndex(pCols, 'returns');
+    const pRows: Array<Record<string, string> | string[]> = byProduct?.tableData?.rows || [];
     const topReturnedProducts: ReturnedProduct[] = pRows
       .map(r => ({
-        name: r[titleIdx] || 'Unknown',
-        returns: Math.round(Math.abs(parseFloat(r[pReturnsIdx] || '0'))),
+        name: cell(pCols, r, 'product_title') || 'Unknown',
+        returns: Math.round(Math.abs(parseFloat(cell(pCols, r, 'returns') || '0'))),
       }))
       .filter(p => p.name !== 'Unknown' && p.returns > 0)
       .sort((a, b) => b.returns - a.returns)
