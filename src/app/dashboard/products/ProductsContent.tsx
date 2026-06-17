@@ -41,6 +41,7 @@ export default function ProductsContent() {
   const [products, setProducts] = useState<ProductSales[]>([]);
   const [totalRevenue, setTotalRevenue] = useState<number>(0);
   const [totalUnits, setTotalUnits] = useState<number>(0);
+  const [totalGrossProfit, setTotalGrossProfit] = useState<number>(0);
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
 
   useEffect(() => {
@@ -56,11 +57,13 @@ export default function ProductsContent() {
           setProducts(data.products || []);
           setTotalRevenue(data.totalRevenue ?? 0);
           setTotalUnits(data.totalUnits ?? 0);
+          setTotalGrossProfit(data.totalGrossProfit ?? 0);
           setStatus('ok');
         } else {
           setProducts([]);
           setTotalRevenue(0);
           setTotalUnits(0);
+          setTotalGrossProfit(0);
           setStatus('error');
         }
       })
@@ -104,7 +107,7 @@ export default function ProductsContent() {
         <MetricCard
           title="Total Revenue"
           value={formatCurrency(totalRevenue)}
-          subtitle={`${products.length} products`}
+          subtitle="Net sales · all products"
           accentColor="#fde68a"
         />
         <MetricCard
@@ -114,15 +117,19 @@ export default function ProductsContent() {
           accentColor="#86efac"
         />
         <MetricCard
-          title="Top Product"
-          value={topProduct ? topProduct.name.split(' ').slice(0, 2).join(' ') : '—'}
-          subtitle={topProduct ? formatCurrency(topProduct.revenue) : '—'}
+          title="Gross Profit"
+          value={totalGrossProfit > 0 ? formatCurrency(totalGrossProfit) : '—'}
+          subtitle={
+            totalGrossProfit > 0 && totalRevenue > 0
+              ? `${formatPercent(Math.round((totalGrossProfit / totalRevenue) * 1000) / 10)} blended margin`
+              : 'After product cost (COGS)'
+          }
           accentColor="#c4b5fd"
         />
         <MetricCard
-          title="Top Product Share"
-          value={topProduct ? formatPercent(topProduct.percentOfTotal) : '—'}
-          subtitle="Of total revenue"
+          title="Top Product"
+          value={topProduct ? topProduct.name.split(' ').slice(0, 2).join(' ') : '—'}
+          subtitle={topProduct ? `${formatCurrency(topProduct.revenue)} · ${formatPercent(topProduct.percentOfTotal)}` : '—'}
           accentColor="#f9a8d4"
         />
       </div>

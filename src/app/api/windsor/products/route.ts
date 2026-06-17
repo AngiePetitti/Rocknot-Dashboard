@@ -122,9 +122,17 @@ export async function GET(request: NextRequest) {
       // BigQuery table empty or query failed — fall through to ShopifyQL
     }
 
-    const result = await runShopifyQL(
-      `FROM sales SHOW net_sales, orders, cost_of_goods_sold, gross_profit GROUP BY product_title, product_type SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 50`
-    );
+    // Per-product breakdown (top 50) plus a store-wide aggregate so the
+    // "Total Revenue" card and "% of total" reflect ALL products, not just
+    // the top 50 shown in the table.
+    const [result, totalsResult] = await Promise.all([
+      runShopifyQL(
+        `FROM sales SHOW net_sales, orders, cost_of_goods_sold, gross_profit GROUP BY product_title, product_type SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 50`
+      ),
+      runShopifyQL(
+        `FROM sales SHOW net_sales, orders, gross_profit SINCE ${from} UNTIL ${to}`
+      ),
+    ]);
 
     if (typeof result?.parseErrors === 'string' && result.parseErrors) {
       throw new Error(result.parseErrors);
@@ -161,13 +169,37 @@ export async function GET(request: NextRequest) {
       })
       .filter(p => p.name && p.name !== 'Unknown' && p.revenue > 0);
 
-    const totalRevenue = products.reduce((s, p) => s + p.revenue, 0);
-    const totalUnits = products.reduce((s, p) => s + p.unitsSold, 0);
+    // Store-wide totals (all products) from the aggregate query. Fall back to
+    // the top-50 sum if the aggregate is missing for any reason.
+    const tCols = totalsResult?.tableData?.columns || [];
+    const tRows: Array<Record<string, string> | string[]> = totalsResult?.tableData?.rows || [];
+    const tCell = (name: string): string => {
+      const r = tRows[0];
+      if (!r) return '';
+      if (Array.isArray(r)) {
+        const i = tCols.findIndex((c: { name: string }) => c.name === name);
+        return i >= 0 ? (r[i] ?? '') : '';
+      }
+      return r[name] ?? '';
+    };
+
+    const top50Revenue = products.reduce((s, p) => s + p.revenue, 0);
+    const top50Units = products.reduce((s, p) => s + p.unitsSold, 0);
+    const top50GrossProfit = products.reduce((s, p) => s + p.grossProfit, 0);
+
+    const totalRevenue = Math.round(parseFloat(tCell('net_sales') || '0')) || top50Revenue;
+    const totalUnits = Math.round(parseFloat(tCell('orders') || '0')) || top50Units;
+    const totalGrossProfit = Math.round(parseFloat(tCell('gross_profit') || '0')) || top50GrossProfit;
+
+    // "% of total" is each product's share of the full store net sales.
     for (const p of products) {
       p.percentOfTotal = totalRevenue > 0 ? Math.round((p.revenue / totalRevenue) * 1000) / 10 : 0;
     }
 
-    return NextResponse.json({ source: 'shopify_live', products, totalRevenue, totalUnits }, { headers: cacheHeaders(tfRaw === 'today') });
+    return NextResponse.json(
+      { source: 'shopify_live', products, totalRevenue, totalUnits, totalGrossProfit },
+      { headers: cacheHeaders(tfRaw === 'today') }
+    );
   } catch (err) {
     return NextResponse.json({ source: 'error', error: String(err), products: [], totalRevenue: 0, totalUnits: 0 });
   }
