@@ -1,4 +1,4 @@
-import { runQuery, getDataset } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedFacebookAdsCte, dedupedGoogleAdsCte, dedupedTiktokAdsCte, dedupedTiktokAdsCteLegacy } from '@/src/lib/bigquery';
 
 // Ad Performance tab data from the Windsor→BigQuery tables.
 // Mirrors the shape returned by /api/windsor/ads so the frontend is unchanged.
@@ -72,62 +72,55 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   const ds = getDataset();
   const params = { date_from: dateFrom, date_to: dateTo };
 
-  // Scope Meta to the Rocknot ad account only. Other clients connected to the
-  // same Windsor workspace land in the shared facebook_ads table under a
-  // different account_name and must never appear in this dashboard.
+  // Each platform query deduplicates by (date, ad_id) before summing — Windsor
+  // re-syncs intraday and inserts duplicate rows, which inflates today's spend.
   const metaSql = `
+    WITH deduped AS (${dedupedFacebookAdsCte(ds)})
     SELECT
-      SUM(CAST(spend AS FLOAT64)) AS spend,
-      SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
-      SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS conversions,
-      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      SUM(spend) AS spend,
+      SUM(revenue) AS revenue,
+      0 AS conversions,
+      0 AS clicks,
       0 AS impressions
-    FROM \`${ds}.facebook_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    FROM deduped
+    WHERE d BETWEEN @date_from AND @date_to
       AND LOWER(account_name) = 'rocknot'
   `;
 
-  // Try with impressions first; fall back without if column doesn't exist yet
-  const metaSqlWithImpressions = metaSql.replace('0 AS impressions', 'SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions');
-
   const googleSql = `
+    WITH deduped AS (${dedupedGoogleAdsCte(ds)})
     SELECT
-      SUM(CAST(spend AS FLOAT64)) AS spend,
-      SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue,
-      SUM(IFNULL(CAST(conversions AS FLOAT64), 0)) AS conversions,
-      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
-      0 AS impressions
-    FROM \`${ds}.google_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+      SUM(spend) AS spend,
+      SUM(revenue) AS revenue,
+      SUM(conversions) AS conversions,
+      SUM(clicks) AS clicks,
+      SUM(impressions) AS impressions
+    FROM deduped
+    WHERE d BETWEEN @date_from AND @date_to
   `;
 
-  const googleSqlWithImpressions = googleSql.replace('0 AS impressions', 'SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions');
-
-  // TikTok purchase value lives in total_complete_payment_rate (Windsor's
-  // confusingly-named "total complete payment value" — confirmed: it equals
-  // value_per_complete_payment × complete_payment count). complete_payment_value
-  // is empty for this account. Try the real value column first; fall back to the
-  // older columns if it isn't synced into the table yet.
   const tiktokSql = `
+    WITH deduped AS (${dedupedTiktokAdsCte(ds)})
     SELECT
-      SUM(CAST(spend AS FLOAT64)) AS spend,
-      SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue,
-      SUM(IFNULL(CAST(complete_payment AS FLOAT64), 0)) AS conversions,
-      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
-      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
-    FROM \`${ds}.tiktok_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+      SUM(spend) AS spend,
+      SUM(revenue) AS revenue,
+      SUM(conversions) AS conversions,
+      SUM(clicks) AS clicks,
+      SUM(impressions) AS impressions
+    FROM deduped
+    WHERE d BETWEEN @date_from AND @date_to
   `;
 
   const tiktokSqlLegacy = `
+    WITH deduped AS (${dedupedTiktokAdsCteLegacy(ds)})
     SELECT
-      SUM(CAST(spend AS FLOAT64)) AS spend,
-      SUM(IFNULL(CAST(complete_payment_value AS FLOAT64), 0)) AS revenue,
-      SUM(IFNULL(CAST(complete_payment AS FLOAT64), 0)) AS conversions,
-      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
-      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
-    FROM \`${ds}.tiktok_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+      SUM(spend) AS spend,
+      SUM(revenue) AS revenue,
+      SUM(conversions) AS conversions,
+      SUM(clicks) AS clicks,
+      SUM(impressions) AS impressions
+    FROM deduped
+    WHERE d BETWEEN @date_from AND @date_to
   `;
 
   const tiktokSqlFallback = `
@@ -142,28 +135,33 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   `;
 
   const metaDailySql = `
-    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
-    FROM \`${ds}.facebook_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    WITH deduped AS (${dedupedFacebookAdsCte(ds)})
+    SELECT d, SUM(spend) AS spend
+    FROM deduped
+    WHERE d BETWEEN @date_from AND @date_to
       AND LOWER(account_name) = 'rocknot'
     GROUP BY d
   `;
 
   const googleDailySql = `
-    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
-    FROM \`${ds}.google_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+    WITH deduped AS (${dedupedGoogleAdsCte(ds)})
+    SELECT d, SUM(spend) AS spend
+    FROM deduped
+    WHERE d BETWEEN @date_from AND @date_to
+    GROUP BY d
   `;
 
   const tiktokDailySql = `
-    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
-    FROM \`${ds}.tiktok_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+    WITH deduped AS (${dedupedTiktokAdsCte(ds)})
+    SELECT d, SUM(spend) AS spend
+    FROM deduped
+    WHERE d BETWEEN @date_from AND @date_to
+    GROUP BY d
   `;
 
   const [metaRows, googleRows, tiktokRows, metaDaily, googleDaily, tiktokDaily] = await Promise.all([
-    runQuery<RawRow>(metaSqlWithImpressions, params).catch(() => runQuery<RawRow>(metaSql, params)).catch(() => null),
-    runQuery<RawRow>(googleSqlWithImpressions, params).catch(() => runQuery<RawRow>(googleSql, params)).catch(() => null),
+    runQuery<RawRow>(metaSql, params).catch(() => null),
+    runQuery<RawRow>(googleSql, params).catch(() => null),
     runQuery<RawRow>(tiktokSql, params)
       .catch(() => runQuery<RawRow>(tiktokSqlLegacy, params))
       .catch(() => runQuery<RawRow>(tiktokSqlFallback, params))
