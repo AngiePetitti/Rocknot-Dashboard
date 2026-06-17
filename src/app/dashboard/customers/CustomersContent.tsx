@@ -103,7 +103,7 @@ export default function CustomersContent() {
         <MetricCard
           title="Avg Lifetime Value"
           value={formatCurrency(customerMetrics.avgLTV)}
-          subtitle="Per customer, all orders"
+          subtitle="Per customer · all-time spend"
           accentColor="#f9a8d4"
         />
         <MetricCard
@@ -174,7 +174,7 @@ export default function CustomersContent() {
       <Card accentColor="#c4b5fd" className="mb-6">
         <h2 className="text-sm font-bold text-gray-700 mb-1">LTV Breakdown</h2>
         <p className="text-xs text-gray-400 mb-4">
-          Customers active in this period, grouped by lifetime order count · value = avg lifetime spend
+          Customers who ordered in this period, grouped by lifetime order count · value = avg total spend across all orders ever
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
