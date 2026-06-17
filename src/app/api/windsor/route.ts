@@ -130,6 +130,7 @@ function emptyBucket(date: string): DayBucket {
 
 function aggregateRows(rows: WindsorRow[]) {
   const byDate: Record<string, DayBucket> = {};
+  const seenOrderIds = new Set<string>();
 
   for (const row of rows) {
     const date = String(row.date || '').split('T')[0];
@@ -141,6 +142,13 @@ function aggregateRows(rows: WindsorRow[]) {
     const isShopify = src.includes('shopify');
 
     if (isShopify) {
+      // Deduplicate by order_id — Windsor re-syncs intraday and can return the
+      // same order multiple times, inflating both revenue and order count.
+      const orderId = String((row as Record<string, unknown>).order_id || '');
+      if (orderId) {
+        if (seenOrderIds.has(orderId)) continue;
+        seenOrderIds.add(orderId);
+      }
       const rev = Number(row.order_total_price || row.order_current_total_price || row.order_subtotal_price || row.order_gross_sales || row.order_net_sales || row.revenue || 0);
       byDate[date].shopifyRevenue += rev;
       byDate[date].orders += Math.round(Number(row.order_count || 0));
@@ -218,7 +226,9 @@ const GOOGLE_FIELDS = ['date', 'source', 'spend', 'impressions', 'clicks', 'conv
 // Shopify fields via Windsor /all endpoint — order-level fields only.
 // Do not mix with Customer-endpoint fields (e.g. customer_is_returning) —
 // per Windsor support, mixing reports in one query nulls out order fields.
-const SHOPIFY_FIELDS = ['date', 'source', 'order_count', 'order_current_total_price', 'order_subtotal_price', 'order_total_price', 'order_gross_sales', 'order_net_sales'].join(',');
+// order_id is included so aggregateRows can deduplicate — Windsor re-syncs
+// intraday and may return the same order more than once.
+const SHOPIFY_FIELDS = ['date', 'source', 'order_id', 'order_count', 'order_current_total_price', 'order_subtotal_price', 'order_total_price', 'order_gross_sales', 'order_net_sales'].join(',');
 
 // Separate queries per Windsor support: orders (with customer id) and the
 // Customers report (customer_is_returning) must not share a query — they are
