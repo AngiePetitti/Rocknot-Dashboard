@@ -8,12 +8,23 @@ const DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com'
 
 export interface ReturnedProduct {
   name: string;
-  returns: number;
+  category: string;
+  grossSales: number;
+  returns: number;  // positive dollar value
+  netSales: number;
+  returnRate: number; // returns / grossSales %
 }
 
 export interface ReturnTrendPoint {
   date: string;
   returns: number;
+}
+
+export interface CategoryReturn {
+  category: string;
+  returns: number;
+  grossSales: number;
+  returnRate: number;
 }
 
 function addDays(dateStr: string, days: number): string {
@@ -47,33 +58,28 @@ function rangeForTf(tfRaw: string, dateFrom: string, dateTo: string): { from: st
 async function runShopifyQL(query: string) {
   const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': TOKEN!,
-    },
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
     body: JSON.stringify({
       query: `{ shopifyqlQuery(query: ${JSON.stringify(query)}) {
-        tableData {
-          rows
-          columns { name dataType }
-        }
+        tableData { rows columns { name dataType } }
         parseErrors
       }}`,
     }),
-    next: { revalidate: 0 },
+    cache: 'no-store',
   });
   const json = await res.json();
-  return json?.data?.shopifyqlQuery;
-}
-
-// Live Admin API returns rows as objects keyed by column name; support
-// positional arrays too for safety.
-function cell(cols: { name: string }[], r: Record<string, string> | string[], name: string): string {
-  if (Array.isArray(r)) {
-    const i = cols.findIndex(c => c.name === name);
-    return i >= 0 ? (r[i] ?? '') : '';
-  }
-  return r?.[name] ?? '';
+  const q = json?.data?.shopifyqlQuery;
+  if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
+  const cols: { name: string }[] = q?.tableData?.columns || [];
+  const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
+  const cell = (r: Record<string, string> | string[], name: string): string => {
+    if (Array.isArray(r)) {
+      const i = cols.findIndex(c => c.name === name);
+      return i >= 0 ? (r[i] ?? '') : '';
+    }
+    return r[name] ?? '';
+  };
+  return { rows, cell };
 }
 
 export async function GET(request: NextRequest) {
@@ -83,73 +89,91 @@ export async function GET(request: NextRequest) {
   const dateTo = searchParams.get('date_to') || '';
 
   if (!TOKEN) {
-    return NextResponse.json({
-      source: 'error',
-      error: 'Shopify access token not configured',
-      totalReturns: 0,
-      grossSales: 0,
-      returnRate: 0,
-      trend: [],
-      topReturnedProducts: [],
-    });
+    return NextResponse.json({ source: 'error', error: 'Shopify token not configured' });
   }
 
   try {
     const { from, to } = rangeForTf(tfRaw, dateFrom, dateTo);
 
-    const [summary, trend, byProduct] = await Promise.all([
-      runShopifyQL(`FROM sales SHOW gross_sales, returns SINCE ${from} UNTIL ${to}`),
-      runShopifyQL(`FROM sales SHOW returns TIMESERIES day SINCE ${from} UNTIL ${to}`),
-      runShopifyQL(`FROM sales SHOW returns BY product_title SINCE ${from} UNTIL ${to} LIMIT 50`),
+    // Use monthly timeseries for multi-month ranges, daily for short ones
+    const tsTz = (to > from && (new Date(to).getTime() - new Date(from).getTime()) / 86400000 > 60)
+      ? 'month' : 'day';
+    const tsField = tsTz === 'month' ? 'month' : 'day';
+
+    const [summary, trend, byProduct, byCategory] = await Promise.all([
+      runShopifyQL(`FROM sales SHOW gross_sales, returns, net_sales SINCE ${from} UNTIL ${to}`),
+      runShopifyQL(`FROM sales SHOW returns TIMESERIES ${tsTz} SINCE ${from} UNTIL ${to}`),
+      runShopifyQL(`FROM sales SHOW gross_sales, returns, net_sales GROUP BY product_title, product_type SINCE ${from} UNTIL ${to} ORDER BY returns ASC LIMIT 50`),
+      runShopifyQL(`FROM sales SHOW gross_sales, returns GROUP BY product_type SINCE ${from} UNTIL ${to} ORDER BY returns ASC`),
     ]);
 
-    for (const r of [summary, trend, byProduct]) {
-      if (typeof r?.parseErrors === 'string' && r.parseErrors) {
-        throw new Error(r.parseErrors);
-      }
-    }
-
-    const sCols = summary?.tableData?.columns || [];
-    const sRow = summary?.tableData?.rows?.[0] || [];
-    const grossSales = parseFloat(cell(sCols, sRow, 'gross_sales') || '0');
-    const totalReturns = Math.abs(parseFloat(cell(sCols, sRow, 'returns') || '0'));
+    // Summary
+    const sRow = summary.rows[0];
+    const grossSales = parseFloat(summary.cell(sRow, 'gross_sales') || '0');
+    const totalReturns = Math.abs(parseFloat(summary.cell(sRow, 'returns') || '0'));
+    const netSales = parseFloat(summary.cell(sRow, 'net_sales') || '0');
     const returnRate = grossSales > 0 ? Math.round((totalReturns / grossSales) * 1000) / 10 : 0;
 
-    const tCols = trend?.tableData?.columns || [];
-    const tRows: Array<Record<string, string> | string[]> = trend?.tableData?.rows || [];
-    const trendData: ReturnTrendPoint[] = tRows.map(r => ({
-      date: (cell(tCols, r, 'day') || '').split('T')[0],
-      returns: Math.round(Math.abs(parseFloat(cell(tCols, r, 'returns') || '0'))),
+    // Trend
+    const trendData: ReturnTrendPoint[] = trend.rows.map(r => ({
+      date: (trend.cell(r, tsField) || '').split('T')[0],
+      returns: Math.round(Math.abs(parseFloat(trend.cell(r, 'returns') || '0'))),
     }));
 
-    const pCols = byProduct?.tableData?.columns || [];
-    const pRows: Array<Record<string, string> | string[]> = byProduct?.tableData?.rows || [];
-    const topReturnedProducts: ReturnedProduct[] = pRows
-      .map(r => ({
-        name: cell(pCols, r, 'product_title') || 'Unknown',
-        returns: Math.round(Math.abs(parseFloat(cell(pCols, r, 'returns') || '0'))),
-      }))
-      .filter(p => p.name !== 'Unknown' && p.returns > 0)
+    // By product — only products with actual returns, with return rate
+    const topReturnedProducts: ReturnedProduct[] = byProduct.rows
+      .filter(r => {
+        const name = byProduct.cell(r, 'product_title');
+        const ret = parseFloat(byProduct.cell(r, 'returns') || '0');
+        return name && ret < 0; // returns are negative in ShopifyQL
+      })
+      .map(r => {
+        const gs = Math.abs(parseFloat(byProduct.cell(r, 'gross_sales') || '0'));
+        const ret = Math.abs(parseFloat(byProduct.cell(r, 'returns') || '0'));
+        const ns = parseFloat(byProduct.cell(r, 'net_sales') || '0');
+        return {
+          name: byProduct.cell(r, 'product_title'),
+          category: byProduct.cell(r, 'product_type') || 'Other',
+          grossSales: Math.round(gs),
+          returns: Math.round(ret),
+          netSales: Math.round(ns),
+          returnRate: gs > 0 ? Math.round((ret / gs) * 1000) / 10 : 100,
+        };
+      })
       .sort((a, b) => b.returns - a.returns)
-      .slice(0, 10);
+      .slice(0, 20);
+
+    // By category
+    const categoryBreakdown: CategoryReturn[] = byCategory.rows
+      .filter(r => {
+        const cat = byCategory.cell(r, 'product_type');
+        const ret = parseFloat(byCategory.cell(r, 'returns') || '0');
+        return cat && ret < 0;
+      })
+      .map(r => {
+        const gs = Math.abs(parseFloat(byCategory.cell(r, 'gross_sales') || '0'));
+        const ret = Math.abs(parseFloat(byCategory.cell(r, 'returns') || '0'));
+        return {
+          category: byCategory.cell(r, 'product_type') || 'Other',
+          grossSales: Math.round(gs),
+          returns: Math.round(ret),
+          returnRate: gs > 0 ? Math.round((ret / gs) * 1000) / 10 : 0,
+        };
+      })
+      .sort((a, b) => b.returns - a.returns);
 
     return NextResponse.json({
       source: 'shopify_live',
       totalReturns: Math.round(totalReturns),
       grossSales: Math.round(grossSales),
+      netSales: Math.round(netSales),
       returnRate,
       trend: trendData,
+      tsField,
       topReturnedProducts,
+      categoryBreakdown,
     }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {
-    return NextResponse.json({
-      source: 'error',
-      error: String(err),
-      totalReturns: 0,
-      grossSales: 0,
-      returnRate: 0,
-      trend: [],
-      topReturnedProducts: [],
-    });
+    return NextResponse.json({ source: 'error', error: String(err) });
   }
 }
