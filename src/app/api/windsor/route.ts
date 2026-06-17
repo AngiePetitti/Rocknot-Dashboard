@@ -12,13 +12,13 @@ const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 function buildCurrentParams(tf: Timeframe, todayStr: string, yesterdayStr: string): Record<string, string> {
   if (tf === 'today') return { date_from: todayStr, date_to: todayStr };
   if (tf === 'yesterday') return { date_from: yesterdayStr, date_to: yesterdayStr };
-  if (tf === '7d') return { date_from: addDays(todayStr, -7), date_to: yesterdayStr };
-  if (tf === '14d') return { date_from: addDays(todayStr, -14), date_to: yesterdayStr };
-  if (tf === '30d') return { date_from: addDays(todayStr, -30), date_to: yesterdayStr };
-  if (tf === '6m') return { date_from: addDays(todayStr, -180), date_to: yesterdayStr };
+  if (tf === '7d') return { date_from: addDays(todayStr, -7), date_to: todayStr };
+  if (tf === '14d') return { date_from: addDays(todayStr, -14), date_to: todayStr };
+  if (tf === '30d') return { date_from: addDays(todayStr, -30), date_to: todayStr };
+  if (tf === '6m') return { date_from: addDays(todayStr, -180), date_to: todayStr };
   if (tf === 'ytd') {
     const year = todayStr.split('-')[0];
-    return { date_from: `${year}-01-01`, date_to: yesterdayStr };
+    return { date_from: `${year}-01-01`, date_to: todayStr };
   }
   if (tf === 'last_month') {
     const [y, m] = todayStr.split('-').map(Number);
@@ -27,7 +27,7 @@ function buildCurrentParams(tf: Timeframe, todayStr: string, yesterdayStr: strin
       date_to: new Date(y, m - 1, 0).toLocaleDateString('en-CA'),
     };
   }
-  return { date_from: addDays(todayStr, -30), date_to: yesterdayStr };
+  return { date_from: addDays(todayStr, -30), date_to: todayStr };
 }
 
 function buildPriorParams(tf: Timeframe, todayStr: string, yesterdayStr: string): { params: Record<string, string>; label: string } {
@@ -39,25 +39,25 @@ function buildPriorParams(tf: Timeframe, todayStr: string, yesterdayStr: string)
     return { params: { date_from: d, date_to: d }, label: d };
   }
   if (tf === '7d') {
-    const from = addDays(todayStr, -14); const to = addDays(todayStr, -8);
+    const from = addDays(todayStr, -15); const to = addDays(todayStr, -8);
     return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
   }
   if (tf === '14d') {
-    const from = addDays(todayStr, -28); const to = addDays(todayStr, -15);
+    const from = addDays(todayStr, -29); const to = addDays(todayStr, -15);
     return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
   }
   if (tf === '30d') {
-    const from = addDays(todayStr, -60); const to = addDays(todayStr, -31);
+    const from = addDays(todayStr, -61); const to = addDays(todayStr, -31);
     return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
   }
   if (tf === '6m') {
-    const from = addDays(todayStr, -360); const to = addDays(todayStr, -181);
+    const from = addDays(todayStr, -361); const to = addDays(todayStr, -181);
     return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
   }
   if (tf === 'ytd') {
     // Same-period-last-year, not the full prior year — YTD through June must
-    // compare against last year through the same June date.
-    const [y, m, d] = yesterdayStr.split('-');
+    // compare against last year through the same June date (today inclusive).
+    const [y, m, d] = todayStr.split('-');
     const from = `${Number(y) - 1}-01-01`;
     const to = `${Number(y) - 1}-${m}-${m === '02' && d === '29' ? '28' : d}`;
     return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };

@@ -146,9 +146,10 @@ export async function GET(request: NextRequest) {
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
 
-  // Build explicit date ranges to match Meta Ads Manager conventions exactly
+  // Build explicit date ranges. Ranges end on today to match how Shopify and
+  // the overview report rolling windows (today's portion lags ~1h on BigQuery).
   function rangeParams(daysBack: number): Record<string, string> {
-    return { date_from: addDays(todayStr, -daysBack), date_to: yesterdayStr };
+    return { date_from: addDays(todayStr, -daysBack), date_to: todayStr };
   }
 
   function firstOfMonth(monthsBack: number): string {
@@ -184,7 +185,7 @@ export async function GET(request: NextRequest) {
     params = rangeParams(180);
   } else if (tfRaw === 'ytd') {
     const year = todayStr.split('-')[0];
-    params = { date_from: `${year}-01-01`, date_to: yesterdayStr };
+    params = { date_from: `${year}-01-01`, date_to: todayStr };
   } else {
     params = rangeParams(30);
   }
@@ -192,10 +193,12 @@ export async function GET(request: NextRequest) {
   const debug = searchParams.get('debug') === 'true';
 
   // Prefer BigQuery; if it fails (e.g. a column not yet synced by Windsor)
-  // fall through to the Windsor REST API below. "Today" always uses the
-  // Windsor API since BigQuery only refreshes on Windsor's sync schedule.
-  const includesToday = tfRaw === 'today' || params.date_to >= todayStr;
-  if (isBigQueryConfigured() && !debug && !includesToday) {
+  // fall through to the Windsor REST API below. Only the explicit "today" tab
+  // goes straight to the live Windsor API (with Meta Graph overlay); multi-day
+  // ranges that include today still use BigQuery — today's portion lags ~1h on
+  // Windsor's sync but stays consistent with the overview tab.
+  const useLiveToday = tfRaw === 'today';
+  if (isBigQueryConfigured() && !debug && !useLiveToday) {
     try {
       const { platforms, dailySpend } = await getAdsOverview(params.date_from, params.date_to);
       return NextResponse.json({ source: 'bigquery_live', platforms, dailySpend }, { headers: cacheHeaders(false) });

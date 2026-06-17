@@ -27,11 +27,11 @@ function rangeForTf(tfRaw: string, dateFrom: string, dateTo: string): { from: st
   if (tfRaw === 'custom' && dateFrom && dateTo) return { from: dateFrom, to: dateTo };
   if (tfRaw === 'today') return { from: todayStr, to: todayStr };
   if (tfRaw === 'yesterday') return { from: yesterdayStr, to: yesterdayStr };
-  if (tfRaw === '7d') return { from: addDays(todayStr, -7), to: yesterdayStr };
-  if (tfRaw === '14d') return { from: addDays(todayStr, -14), to: yesterdayStr };
-  if (tfRaw === '30d') return { from: addDays(todayStr, -30), to: yesterdayStr };
-  if (tfRaw === '6m') return { from: addDays(todayStr, -180), to: yesterdayStr };
-  if (tfRaw === 'ytd') return { from: `${todayStr.split('-')[0]}-01-01`, to: yesterdayStr };
+  if (tfRaw === '7d') return { from: addDays(todayStr, -7), to: todayStr };
+  if (tfRaw === '14d') return { from: addDays(todayStr, -14), to: todayStr };
+  if (tfRaw === '30d') return { from: addDays(todayStr, -30), to: todayStr };
+  if (tfRaw === '6m') return { from: addDays(todayStr, -180), to: todayStr };
+  if (tfRaw === 'ytd') return { from: `${todayStr.split('-')[0]}-01-01`, to: todayStr };
   if (tfRaw === 'last_month') {
     const [y, m] = todayStr.split('-').map(Number);
     return {
