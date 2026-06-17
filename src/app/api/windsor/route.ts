@@ -153,8 +153,6 @@ function aggregateRows(rows: WindsorRow[]) {
       byDate[date].shopifyRevenue += rev;
       byDate[date].orders += Math.round(Number(row.order_count || 0));
     } else {
-      byDate[date].adSpend += spend;
-
       if (src.includes('facebook') || src.includes('meta')) {
         // Only include the Rocknot ad account — other accounts in the same
         // Windsor workspace would otherwise inflate today's Meta spend.
@@ -166,12 +164,15 @@ function aggregateRows(rows: WindsorRow[]) {
         const roasVal = roasArr ? Number(roasArr[0]?.value || 0) : 0;
         byDate[date].metaRevenue += roasVal > 0 ? roasVal * spend : 0;
         byDate[date].metaSpend += spend;
+        byDate[date].adSpend += spend;
       } else if (src.includes('google')) {
         byDate[date].googleRevenue += Number(row.conversion_value || row.revenue || 0);
         byDate[date].googleSpend += spend;
+        byDate[date].adSpend += spend;
       } else if (src.includes('tiktok')) {
         byDate[date].tiktokRevenue += Number((row as Record<string, unknown>).onsite_total_purchase_value || row.conversion_value || row.revenue || 0);
         byDate[date].tiktokSpend += spend;
+        byDate[date].adSpend += spend;
       }
     }
   }
