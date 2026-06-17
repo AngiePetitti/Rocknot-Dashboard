@@ -43,13 +43,21 @@ export interface Product {
 }
 
 export interface CustomerMetrics {
-  repeatPurchaserRate: number;
+  repeatPurchaserRate: number;   // Shopify returning_customer_rate (period)
   avgLTV: number;
   firstOrderAvg: number;
   secondOrderAvg: number;
   thirdPlusOrderAvg: number;
-  totalCustomers: number;
-  repeatCustomers: number;
+  totalCustomers: number;        // Shopify customers active in period
+  repeatCustomers: number;       // Shopify returning customers in period
+  // Real tier counts/LTV among customers active in the period (BigQuery).
+  activeCustomers: number;       // base for tier percentages
+  oneOrderCount: number;
+  twoOrderCount: number;
+  threePlusCount: number;
+  ltvOneOrder: number;
+  ltvTwoOrders: number;
+  ltvThreePlus: number;
 }
 
 export interface CohortData {
@@ -409,6 +417,13 @@ export const customerMetrics: CustomerMetrics = {
   thirdPlusOrderAvg: 96.8,
   totalCustomers: 4820,
   repeatCustomers: 1649,
+  activeCustomers: 4820,
+  oneOrderCount: 3171,
+  twoOrderCount: 989,
+  threePlusCount: 660,
+  ltvOneOrder: 68.4,
+  ltvTwoOrders: 150.5,
+  ltvThreePlus: 312.0,
 };
 
 export const cohortData: CohortData[] = [

@@ -1,13 +1,36 @@
 import { runQuery, getDataset, dedupedOrdersCte } from '@/src/lib/bigquery';
-import { CustomerMetrics, CohortData } from '@/src/lib/mockData';
+import { CohortData } from '@/src/lib/mockData';
 
 interface SummaryRow {
-  total_customers: number;
-  repeat_customers: number;
-  total_revenue: number | null;
   first_avg: number | null;
   second_avg: number | null;
   third_plus_avg: number | null;
+  active_customers: number | null;
+  one_order: number | null;
+  two_orders: number | null;
+  three_plus: number | null;
+  avg_ltv: number | null;
+  ltv_one: number | null;
+  ltv_two: number | null;
+  ltv_three_plus: number | null;
+}
+
+// BigQuery-derived customer metrics for customers ACTIVE in the period.
+// The returning-customer rate / customer counts come from Shopify (in the
+// route) to match Shopify's own Customers report exactly; this provides the
+// order-sequence AOV and the LTV tier breakdown (real counts, no estimates).
+export interface BqCustomerMetrics {
+  avgLTV: number;
+  firstOrderAvg: number;
+  secondOrderAvg: number;
+  thirdPlusOrderAvg: number;
+  activeCustomers: number;
+  oneOrderCount: number;
+  twoOrderCount: number;
+  threePlusCount: number;
+  ltvOneOrder: number;
+  ltvTwoOrders: number;
+  ltvThreePlus: number;
 }
 
 interface CohortRow {
@@ -26,47 +49,79 @@ function monthLabel(isoDate: string): string {
   return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 }
 
-export async function getCustomerMetrics(): Promise<CustomerMetrics> {
+export async function getCustomerMetrics(dateFrom: string, dateTo: string): Promise<BqCustomerMetrics> {
   const ds = getDataset();
+  const params = { date_from: dateFrom, date_to: dateTo };
 
   const rows = await runQuery<SummaryRow>(`
     WITH order_revenue AS (${dedupedOrdersCte(ds)}),
     ranked AS (
       SELECT order_customer_id AS customer_id,
              total_price AS revenue,
+             order_date,
              ROW_NUMBER() OVER (PARTITION BY order_customer_id ORDER BY order_date) AS seq
       FROM order_revenue
       WHERE order_customer_id IS NOT NULL
+    ),
+    -- Lifetime totals per customer (across all history, not just the period).
+    lifetime AS (
+      SELECT customer_id, COUNT(*) AS lifetime_orders, SUM(revenue) AS lifetime_revenue
+      FROM ranked GROUP BY customer_id
+    ),
+    -- Customers who placed at least one order within the selected period.
+    active AS (
+      SELECT DISTINCT customer_id FROM ranked
+      WHERE order_date BETWEEN @date_from AND @date_to
+    ),
+    -- AOV by lifetime order sequence, for orders placed within the period.
+    seq_aov AS (
+      SELECT
+        AVG(IF(seq = 1, revenue, NULL))  AS first_avg,
+        AVG(IF(seq = 2, revenue, NULL))  AS second_avg,
+        AVG(IF(seq >= 3, revenue, NULL)) AS third_plus_avg
+      FROM ranked
+      WHERE order_date BETWEEN @date_from AND @date_to
+    ),
+    -- Real tier breakdown among active customers, by lifetime order count.
+    tiers AS (
+      SELECT
+        COUNT(*) AS active_customers,
+        COUNTIF(l.lifetime_orders = 1)  AS one_order,
+        COUNTIF(l.lifetime_orders = 2)  AS two_orders,
+        COUNTIF(l.lifetime_orders >= 3) AS three_plus,
+        AVG(l.lifetime_revenue) AS avg_ltv,
+        AVG(IF(l.lifetime_orders = 1,  l.lifetime_revenue, NULL)) AS ltv_one,
+        AVG(IF(l.lifetime_orders = 2,  l.lifetime_revenue, NULL)) AS ltv_two,
+        AVG(IF(l.lifetime_orders >= 3, l.lifetime_revenue, NULL)) AS ltv_three_plus
+      FROM active a JOIN lifetime l USING (customer_id)
     )
-    SELECT
-      COUNT(DISTINCT customer_id) AS total_customers,
-      COUNT(DISTINCT IF(seq >= 2, customer_id, NULL)) AS repeat_customers,
-      SUM(revenue) AS total_revenue,
-      AVG(IF(seq = 1, revenue, NULL)) AS first_avg,
-      AVG(IF(seq = 2, revenue, NULL)) AS second_avg,
-      AVG(IF(seq >= 3, revenue, NULL)) AS third_plus_avg
-    FROM ranked
-  `);
+    SELECT * FROM seq_aov, tiers
+  `, params);
 
   const r = rows[0];
-  const totalCustomers = Number(r?.total_customers || 0);
-  const repeatCustomers = Number(r?.repeat_customers || 0);
-  const totalRevenue = Number(r?.total_revenue || 0);
+  const round2 = (v: number | null | undefined) => Math.round(Number(v || 0) * 100) / 100;
 
   return {
-    repeatPurchaserRate: totalCustomers > 0 ? Math.round((repeatCustomers / totalCustomers) * 1000) / 10 : 0,
-    avgLTV: totalCustomers > 0 ? Math.round((totalRevenue / totalCustomers) * 100) / 100 : 0,
-    firstOrderAvg: Math.round(Number(r?.first_avg || 0) * 100) / 100,
-    secondOrderAvg: Math.round(Number(r?.second_avg || 0) * 100) / 100,
-    thirdPlusOrderAvg: Math.round(Number(r?.third_plus_avg || 0) * 100) / 100,
-    totalCustomers,
-    repeatCustomers,
+    avgLTV: round2(r?.avg_ltv),
+    firstOrderAvg: round2(r?.first_avg),
+    secondOrderAvg: round2(r?.second_avg),
+    thirdPlusOrderAvg: round2(r?.third_plus_avg),
+    activeCustomers: Number(r?.active_customers || 0),
+    oneOrderCount: Number(r?.one_order || 0),
+    twoOrderCount: Number(r?.two_orders || 0),
+    threePlusCount: Number(r?.three_plus || 0),
+    ltvOneOrder: round2(r?.ltv_one),
+    ltvTwoOrders: round2(r?.ltv_two),
+    ltvThreePlus: round2(r?.ltv_three_plus),
   };
 }
 
-export async function getCohortData(): Promise<CohortData[]> {
+export async function getCohortData(dateFrom: string, dateTo: string): Promise<CohortData[]> {
   const ds = getDataset();
+  const params = { date_from: dateFrom, date_to: dateTo };
 
+  // Cohorts are defined by first-order month; we show cohorts whose first
+  // order falls within the selected period so the chart reflects the timeframe.
   const rows = await runQuery<CohortRow>(`
     WITH order_revenue AS (${dedupedOrdersCte(ds)}),
     orders AS (
@@ -77,12 +132,16 @@ export async function getCohortData(): Promise<CohortData[]> {
     first_order AS (
       SELECT customer_id, MIN(d) AS first_date FROM orders GROUP BY customer_id
     ),
+    cohort_customers AS (
+      SELECT customer_id, first_date FROM first_order
+      WHERE first_date BETWEEN @date_from AND @date_to
+    ),
     cohorted AS (
       SELECT o.customer_id,
              DATE_TRUNC(f.first_date, MONTH) AS cohort_month,
              DATE_DIFF(DATE_TRUNC(o.d, MONTH), DATE_TRUNC(f.first_date, MONTH), MONTH) AS month_offset
       FROM orders o
-      JOIN first_order f ON o.customer_id = f.customer_id
+      JOIN cohort_customers f ON o.customer_id = f.customer_id
     ),
     cohort_sizes AS (
       SELECT cohort_month, COUNT(DISTINCT customer_id) AS cohort_size
@@ -98,7 +157,7 @@ export async function getCohortData(): Promise<CohortData[]> {
     GROUP BY c.cohort_month, c.month_offset, s.cohort_size
     ORDER BY c.cohort_month DESC, c.month_offset
     LIMIT 60
-  `);
+  `, params);
 
   const byMonth: Record<string, CohortData & { size: number }> = {};
 

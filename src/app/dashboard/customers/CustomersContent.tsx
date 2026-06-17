@@ -13,6 +13,13 @@ const EMPTY_METRICS: CustomerMetrics = {
   thirdPlusOrderAvg: 0,
   totalCustomers: 0,
   repeatCustomers: 0,
+  activeCustomers: 0,
+  oneOrderCount: 0,
+  twoOrderCount: 0,
+  threePlusCount: 0,
+  ltvOneOrder: 0,
+  ltvTwoOrders: 0,
+  ltvThreePlus: 0,
 };
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
@@ -32,13 +39,21 @@ import {
 
 export default function CustomersContent() {
   const searchParams = useSearchParams();
+  const tfRaw = searchParams.get('tf') || '30d';
+  const dateFrom = searchParams.get('date_from') || '';
+  const dateTo = searchParams.get('date_to') || '';
 
   const [customerMetrics, setCustomerMetrics] = useState<CustomerMetrics>(EMPTY_METRICS);
   const [cohortData, setCohortData] = useState<CohortData[]>([]);
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
 
   useEffect(() => {
-    fetch('/api/windsor/customers')
+    setStatus('loading');
+    const params = new URLSearchParams({ tf: tfRaw });
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+
+    fetch(`/api/windsor/customers?${params}`)
       .then(r => r.json())
       .then(data => {
         if (data.source === 'bigquery_live' && data.customerMetrics) {
@@ -56,7 +71,7 @@ export default function CustomersContent() {
         setCohortData([]);
         setStatus('error');
       });
-  }, []);
+  }, [tfRaw, dateFrom, dateTo]);
 
   const buybackData = [
     { order: '1st Order', avg: customerMetrics.firstOrderAvg, fill: '#c4b5fd' },
@@ -80,9 +95,9 @@ export default function CustomersContent() {
       {/* Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <MetricCard
-          title="Repeat Purchase Rate"
+          title="Returning Customer Rate"
           value={formatPercent(customerMetrics.repeatPurchaserRate)}
-          subtitle={`${customerMetrics.repeatCustomers.toLocaleString()} of ${customerMetrics.totalCustomers.toLocaleString()} customers`}
+          subtitle={`${customerMetrics.repeatCustomers.toLocaleString()} of ${customerMetrics.totalCustomers.toLocaleString()} customers (Shopify)`}
           accentColor="#c4b5fd"
         />
         <MetricCard
@@ -126,8 +141,8 @@ export default function CustomersContent() {
                 axisLine={false}
                 tickLine={false}
                 tickFormatter={(v) => '$' + v}
-                domain={[0, 120]}
-                width={38}
+                domain={[0, 'auto']}
+                width={44}
               />
               <Tooltip
                 formatter={(v: unknown) => [formatCurrency(Number(v)), 'Avg Order Value']}
@@ -157,25 +172,28 @@ export default function CustomersContent() {
 
       {/* LTV Breakdown */}
       <Card accentColor="#c4b5fd" className="mb-6">
-        <h2 className="text-sm font-bold text-gray-700 mb-4">LTV Breakdown</h2>
+        <h2 className="text-sm font-bold text-gray-700 mb-1">LTV Breakdown</h2>
+        <p className="text-xs text-gray-400 mb-4">
+          Customers active in this period, grouped by lifetime order count · value = avg lifetime spend
+        </p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
             {
-              label: 'New Customers (1 order)',
-              count: customerMetrics.totalCustomers - customerMetrics.repeatCustomers,
-              ltv: customerMetrics.firstOrderAvg,
+              label: 'One-time (1 order)',
+              count: customerMetrics.oneOrderCount,
+              ltv: customerMetrics.ltvOneOrder,
               color: '#fde68a',
             },
             {
               label: 'Returning (2 orders)',
-              count: Math.round(customerMetrics.repeatCustomers * 0.6),
-              ltv: customerMetrics.firstOrderAvg + customerMetrics.secondOrderAvg,
+              count: customerMetrics.twoOrderCount,
+              ltv: customerMetrics.ltvTwoOrders,
               color: '#f9a8d4',
             },
             {
               label: 'Loyal (3+ orders)',
-              count: Math.round(customerMetrics.repeatCustomers * 0.4),
-              ltv: customerMetrics.avgLTV,
+              count: customerMetrics.threePlusCount,
+              ltv: customerMetrics.ltvThreePlus,
               color: '#86efac',
             },
           ].map(tier => (
@@ -185,11 +203,11 @@ export default function CustomersContent() {
               style={{ borderColor: tier.color + '66', backgroundColor: tier.color + '15' }}
             >
               <p className="text-xs font-semibold text-gray-500 mb-2">{tier.label}</p>
-              <p className="text-2xl font-bold text-gray-800">{formatCurrency(tier.ltv)}</p>
+              <p className="text-2xl font-bold text-gray-800">{tier.ltv > 0 ? formatCurrency(tier.ltv) : '—'}</p>
               <p className="text-xs text-gray-400 mt-1">
                 {tier.count.toLocaleString()} customers ·{' '}
-                {customerMetrics.totalCustomers > 0
-                  ? formatPercent((tier.count / customerMetrics.totalCustomers) * 100)
+                {customerMetrics.activeCustomers > 0
+                  ? formatPercent((tier.count / customerMetrics.activeCustomers) * 100)
                   : '—'} of base
               </p>
             </div>
