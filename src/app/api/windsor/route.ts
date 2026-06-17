@@ -442,11 +442,12 @@ export async function GET(request: NextRequest) {
 
     const current = aggregateRows(currentRows);
 
-    // For "today", replace Meta numbers with the Graph API's live figures —
-    // Windsor refreshes from Meta on a delay, so its intraday spend runs low.
+    // For "today", replace Meta numbers with the Graph API's live figures.
+    // Always trust the Graph API over Windsor — Windsor can both under-report
+    // (sync delay) and over-report (intraday re-sync duplicates).
     if (tfRaw === 'today' && !latestAvailableDate) {
       const metaLive = await fetchMetaToday();
-      if (metaLive && metaLive.spend >= current.metrics.metaSpend) {
+      if (metaLive && metaLive.spend > 0) {
         const spendDelta = metaLive.spend - current.metrics.metaSpend;
         current.metrics.metaSpend = Math.round(metaLive.spend * 100) / 100;
         current.metrics.metaRevenue = Math.round(metaLive.revenue * 100) / 100;
