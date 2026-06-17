@@ -170,7 +170,13 @@ function aggregateRows(rows: WindsorRow[]) {
         byDate[date].googleSpend += spend;
         byDate[date].adSpend += spend;
       } else if (src.includes('tiktok')) {
-        byDate[date].tiktokRevenue += Number((row as Record<string, unknown>).onsite_total_purchase_value || row.conversion_value || row.revenue || 0);
+        const tiktokRev = Number(
+          (row as Record<string, unknown>).total_complete_payment_rate ||
+          (row as Record<string, unknown>).complete_payment_value ||
+          (row as Record<string, unknown>).onsite_total_purchase_value ||
+          row.conversion_value || row.revenue || 0
+        );
+        byDate[date].tiktokRevenue += tiktokRev;
         byDate[date].tiktokSpend += spend;
         byDate[date].adSpend += spend;
       }
@@ -235,6 +241,9 @@ const GOOGLE_FIELDS = ['date', 'source', 'spend', 'impressions', 'clicks', 'conv
 // intraday and may return the same order more than once.
 const SHOPIFY_FIELDS = ['date', 'source', 'order_id', 'order_count', 'order_current_total_price', 'order_subtotal_price', 'order_total_price', 'order_gross_sales', 'order_net_sales'].join(',');
 
+const TIKTOK_FIELDS = ['date', 'source', 'spend', 'clicks', 'impressions', 'complete_payment', 'total_complete_payment_rate'].join(',');
+const TIKTOK_FIELDS_LEGACY = ['date', 'source', 'spend', 'clicks', 'impressions', 'complete_payment', 'complete_payment_value'].join(',');
+
 // Separate queries per Windsor support: orders (with customer id) and the
 // Customers report (customer_is_returning) must not share a query — they are
 // joined here on order_customer_id = customer_id.
@@ -298,6 +307,10 @@ async function fetchFromWindsor(endpoint: string, fields: string, params: Record
 }
 
 async function fetchAllRows(params: Record<string, string>): Promise<WindsorRow[]> {
+  const tiktokResult = await fetchFromWindsor('tiktok_ads', TIKTOK_FIELDS, params)
+    .then(r => r.rowCount > 0 ? r : fetchFromWindsor('tiktok_ads', TIKTOK_FIELDS_LEGACY, params))
+    .catch(() => ({ rows: [] as WindsorRow[], rowCount: 0 }));
+
   const [meta, google, shopify] = await Promise.all([
     fetchFromWindsor('facebook', META_FIELDS, params),
     fetchFromWindsor('google_ads', GOOGLE_FIELDS, params),
@@ -312,6 +325,7 @@ async function fetchAllRows(params: Record<string, string>): Promise<WindsorRow[
   return [
     ...meta.rows.map(r => ({ ...r, source: 'facebook' })),
     ...google.rows.map(r => ({ ...r, source: 'google' })),
+    ...tiktokResult.rows.map(r => ({ ...r, source: 'tiktok' })),
     ...shopifyRows,
   ];
 }

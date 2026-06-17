@@ -386,15 +386,70 @@ export default function OverviewContent() {
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
-        <Card accentColor="#c4b5fd" className="lg:col-span-2">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-sm font-bold text-gray-700">Revenue & Ad Spend Trend</h2>
-              <p className="text-xs text-gray-400">Purple = Revenue · Pink = Ad Spend</p>
+        {(tfRaw === 'today' || tfRaw === 'yesterday') ? (
+          /* Single-day view: New vs Returning customer revenue breakdown */
+          <Card accentColor="#c4b5fd" className="lg:col-span-2">
+            <h2 className="text-sm font-bold text-gray-700 mb-1">Customer Revenue Breakdown</h2>
+            <p className="text-xs text-gray-400 mb-5">New vs returning customers · {tfRaw === 'today' ? 'Today' : 'Yesterday'}</p>
+            <div className="space-y-4">
+              {/* New customers */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-violet-400 shrink-0" />
+                    <span className="text-sm font-semibold text-gray-700">New Customers</span>
+                    <span className="text-xs text-gray-400">({metrics.newCustomers ?? 0})</span>
+                  </div>
+                  <span className="text-sm font-bold text-gray-800">{formatCurrency(metrics.newCustomerRevenue ?? 0)}</span>
+                </div>
+                <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-violet-400"
+                    style={{ width: metrics.totalRevenue > 0 ? `${Math.min(100, ((metrics.newCustomerRevenue ?? 0) / metrics.totalRevenue) * 100)}%` : '0%' }}
+                  />
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  {metrics.totalRevenue > 0 ? (((metrics.newCustomerRevenue ?? 0) / metrics.totalRevenue) * 100).toFixed(0) : 0}% of revenue · avg {metrics.newCustomers ? formatCurrency((metrics.newCustomerRevenue ?? 0) / metrics.newCustomers) : '—'}/order
+                </p>
+              </div>
+              {/* Returning customers */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-pink-400 shrink-0" />
+                    <span className="text-sm font-semibold text-gray-700">Returning Customers</span>
+                    <span className="text-xs text-gray-400">({metrics.returningCustomers ?? 0})</span>
+                  </div>
+                  <span className="text-sm font-bold text-gray-800">{formatCurrency(metrics.returningCustomerRevenue ?? 0)}</span>
+                </div>
+                <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-pink-400"
+                    style={{ width: metrics.totalRevenue > 0 ? `${Math.min(100, ((metrics.returningCustomerRevenue ?? 0) / metrics.totalRevenue) * 100)}%` : '0%' }}
+                  />
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  {metrics.totalRevenue > 0 ? (((metrics.returningCustomerRevenue ?? 0) / metrics.totalRevenue) * 100).toFixed(0) : 0}% of revenue · avg {metrics.returningCustomers ? formatCurrency((metrics.returningCustomerRevenue ?? 0) / metrics.returningCustomers) : '—'}/order
+                </p>
+              </div>
+              {/* Totals row */}
+              <div className="pt-3 border-t border-gray-100 flex justify-between text-xs text-gray-500">
+                <span>{(metrics.newCustomers ?? 0) + (metrics.returningCustomers ?? 0)} total customers</span>
+                <span>{formatCurrency(metrics.totalRevenue)} total revenue</span>
+              </div>
             </div>
-          </div>
-          <RevenueChart data={revenueData} />
-        </Card>
+          </Card>
+        ) : (
+          <Card accentColor="#c4b5fd" className="lg:col-span-2">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-sm font-bold text-gray-700">Revenue & Ad Spend Trend</h2>
+                <p className="text-xs text-gray-400">Purple = Revenue · Pink = Ad Spend</p>
+              </div>
+            </div>
+            <RevenueChart data={revenueData} />
+          </Card>
+        )}
 
         <Card accentColor="#f9a8d4">
           <h2 className="text-sm font-bold text-gray-700 mb-1">Ad Spend by Platform</h2>
