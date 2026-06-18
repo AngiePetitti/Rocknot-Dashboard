@@ -441,18 +441,18 @@ export default function CalendarContent() {
 
       {/* ── Event Modal ── */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/40 backdrop-blur-sm" onClick={() => setShowModal(false)}>
-          {/* On mobile: slides up from bottom. On sm+: centered card */}
+        <div className="fixed inset-0 z-50 flex flex-col justify-end sm:justify-center sm:items-center sm:p-4 bg-black/40 backdrop-blur-sm" onClick={() => setShowModal(false)}>
+          {/* On mobile: bottom sheet. On sm+: centered card */}
           <div
-            className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl shadow-xl overflow-y-auto max-h-[90vh]"
+            className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-3xl shadow-xl overflow-y-auto max-h-[92dvh] sm:max-h-[90vh]"
             onClick={e => e.stopPropagation()}
           >
-            {/* Drag handle (mobile) */}
-            <div className="flex justify-center pt-3 pb-1 sm:hidden">
+            {/* Drag handle */}
+            <div className="flex justify-center pt-3 pb-0">
               <div className="w-10 h-1 rounded-full bg-gray-200" />
             </div>
 
-            <div className="px-5 pt-4 pb-6 sm:p-6">
+            <div className="px-5 pt-3 pb-8 sm:p-6">
               <div className="flex items-center justify-between mb-5">
                 <h2 className="text-base font-bold text-gray-900">{editEvent ? 'Edit Event' : 'New Event'}</h2>
                 <button onClick={() => setShowModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
@@ -468,7 +468,7 @@ export default function CalendarContent() {
                     value={form.title}
                     onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
                     placeholder="e.g. Summer Sale Launch"
-                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400"
+                    className="w-full px-3 py-2.5 text-sm text-gray-800 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400"
                   />
                 </div>
 
@@ -499,7 +499,7 @@ export default function CalendarContent() {
                       type="date"
                       value={form.date}
                       onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
-                      className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      className="w-full px-3 py-2.5 text-sm text-gray-800 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400"
                     />
                   </div>
                   <div>
@@ -508,7 +508,7 @@ export default function CalendarContent() {
                       type="date"
                       value={form.endDate}
                       onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))}
-                      className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      className="w-full px-3 py-2.5 text-sm text-gray-800 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400"
                     />
                   </div>
                 </div>
