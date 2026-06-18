@@ -212,7 +212,7 @@ export default function ProductsContent() {
             <tbody>
               {sortedProducts.map((product, i) => (
                 <tr key={product.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                  <td className="py-3 pr-4">
+                  <td className="py-2 pr-4">
                     <span
                       className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white"
                       style={{ backgroundColor: PRODUCT_COLORS[i] || '#e2e8f0', color: '#374151' }}
@@ -220,18 +220,18 @@ export default function ProductsContent() {
                       {i + 1}
                     </span>
                   </td>
-                  <td className="py-3 pr-4 font-medium text-gray-800">{product.name}</td>
-                  <td className="py-3 pr-4">
+                  <td className="py-2 pr-4 font-medium text-gray-800">{product.name}</td>
+                  <td className="py-2 pr-4">
                     <span className="text-xs font-medium px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full">
                       {product.category}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-right text-gray-600">{product.unitsSold.toLocaleString()}</td>
-                  <td className="py-3 px-4 text-right font-semibold text-gray-800">{formatCurrency(product.revenue)}</td>
-                  <td className="py-3 px-4 text-right font-semibold text-gray-800">
+                  <td className="py-2 px-4 text-right text-gray-600">{product.unitsSold.toLocaleString()}</td>
+                  <td className="py-2 px-4 text-right font-semibold text-gray-800">{formatCurrency(product.revenue)}</td>
+                  <td className="py-2 px-4 text-right font-semibold text-gray-800">
                     {product.grossProfit > 0 ? formatCurrency(product.grossProfit) : '—'}
                   </td>
-                  <td className="py-3 px-4 text-right">
+                  <td className="py-2 px-4 text-right">
                     {product.grossProfit > 0 ? (
                       <span
                         className="font-semibold"
@@ -243,7 +243,7 @@ export default function ProductsContent() {
                       <span className="text-gray-400" title="No cost-per-item set for this product">—</span>
                     )}
                   </td>
-                  <td className="py-3 pl-4 text-right">
+                  <td className="py-2 pl-4 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                         <div
