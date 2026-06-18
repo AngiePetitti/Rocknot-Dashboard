@@ -148,8 +148,8 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       SUM(CAST(spend AS FLOAT64)) AS spend,
       SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
       0 AS conversions,
-      0 AS clicks,
-      0 AS impressions
+      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
     FROM \`${ds}.facebook_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
       AND LOWER(account_name) = 'rocknot'
@@ -158,10 +158,10 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   const googleSqlSafe = `
     SELECT
       SUM(CAST(spend AS FLOAT64)) AS spend,
-      0 AS revenue,
-      0 AS conversions,
-      0 AS clicks,
-      0 AS impressions
+      SUM(IFNULL(CAST(conversion_value AS FLOAT64), 0)) AS revenue,
+      SUM(IFNULL(CAST(conversions AS FLOAT64), 0)) AS conversions,
+      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
     FROM \`${ds}.google_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
   `;
