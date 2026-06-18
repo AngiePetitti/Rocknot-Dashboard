@@ -212,6 +212,50 @@ export default function CalendarContent() {
         </div>
       )}
 
+      {/* ── Next Up ── */}
+      {upcomingEvents.length > 0 && (
+        <div className="mb-4">
+          <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-2 px-0.5">Next Up</p>
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x snap-mandatory">
+            {upcomingEvents.slice(0, 8).map(ev => {
+              const daysAway = Math.round((new Date(ev.date).getTime() - new Date(todayDateStr).getTime()) / 86400000);
+              const countdownLabel = daysAway === 0 ? 'Today' : daysAway === 1 ? 'Tomorrow' : `${daysAway}d away`;
+              const isUrgent = daysAway <= 3;
+              return (
+                <button
+                  key={ev.id}
+                  onClick={() => openEdit(ev)}
+                  className="snap-start shrink-0 flex flex-col gap-2 p-3 rounded-2xl border bg-white text-left transition-all hover:shadow-md active:opacity-80"
+                  style={{ minWidth: '140px', maxWidth: '160px', borderColor: ev.color + '40' }}
+                >
+                  {/* Countdown badge */}
+                  <span
+                    className="self-start text-[10px] font-bold px-2 py-0.5 rounded-full"
+                    style={{ backgroundColor: isUrgent ? ev.color : ev.color + '18', color: isUrgent ? '#fff' : ev.color }}
+                  >
+                    {countdownLabel}
+                  </span>
+                  {/* Title */}
+                  <p className="text-xs font-bold text-gray-800 leading-snug line-clamp-2">{ev.title}</p>
+                  {/* Type + date row */}
+                  <div className="mt-auto space-y-0.5">
+                    <span className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TYPE_BG[ev.type]}`}>
+                      {TYPE_LABELS[ev.type]}
+                    </span>
+                    <p className="text-[10px] text-gray-400 leading-none">
+                      {MONTHS_SHORT[parseInt(ev.date.split('-')[1]) - 1]} {parseInt(ev.date.split('-')[2])}
+                      {ev.endDate && ev.endDate !== ev.date && ` – ${MONTHS_SHORT[parseInt(ev.endDate.split('-')[1]) - 1]} ${parseInt(ev.endDate.split('-')[2])}`}
+                    </p>
+                  </div>
+                  {/* Color bar at bottom */}
+                  <div className="w-full h-0.5 rounded-full mt-1" style={{ backgroundColor: ev.color }} />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── Year-ahead strip ── */}
       <div className="mb-4 -mx-1">
         <div className="flex gap-2 overflow-x-auto px-1 pb-2 scrollbar-none snap-x snap-mandatory">
