@@ -142,28 +142,36 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
   `;
 
-  const metaSqlFallback = metaSql.replace(
-    'SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS conversions,',
-    '0 AS conversions,'
-  );
+  // Safe fallbacks using only columns confirmed to exist in BigQuery
+  const metaSqlSafe = `
+    SELECT
+      SUM(CAST(spend AS FLOAT64)) AS spend,
+      SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
+      0 AS conversions,
+      0 AS clicks,
+      0 AS impressions
+    FROM \`${ds}.facebook_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
+      AND LOWER(account_name) = 'rocknot'
+  `;
 
-  // Google fallback: drop conversions_value (may not exist) then drop conversions column
-  const googleSqlFallback1 = googleSql.replace(
-    'SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue,',
-    'SUM(IFNULL(CAST(conversion_value AS FLOAT64), 0)) AS revenue,'
-  );
-  const googleSqlFallback2 = googleSqlFallback1.replace(
-    'SUM(IFNULL(CAST(conversions AS FLOAT64), 0)) AS conversions,',
-    '0 AS conversions,'
-  );
+  const googleSqlSafe = `
+    SELECT
+      SUM(CAST(spend AS FLOAT64)) AS spend,
+      0 AS revenue,
+      0 AS conversions,
+      0 AS clicks,
+      0 AS impressions
+    FROM \`${ds}.google_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
+  `;
 
   const [metaRows, googleRows, tiktokRows, metaDaily, googleDaily, tiktokDaily] = await Promise.all([
     runQuery<RawRow>(metaSql, params)
-      .catch(() => runQuery<RawRow>(metaSqlFallback, params))
+      .catch(() => runQuery<RawRow>(metaSqlSafe, params))
       .catch(() => null),
     runQuery<RawRow>(googleSql, params)
-      .catch(() => runQuery<RawRow>(googleSqlFallback1, params))
-      .catch(() => runQuery<RawRow>(googleSqlFallback2, params))
+      .catch(() => runQuery<RawRow>(googleSqlSafe, params))
       .catch(() => null),
     runQuery<RawRow>(tiktokSql, params)
       .catch(() => runQuery<RawRow>(tiktokSqlLegacy, params))
