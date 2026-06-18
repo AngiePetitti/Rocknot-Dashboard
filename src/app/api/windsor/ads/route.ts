@@ -39,6 +39,8 @@ export interface PlatformData {
   impressions: number;
   clicks: number;
   ctr: number;
+  conversions: number;
+  costPerConversion: number;
   color: string;
 }
 
@@ -46,8 +48,8 @@ export interface PlatformData {
 async function fetchSourceTotals(source: 'facebook' | 'google_ads' | 'tiktok', params: Record<string, string>): Promise<WindsorRow[]> {
   const fieldMap = {
     facebook:   'account_id,source,spend,impressions,clicks,action_values_omni_purchase,actions_omni_purchase',
-    google_ads: 'source,spend,impressions,clicks,conversion_value',
-    tiktok:     'source,spend,impressions,clicks,complete_payment,total_complete_payment_rate,onsite_total_purchase_value,conversion_value',
+    google_ads: 'source,spend,impressions,clicks,conversion_value,conversions',
+    tiktok:     'source,spend,impressions,clicks,complete_payment,onsite_total_purchase,total_complete_payment_rate,onsite_total_purchase_value,conversion_value',
   };
   try {
     const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields: fieldMap[source], _renderer: 'json', ...params });
@@ -81,23 +83,23 @@ async function fetchSourceDaily(source: 'facebook' | 'google_ads' | 'tiktok', pa
 }
 
 function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'TikTok', color: string): PlatformData {
-  let spend = 0, impressions = 0, clicks = 0, revenue = 0;
+  let spend = 0, impressions = 0, clicks = 0, revenue = 0, conversions = 0;
 
   for (const row of rows) {
-    const s = Number(row.spend || 0);
-    spend += s;
+    const r = row as Record<string, unknown>;
+    spend += Number(row.spend || 0);
     impressions += Number(row.impressions || 0);
     clicks += Number(row.clicks || 0);
 
     if (platform === 'Meta') {
-      revenue += Number((row as Record<string, unknown>).action_values_omni_purchase || 0);
+      revenue += Number(r.action_values_omni_purchase || 0);
+      conversions += Number(r.actions_omni_purchase || 0);
     } else if (platform === 'TikTok') {
-      const tk = row as Record<string, unknown>;
-      // total_complete_payment_rate is TikTok's total purchase value (Windsor's
-      // misleading name); complete_payment_value is empty for this account.
-      revenue += Number(tk.total_complete_payment_rate || tk.onsite_total_purchase_value || row.conversion_value || 0);
+      revenue += Number(r.total_complete_payment_rate || r.onsite_total_purchase_value || row.conversion_value || 0);
+      conversions += Number(r.complete_payment || r.onsite_total_purchase || 0);
     } else {
       revenue += Number(row.conversion_value || 0);
+      conversions += Number(row.conversions || 0);
     }
   }
 
@@ -109,6 +111,8 @@ function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'Ti
     impressions: Math.round(impressions),
     clicks: Math.round(clicks),
     ctr: impressions > 0 ? Math.round((clicks / impressions) * 10000) / 100 : 0,
+    conversions: Math.round(conversions),
+    costPerConversion: conversions > 0 ? Math.round((spend / conversions) * 100) / 100 : 0,
     color,
   };
 }
