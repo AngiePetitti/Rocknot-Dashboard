@@ -373,7 +373,7 @@ export async function GET(request: NextRequest) {
     // "Today" is the exception: BigQuery only updates when Windsor's scheduled
     // sync runs, so the live view goes straight to the Windsor API instead.
     const includesToday = tfRaw === 'today' || (isCustom && dateTo >= todayStr);
-    if (isBigQueryConfigured() && !debug && !includesToday) {
+    if (isBigQueryConfigured() && !debug) {
       const overview = await getOverview(currentParams.date_from, currentParams.date_to);
 
       let bqPrior = null;
