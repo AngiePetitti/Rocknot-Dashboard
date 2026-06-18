@@ -211,13 +211,11 @@ export async function GET(request: NextRequest) {
   // ranges that include today still use BigQuery — today's portion lags ~1h on
   // Windsor's sync but stays consistent with the overview tab.
   const useLiveToday = tfRaw === 'today';
-  if (isBigQueryConfigured() && !useLiveToday) {
+  if (isBigQueryConfigured() && !debug && !useLiveToday) {
     try {
       const { platforms, dailySpend } = await getAdsOverview(params.date_from, params.date_to);
-      if (debug) return NextResponse.json({ source: 'bigquery_live', params, platforms, dailySpend });
       return NextResponse.json({ source: 'bigquery_live', platforms, dailySpend }, { headers: cacheHeaders(false) });
-    } catch (err) {
-      if (debug) return NextResponse.json({ source: 'bigquery_error', error: String(err), params });
+    } catch {
       // fall through to Windsor REST
     }
   }

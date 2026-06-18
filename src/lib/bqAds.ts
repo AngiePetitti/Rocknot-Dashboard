@@ -142,15 +142,8 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
   `;
 
-  const metaSqlNoConversions = metaSql.replace(
-    'SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS conversions,',
-    '0 AS conversions,'
-  );
-
   const [metaRows, googleRows, tiktokRows, metaDaily, googleDaily, tiktokDaily] = await Promise.all([
-    runQuery<RawRow>(metaSql, params)
-      .catch(() => runQuery<RawRow>(metaSqlNoConversions, params))
-      .catch(() => null),
+    runQuery<RawRow>(metaSql, params).catch(() => null),
     runQuery<RawRow>(googleSql, params).catch(() => null),
     runQuery<RawRow>(tiktokSql, params)
       .catch(() => runQuery<RawRow>(tiktokSqlLegacy, params))
