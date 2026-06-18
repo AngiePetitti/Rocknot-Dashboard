@@ -78,7 +78,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
       SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS conversions,
       SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
-      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
+      0 AS impressions
     FROM \`${ds}.facebook_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
       AND LOWER(account_name) = 'rocknot'
@@ -90,7 +90,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue,
       SUM(IFNULL(CAST(conversions AS FLOAT64), 0)) AS conversions,
       SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
-      SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
+      0 AS impressions
     FROM \`${ds}.google_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
   `;
@@ -143,36 +143,9 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   `;
 
   // Safe fallbacks using only columns confirmed to exist in BigQuery
-  const metaSqlSafe = `
-    SELECT
-      SUM(CAST(spend AS FLOAT64)) AS spend,
-      SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
-      0 AS conversions,
-      0 AS clicks,
-      0 AS impressions
-    FROM \`${ds}.facebook_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
-      AND LOWER(account_name) = 'rocknot'
-  `;
-
-  const googleSqlSafe = `
-    SELECT
-      SUM(CAST(spend AS FLOAT64)) AS spend,
-      0 AS revenue,
-      0 AS conversions,
-      0 AS clicks,
-      0 AS impressions
-    FROM \`${ds}.google_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
-  `;
-
   const [metaRows, googleRows, tiktokRows, metaDaily, googleDaily, tiktokDaily] = await Promise.all([
-    runQuery<RawRow>(metaSql, params)
-      .catch(() => runQuery<RawRow>(metaSqlSafe, params))
-      .catch(() => null),
-    runQuery<RawRow>(googleSql, params)
-      .catch(() => runQuery<RawRow>(googleSqlSafe, params))
-      .catch(() => null),
+    runQuery<RawRow>(metaSql, params).catch(() => null),
+    runQuery<RawRow>(googleSql, params).catch(() => null),
     runQuery<RawRow>(tiktokSql, params)
       .catch(() => runQuery<RawRow>(tiktokSqlLegacy, params))
       .catch(() => runQuery<RawRow>(tiktokSqlFallback, params))
