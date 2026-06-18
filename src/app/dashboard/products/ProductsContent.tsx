@@ -195,40 +195,7 @@ export default function ProductsContent() {
       {/* Products Table */}
       <Card accentColor="#86efac">
         <h2 className="text-sm font-bold text-gray-700 mb-4">Top Sellers Table</h2>
-        {/* Mobile: stacked product+category, key columns only */}
-        <div className="sm:hidden">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-gray-100">
-                <th className="text-left font-semibold text-gray-400 uppercase pb-2 pr-2 w-6">#</th>
-                <th className="text-left font-semibold text-gray-400 uppercase pb-2 pr-2">Product</th>
-                <th onClick={() => handleSort('unitsSold')} className="text-right font-semibold text-gray-400 uppercase pb-2 px-2 cursor-pointer select-none">Units{sortArrow('unitsSold')}</th>
-                <th onClick={() => handleSort('revenue')} className="text-right font-semibold text-gray-400 uppercase pb-2 pl-2 cursor-pointer select-none">Revenue{sortArrow('revenue')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedProducts.map((product, i) => (
-                <tr key={product.id} className="border-b border-gray-50">
-                  <td className="py-1.5 pr-2 align-top">
-                    <span
-                      className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold"
-                      style={{ backgroundColor: PRODUCT_COLORS[i] || '#e2e8f0', color: '#374151' }}
-                    >{i + 1}</span>
-                  </td>
-                  <td className="py-1.5 pr-2">
-                    <div className="font-medium text-gray-800 leading-tight">{product.name}</div>
-                    <div className="text-gray-400">{product.category}</div>
-                  </td>
-                  <td className="py-1.5 px-2 text-right text-gray-600 align-top">{product.unitsSold.toLocaleString()}</td>
-                  <td className="py-1.5 pl-2 text-right font-semibold text-gray-800 align-top">{formatCurrency(product.revenue)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Desktop: full table */}
-        <div className="hidden sm:block overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
@@ -245,30 +212,44 @@ export default function ProductsContent() {
             <tbody>
               {sortedProducts.map((product, i) => (
                 <tr key={product.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                  <td className="py-2 pr-4">
+                  <td className="py-1 pr-4">
                     <span
                       className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white"
                       style={{ backgroundColor: PRODUCT_COLORS[i] || '#e2e8f0', color: '#374151' }}
-                    >{i + 1}</span>
+                    >
+                      {i + 1}
+                    </span>
                   </td>
-                  <td className="py-2 pr-4 font-medium text-gray-800">{product.name}</td>
-                  <td className="py-2 pr-4">
-                    <span className="text-xs font-medium px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full">{product.category}</span>
+                  <td className="py-1 pr-4 font-medium text-gray-800">{product.name}</td>
+                  <td className="py-1 pr-4">
+                    <span className="text-xs font-medium px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full">
+                      {product.category}
+                    </span>
                   </td>
-                  <td className="py-2 px-4 text-right text-gray-600">{product.unitsSold.toLocaleString()}</td>
-                  <td className="py-2 px-4 text-right font-semibold text-gray-800">{formatCurrency(product.revenue)}</td>
-                  <td className="py-2 px-4 text-right font-semibold text-gray-800">{product.grossProfit > 0 ? formatCurrency(product.grossProfit) : '—'}</td>
-                  <td className="py-2 px-4 text-right">
+                  <td className="py-1 px-4 text-right text-gray-600">{product.unitsSold.toLocaleString()}</td>
+                  <td className="py-1 px-4 text-right font-semibold text-gray-800">{formatCurrency(product.revenue)}</td>
+                  <td className="py-1 px-4 text-right font-semibold text-gray-800">
+                    {product.grossProfit > 0 ? formatCurrency(product.grossProfit) : '—'}
+                  </td>
+                  <td className="py-1 px-4 text-right">
                     {product.grossProfit > 0 ? (
-                      <span className="font-semibold" style={{ color: product.grossMargin >= 50 ? '#22c55e' : product.grossMargin >= 30 ? '#374151' : '#ef4444' }}>
+                      <span
+                        className="font-semibold"
+                        style={{ color: product.grossMargin >= 50 ? '#22c55e' : product.grossMargin >= 30 ? '#374151' : '#ef4444' }}
+                      >
                         {formatPercent(product.grossMargin)}
                       </span>
-                    ) : <span className="text-gray-400">—</span>}
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
                   </td>
-                  <td className="py-2 pl-4 text-right">
+                  <td className="py-1 pl-4 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: `${product.percentOfTotal}%`, backgroundColor: PRODUCT_COLORS[i] || '#e2e8f0' }} />
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${product.percentOfTotal}%`, backgroundColor: PRODUCT_COLORS[i] || '#e2e8f0' }}
+                        />
                       </div>
                       <span className="text-gray-600 w-12 text-right">{formatPercent(product.percentOfTotal)}</span>
                     </div>
