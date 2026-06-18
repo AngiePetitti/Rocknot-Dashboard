@@ -172,6 +172,27 @@ export default function CalendarContent() {
 
   const selectedDayEvents = selectedDate ? eventsForDate(selectedDate) : [];
 
+  // Build 12-month lookahead from today for the year strip
+  const yearStrip: { label: string; prefix: string; evts: MarketingEvent[] }[] = [];
+  for (let i = 0; i < 12; i++) {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + i);
+    const prefix = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const evts = events.filter(e => {
+      const start = e.date.slice(0, 7);
+      const end = (e.endDate || e.date).slice(0, 7);
+      return start <= prefix && end >= prefix;
+    });
+    yearStrip.push({ label: `${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`, prefix, evts });
+  }
+
+  function jumpToMonth(prefix: string) {
+    const [y, m] = prefix.split('-').map(Number);
+    setView({ year: y, month: m - 1 });
+    setSelectedDate(null);
+  }
+
   return (
     <div>
       <Header title="Marketing Calendar" subtitle="Plan launches, deadlines & campaigns">
@@ -190,6 +211,46 @@ export default function CalendarContent() {
           <span>Could not load calendar events. Make sure Vercel KV is configured.</span>
         </div>
       )}
+
+      {/* ── Year-ahead strip ── */}
+      <div className="mb-4 -mx-1">
+        <div className="flex gap-2 overflow-x-auto px-1 pb-2 scrollbar-none snap-x snap-mandatory">
+          {yearStrip.map(({ label, prefix, evts }) => {
+            const isCurrentView = `${year}-${String(month + 1).padStart(2, '0')}` === prefix;
+            const topColors = [...new Set(evts.map(e => e.color))].slice(0, 4);
+            return (
+              <button
+                key={prefix}
+                onClick={() => jumpToMonth(prefix)}
+                className={`snap-start shrink-0 flex flex-col items-start gap-1.5 px-3 py-2.5 rounded-xl border transition-all ${
+                  isCurrentView
+                    ? 'bg-violet-600 border-violet-600 text-white'
+                    : evts.length > 0
+                    ? 'bg-white border-gray-200 hover:border-violet-300 text-gray-700'
+                    : 'bg-gray-50 border-gray-100 text-gray-400 hover:bg-gray-100'
+                }`}
+                style={{ minWidth: '80px' }}
+              >
+                <span className={`text-[11px] font-bold leading-none ${isCurrentView ? 'text-white' : ''}`}>{label}</span>
+                {evts.length > 0 ? (
+                  <div className="flex items-center gap-1.5 w-full">
+                    <div className="flex gap-0.5">
+                      {topColors.map((c, ci) => (
+                        <div key={ci} className="w-2 h-2 rounded-full" style={{ backgroundColor: isCurrentView ? 'rgba(255,255,255,0.7)' : c }} />
+                      ))}
+                    </div>
+                    <span className={`text-[10px] font-semibold ml-auto ${isCurrentView ? 'text-violet-200' : 'text-gray-400'}`}>
+                      {evts.length}
+                    </span>
+                  </div>
+                ) : (
+                  <span className={`text-[10px] ${isCurrentView ? 'text-violet-300' : 'text-gray-300'}`}>—</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* ── DESKTOP layout (md+) ── */}
       <div className="hidden md:grid md:grid-cols-3 gap-4">
