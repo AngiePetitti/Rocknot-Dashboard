@@ -147,11 +147,24 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     '0 AS conversions,'
   );
 
+  // Google fallback: drop conversions_value (may not exist) then drop conversions column
+  const googleSqlFallback1 = googleSql.replace(
+    'SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue,',
+    'SUM(IFNULL(CAST(conversion_value AS FLOAT64), 0)) AS revenue,'
+  );
+  const googleSqlFallback2 = googleSqlFallback1.replace(
+    'SUM(IFNULL(CAST(conversions AS FLOAT64), 0)) AS conversions,',
+    '0 AS conversions,'
+  );
+
   const [metaRows, googleRows, tiktokRows, metaDaily, googleDaily, tiktokDaily] = await Promise.all([
     runQuery<RawRow>(metaSql, params)
       .catch(() => runQuery<RawRow>(metaSqlFallback, params))
       .catch(() => null),
-    runQuery<RawRow>(googleSql, params).catch(() => null),
+    runQuery<RawRow>(googleSql, params)
+      .catch(() => runQuery<RawRow>(googleSqlFallback1, params))
+      .catch(() => runQuery<RawRow>(googleSqlFallback2, params))
+      .catch(() => null),
     runQuery<RawRow>(tiktokSql, params)
       .catch(() => runQuery<RawRow>(tiktokSqlLegacy, params))
       .catch(() => runQuery<RawRow>(tiktokSqlFallback, params))
