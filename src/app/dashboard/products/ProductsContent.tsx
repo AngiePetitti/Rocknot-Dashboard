@@ -192,10 +192,38 @@ export default function ProductsContent() {
         </ResponsiveContainer>
       </Card>
 
-      {/* Products Table */}
+      {/* Products Table — desktop */}
       <Card accentColor="#86efac">
         <h2 className="text-sm font-bold text-gray-700 mb-4">Top Sellers Table</h2>
-        <div className="overflow-x-auto">
+
+        {/* Mobile cards */}
+        <div className="sm:hidden space-y-2">
+          {sortedProducts.map((product, i) => (
+            <div key={product.id} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
+              <span
+                className="w-7 h-7 shrink-0 rounded-full flex items-center justify-center text-xs font-bold"
+                style={{ backgroundColor: PRODUCT_COLORS[i] || '#e2e8f0', color: '#374151' }}
+              >
+                {i + 1}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-gray-800 truncate">{product.name}</p>
+                <p className="text-xs text-gray-400">{product.category} · {product.unitsSold.toLocaleString()} units</p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className="text-xs font-semibold text-gray-800">{formatCurrency(product.revenue)}</p>
+                {product.grossMargin > 0 && (
+                  <p className="text-xs font-semibold" style={{ color: product.grossMargin >= 50 ? '#22c55e' : product.grossMargin >= 30 ? '#374151' : '#ef4444' }}>
+                    {formatPercent(product.grossMargin)}
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
@@ -240,7 +268,7 @@ export default function ProductsContent() {
                         {formatPercent(product.grossMargin)}
                       </span>
                     ) : (
-                      <span className="text-gray-400" title="No cost-per-item set for this product">—</span>
+                      <span className="text-gray-400">—</span>
                     )}
                   </td>
                   <td className="py-2 pl-4 text-right">
@@ -248,15 +276,10 @@ export default function ProductsContent() {
                       <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                         <div
                           className="h-full rounded-full"
-                          style={{
-                            width: `${product.percentOfTotal}%`,
-                            backgroundColor: PRODUCT_COLORS[i] || '#e2e8f0',
-                          }}
+                          style={{ width: `${product.percentOfTotal}%`, backgroundColor: PRODUCT_COLORS[i] || '#e2e8f0' }}
                         />
                       </div>
-                      <span className="text-gray-600 w-12 text-right">
-                        {formatPercent(product.percentOfTotal)}
-                      </span>
+                      <span className="text-gray-600 w-12 text-right">{formatPercent(product.percentOfTotal)}</span>
                     </div>
                   </td>
                 </tr>
