@@ -217,7 +217,7 @@ export default function CalendarContent() {
         <div className="flex gap-2 overflow-x-auto px-1 pb-2 scrollbar-none snap-x snap-mandatory">
           {yearStrip.map(({ label, prefix, evts }) => {
             const isCurrentView = `${year}-${String(month + 1).padStart(2, '0')}` === prefix;
-            const topColors = [...new Set(evts.map(e => e.color))].slice(0, 4);
+            const topColors = Array.from(new Set(evts.map(e => e.color))).slice(0, 4);
             return (
               <button
                 key={prefix}
