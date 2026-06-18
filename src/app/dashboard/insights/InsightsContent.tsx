@@ -19,53 +19,39 @@ interface InsightSet {
 interface Snapshot {
   dateFrom: string;
   dateTo: string;
+  label: string;
+  compareLabel: string | null;
   metrics: Record<string, number>;
   productsCount: number;
   platforms: string[];
 }
 
 const CATEGORIES = [
-  {
-    key: 'creatives' as const,
-    label: 'Ad Creative Ideas',
-    icon: '🎨',
-    accentColor: '#818cf8',
-    bg: 'bg-indigo-50',
-    text: 'text-indigo-700',
-    dot: 'bg-indigo-400',
-    description: 'New angles, hooks & formats to test',
-  },
-  {
-    key: 'products' as const,
-    label: 'Product Opportunities',
-    icon: '📦',
-    accentColor: '#f9a8d4',
-    bg: 'bg-pink-50',
-    text: 'text-pink-700',
-    dot: 'bg-pink-400',
-    description: 'Colorways, bundles & variants to explore',
-  },
-  {
-    key: 'promos' as const,
-    label: 'Promos & Events',
-    icon: '🎯',
-    accentColor: '#fde68a',
-    bg: 'bg-amber-50',
-    text: 'text-amber-700',
-    dot: 'bg-amber-400',
-    description: 'Sale timing, campaigns & seasonal plays',
-  },
-  {
-    key: 'retention' as const,
-    label: 'Retention & Growth',
-    icon: '👥',
-    accentColor: '#86efac',
-    bg: 'bg-green-50',
-    text: 'text-green-700',
-    dot: 'bg-green-400',
-    description: 'Win-back, loyalty & customer growth',
-  },
+  { key: 'creatives' as const, label: 'Ad Creative Ideas', icon: '🎨', accentColor: '#818cf8', bg: 'bg-indigo-50', text: 'text-indigo-700', dot: 'bg-indigo-400', description: 'New angles, hooks & formats to test' },
+  { key: 'products' as const, label: 'Product Opportunities', icon: '📦', accentColor: '#f9a8d4', bg: 'bg-pink-50', text: 'text-pink-700', dot: 'bg-pink-400', description: 'Colorways, bundles & variants to explore' },
+  { key: 'promos' as const, label: 'Promos & Events', icon: '🎯', accentColor: '#fde68a', bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-400', description: 'Sale timing, campaigns & seasonal plays' },
+  { key: 'retention' as const, label: 'Retention & Growth', icon: '👥', accentColor: '#86efac', bg: 'bg-green-50', text: 'text-green-700', dot: 'bg-green-400', description: 'Win-back, loyalty & customer growth' },
 ];
+
+const TIMEFRAMES = [
+  { value: '30d', label: 'Last 30 days' },
+  { value: '90d', label: 'Last 90 days' },
+  { value: '6m', label: 'Last 6 months' },
+  { value: 'ytd', label: 'Year to date' },
+  { divider: true },
+  { value: 'q4_last', label: 'Q4 Last Year', badge: 'Holiday' },
+  { value: 'holiday_last', label: 'Holiday Season', badge: 'Nov–Dec' },
+  { value: 'q3_last', label: 'Q3 Last Year' },
+  { divider: true },
+  { value: 'q1', label: 'Q1 This Year' },
+  { value: 'q2', label: 'Q2 This Year' },
+  { value: 'q3', label: 'Q3 This Year' },
+  { value: 'q4', label: 'Q4 This Year' },
+  { divider: true },
+  { value: 'custom', label: 'Custom range…' },
+] as const;
+
+type TfValue = 'custom' | '30d' | '90d' | '6m' | 'ytd' | 'q4_last' | 'holiday_last' | 'q3_last' | 'q1' | 'q2' | 'q3' | 'q4';
 
 function SkeletonCard() {
   return (
@@ -88,11 +74,23 @@ export default function InsightsContent() {
   const [error, setError] = useState<string | null>(null);
   const [generatedAt, setGeneratedAt] = useState<Date | null>(null);
 
+  const [tf, setTf] = useState<TfValue>('30d');
+  const [compareMode, setCompareMode] = useState(false);
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [showTfMenu, setShowTfMenu] = useState(false);
+
+  const currentTfItem = TIMEFRAMES.find(t => 'value' in t && t.value === tf);
+  const currentTfLabel = currentTfItem && 'label' in currentTfItem ? currentTfItem.label : 'Last 30 days';
+
   async function generate() {
+    if (tf === 'custom' && (!customFrom || !customTo)) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/insights', { cache: 'no-store' });
+      let url = `/api/insights?tf=${tf}&compare=${compareMode}`;
+      if (tf === 'custom') url += `&date_from=${customFrom}&date_to=${customTo}`;
+      const res = await fetch(url, { cache: 'no-store' });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setInsights(data.insights);
@@ -106,13 +104,14 @@ export default function InsightsContent() {
   }
 
   const hasInsights = insights && !loading;
+  const canGenerate = tf !== 'custom' || (customFrom && customTo);
 
   return (
     <div>
       <Header title="AI Insights" subtitle="Data-driven ideas powered by Claude">
         <button
           onClick={generate}
-          disabled={loading}
+          disabled={loading || !canGenerate}
           className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white text-sm font-semibold rounded-xl transition-colors"
         >
           {loading ? (
@@ -132,6 +131,84 @@ export default function InsightsContent() {
         </button>
       </Header>
 
+      {/* Controls bar */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        {/* Timeframe picker */}
+        <div className="relative">
+          <button
+            onClick={() => setShowTfMenu(v => !v)}
+            className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-semibold text-gray-700 hover:border-violet-300 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5 text-gray-400" viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="14" height="13" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M1 6h14M5 1v3M11 1v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            {currentTfLabel}
+            <svg className="w-3 h-3 text-gray-400" viewBox="0 0 12 12" fill="none"><path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </button>
+          {showTfMenu && (
+            <div className="absolute top-full left-0 mt-1 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-20 py-1 overflow-hidden">
+              {TIMEFRAMES.map((item, i) => {
+                if ('divider' in item) return <div key={i} className="h-px bg-gray-100 my-1" />;
+                return (
+                  <button
+                    key={item.value}
+                    onClick={() => { setTf(item.value as TfValue); setShowTfMenu(false); }}
+                    className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-violet-50 transition-colors ${tf === item.value ? 'text-violet-700 font-semibold bg-violet-50' : 'text-gray-700'}`}
+                  >
+                    <span>{item.label}</span>
+                    {'badge' in item && item.badge && (
+                      <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">{item.badge}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Custom date range */}
+        {tf === 'custom' && (
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={customFrom}
+              onChange={e => setCustomFrom(e.target.value)}
+              className="px-2 py-1.5 text-xs border border-gray-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-400"
+            />
+            <span className="text-xs text-gray-400">to</span>
+            <input
+              type="date"
+              value={customTo}
+              onChange={e => setCustomTo(e.target.value)}
+              className="px-2 py-1.5 text-xs border border-gray-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-400"
+            />
+          </div>
+        )}
+
+        {/* Compare toggle */}
+        <button
+          onClick={() => setCompareMode(v => !v)}
+          className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+            compareMode
+              ? 'bg-violet-600 border-violet-600 text-white'
+              : 'bg-white border-gray-200 text-gray-600 hover:border-violet-300'
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M8 2v12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          Compare vs Q4 Last Year
+        </button>
+
+        {showTfMenu && (
+          <div className="fixed inset-0 z-10" onClick={() => setShowTfMenu(false)} />
+        )}
+      </div>
+
+      {/* Compare info pill */}
+      {compareMode && (
+        <div className="flex items-center gap-2 bg-violet-50 border border-violet-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-violet-700">
+          <span>✦</span>
+          <span>Claude will analyze <strong>{currentTfLabel}</strong> vs <strong>Q4 last year</strong> and highlight what changed, what worked, and what to do differently.</span>
+        </div>
+      )}
+
       {error && (
         <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-red-700">
           <span>⚠️</span>
@@ -141,15 +218,16 @@ export default function InsightsContent() {
 
       {/* Empty state */}
       {!insights && !loading && !error && (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
+        <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="w-16 h-16 rounded-2xl bg-violet-100 flex items-center justify-center text-3xl mb-4">✦</div>
           <h2 className="text-base font-bold text-gray-800 mb-1">Ready to generate insights</h2>
           <p className="text-sm text-gray-400 max-w-xs mb-6">
-            Claude will analyze your last 30 days of real sales, ad, and product data to generate specific recommendations for Rocknot.
+            Pick a timeframe, optionally compare against Q4 last year, then hit Generate. Claude analyzes your real store data and returns specific recommendations.
           </p>
           <button
             onClick={generate}
-            className="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold rounded-xl transition-colors"
+            disabled={!canGenerate}
+            className="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
           >
             <span>✦</span> Generate Insights
           </button>
@@ -169,20 +247,19 @@ export default function InsightsContent() {
 
       {/* Data context bar */}
       {snapshot && hasInsights && (
-        <div className="flex flex-wrap items-center gap-3 mb-4 px-0.5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-4 px-0.5">
           <div className="flex items-center gap-1.5 text-[11px] text-gray-400">
             <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-            Analyzed {snapshot.dateFrom} → {snapshot.dateTo}
+            {snapshot.label}
           </div>
+          {snapshot.compareLabel && (
+            <div className="text-[11px] text-gray-400">· vs {snapshot.compareLabel}</div>
+          )}
           {snapshot.platforms.length > 0 && (
-            <div className="flex items-center gap-1 text-[11px] text-gray-400">
-              · Platforms: {snapshot.platforms.join(', ')}
-            </div>
+            <div className="text-[11px] text-gray-400">· {snapshot.platforms.join(', ')}</div>
           )}
           {snapshot.productsCount > 0 && (
-            <div className="text-[11px] text-gray-400">
-              · {snapshot.productsCount} products
-            </div>
+            <div className="text-[11px] text-gray-400">· {snapshot.productsCount} products</div>
           )}
           {generatedAt && (
             <div className="ml-auto text-[11px] text-gray-300">
@@ -228,7 +305,7 @@ export default function InsightsContent() {
                 </div>
                 <div className="space-y-3">
                   {items.map((item, i) => (
-                    <div key={i} className={`p-3 rounded-xl ${cat.bg} border border-transparent`}>
+                    <div key={i} className={`p-3 rounded-xl ${cat.bg}`}>
                       <div className="flex items-start gap-2">
                         <div className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1.5 ${cat.dot}`} />
                         <div>
@@ -245,7 +322,6 @@ export default function InsightsContent() {
         </div>
       )}
 
-      {/* Disclaimer */}
       {hasInsights && (
         <p className="text-[10px] text-gray-300 text-center mt-6">
           AI-generated insights based on your real store data. Always validate before acting.
