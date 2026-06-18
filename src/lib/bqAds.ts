@@ -143,9 +143,30 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   `;
 
   // Safe fallbacks using only columns confirmed to exist in BigQuery
+  // Minimal fallbacks — spend + revenue only — in case Windsor changes the schema
+  const metaSqlMin = `
+    SELECT SUM(CAST(spend AS FLOAT64)) AS spend,
+           SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
+           0 AS conversions, 0 AS clicks, 0 AS impressions
+    FROM \`${ds}.facebook_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
+      AND LOWER(account_name) = 'rocknot'
+  `;
+  const googleSqlMin = `
+    SELECT SUM(CAST(spend AS FLOAT64)) AS spend,
+           SUM(IFNULL(CAST(conversion_value AS FLOAT64), 0)) AS revenue,
+           0 AS conversions, 0 AS clicks, 0 AS impressions
+    FROM \`${ds}.google_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
+  `;
+
   const [metaRows, googleRows, tiktokRows, metaDaily, googleDaily, tiktokDaily] = await Promise.all([
-    runQuery<RawRow>(metaSql, params).catch(() => null),
-    runQuery<RawRow>(googleSql, params).catch(() => null),
+    runQuery<RawRow>(metaSql, params)
+      .catch(() => runQuery<RawRow>(metaSqlMin, params))
+      .catch(() => null),
+    runQuery<RawRow>(googleSql, params)
+      .catch(() => runQuery<RawRow>(googleSqlMin, params))
+      .catch(() => null),
     runQuery<RawRow>(tiktokSql, params)
       .catch(() => runQuery<RawRow>(tiktokSqlLegacy, params))
       .catch(() => runQuery<RawRow>(tiktokSqlFallback, params))
