@@ -20,6 +20,23 @@ export interface InventoryItem {
   reorderQty: number; // suggested 30-day restock
 }
 
+// Hidden "bag only" listings hold the TRUE physical bag stock (the public
+// handbag listings are untracked because each bag can be mixed-and-matched
+// with many strap/insert variants). They all carry "bag only" in the title,
+// sometimes "bag only inventory".
+function isBagOnly(title: string): boolean {
+  return /bag\s*only/i.test(title);
+}
+
+// Strip the "bag only" / "bag only inventory" marker so the section reads as
+// the real bag name, then clean up any trailing separators left behind.
+function cleanBagName(title: string): string {
+  return title
+    .replace(/\s*[-–—·|:]?\s*bag\s*only(\s+inventory)?\b/i, '')
+    .replace(/[-–—·|:]\s*$/, '')
+    .trim() || title.trim();
+}
+
 async function runShopifyQL(query: string) {
   const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
@@ -73,67 +90,83 @@ export async function GET() {
     const UNTIL = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
     const PERIOD_DAYS = 90;
 
+    // No "> 0" guard here: we want SKUs that sold out to zero to come through
+    // so genuine sellouts can be flagged. The < 50000 cap still drops junk rows
+    // (e.g. non-physical "Return" products). Limit raised so slow movers with
+    // low stock aren't truncated off the bottom of the units-sold ordering.
     const { rows, cell } = await runShopifyQL(
       `FROM inventory
        SHOW ending_inventory_units, inventory_units_sold, sell_through_rate
        GROUP BY product_title, product_variant_title, product_type
        SINCE ${SINCE} UNTIL ${UNTIL}
-       HAVING ending_inventory_units > 0 AND ending_inventory_units < 50000
+       HAVING ending_inventory_units < 50000
        ORDER BY inventory_units_sold DESC
-       LIMIT 250`
+       LIMIT 500`
     );
 
-    const items: InventoryItem[] = rows
-      .map((r, i) => {
-        const product = cell(r, 'product_title') || 'Unknown';
-        const variant = cell(r, 'product_variant_title') || '';
-        const category = cell(r, 'product_type') || 'Other';
-        const currentStock = Math.round(parseFloat(cell(r, 'ending_inventory_units') || '0'));
-        const unitsSold = Math.round(parseFloat(cell(r, 'inventory_units_sold') || '0'));
-        const sellThroughRate = Math.round(parseFloat(cell(r, 'sell_through_rate') || '0') * 1000) / 10;
+    const allRows: (InventoryItem & { _isBag: boolean })[] = rows.map((r, i) => {
+      const rawProduct = cell(r, 'product_title') || 'Unknown';
+      const variant = cell(r, 'product_variant_title') || '';
+      const category = cell(r, 'product_type') || 'Other';
+      const currentStock = Math.round(parseFloat(cell(r, 'ending_inventory_units') || '0'));
+      const unitsSold = Math.round(parseFloat(cell(r, 'inventory_units_sold') || '0'));
+      const sellThroughRate = Math.round(parseFloat(cell(r, 'sell_through_rate') || '0') * 1000) / 10;
 
-        const dailyVelocity = Math.round((unitsSold / PERIOD_DAYS) * 100) / 100;
-        const daysRemaining = dailyVelocity > 0
-          ? Math.round(currentStock / dailyVelocity)
-          : null;
-        const status = statusFor(currentStock, daysRemaining);
+      const dailyVelocity = Math.round((unitsSold / PERIOD_DAYS) * 100) / 100;
+      const daysRemaining = dailyVelocity > 0
+        ? Math.round(currentStock / dailyVelocity)
+        : null;
+      const status = statusFor(currentStock, daysRemaining);
 
-        // Suggest enough stock to cover 90 days at current velocity, minus what's on hand.
-        const reorderQty = dailyVelocity > 0
-          ? Math.max(0, Math.round(dailyVelocity * SUPPLY_TARGET_DAYS) - Math.max(currentStock, 0))
-          : 0;
+      // Suggest enough stock to cover 90 days at current velocity, minus what's on hand.
+      const reorderQty = dailyVelocity > 0
+        ? Math.max(0, Math.round(dailyVelocity * SUPPLY_TARGET_DAYS) - Math.max(currentStock, 0))
+        : 0;
 
-        return {
-          id: String(i),
-          product,
-          variant: variant === 'Default Title' ? '' : variant,
-          category,
-          currentStock,
-          unitsSold90d: unitsSold,
-          dailyVelocity,
-          daysRemaining,
-          sellThroughRate,
-          status,
-          reorderQty,
-        };
-      })
-      // Only show SKUs with positive tracked stock. Items where Shopify
-      // inventory tracking is disabled (handbags, bundles) report 0 or null
-      // ending_inventory_units — excluding them avoids false "Out of Stock"
-      // badges for products that were never tracked in the first place.
-      .filter(item => item.currentStock > 0);
+      const _isBag = isBagOnly(rawProduct);
+      return {
+        id: String(i),
+        product: _isBag ? cleanBagName(rawProduct) : rawProduct,
+        variant: variant === 'Default Title' ? '' : variant,
+        category,
+        currentStock,
+        unitsSold90d: unitsSold,
+        dailyVelocity,
+        daysRemaining,
+        sellThroughRate,
+        status,
+        reorderQty,
+        _isBag,
+      };
+    });
 
-    // Count as "out of stock" only items that had real sales in the window
-    // AND hit zero — not untracked items that simply report 0.
-    const outOfStock = items.filter(i => i.status === 'out_of_stock' && i.unitsSold90d > 0).length;
-    const critical = items.filter(i => i.status === 'critical').length;
-    const low = items.filter(i => i.status === 'low').length;
-    const healthy = items.filter(i => i.status === 'healthy').length;
+    // Bags ("bag only" listings) are the true physical stock — always show them,
+    // even at zero and even with no recent sales, sorted lowest stock first so
+    // the ones that need attention surface at the top.
+    const bags: InventoryItem[] = allRows
+      .filter(r => r._isBag)
+      .map(({ _isBag, ...rest }) => rest)
+      .sort((a, b) => a.currentStock - b.currentStock);
+
+    // Main list: everything else. Keep a SKU if it has stock OR sold units in
+    // the window — a SKU that sold is genuinely tracked, so if it's now at 0
+    // that's a real sellout. Untracked handbags/bundles (0 stock, 0 sales) stay
+    // hidden, avoiding false "Out of Stock" badges.
+    const items: InventoryItem[] = allRows
+      .filter(r => !r._isBag && (r.currentStock > 0 || r.unitsSold90d > 0))
+      .map(({ _isBag, ...rest }) => rest);
+
+    // Counts span the main list plus bags so the tiles reflect everything.
+    const tileScope = [...items, ...bags];
+    const outOfStock = tileScope.filter(i => i.status === 'out_of_stock').length;
+    const critical = tileScope.filter(i => i.status === 'critical').length;
+    const low = tileScope.filter(i => i.status === 'low').length;
+    const healthy = tileScope.filter(i => i.status === 'healthy').length;
 
     const categories = Array.from(new Set(items.map(i => i.category))).filter(Boolean).sort();
 
     return NextResponse.json(
-      { source: 'shopify_live', items, outOfStock, critical, low, healthy, categories },
+      { source: 'shopify_live', items, bags, outOfStock, critical, low, healthy, categories },
       { headers: cacheHeaders(false) }
     );
   } catch (err) {

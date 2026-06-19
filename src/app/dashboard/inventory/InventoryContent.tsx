@@ -31,6 +31,7 @@ type SortKey = 'daysRemaining' | 'currentStock' | 'unitsSold90d' | 'sellThroughR
 
 export default function InventoryContent() {
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [bags, setBags] = useState<InventoryItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [counts, setCounts] = useState({ outOfStock: 0, critical: 0, low: 0, healthy: 0 });
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
@@ -47,6 +48,7 @@ export default function InventoryContent() {
       .then(data => {
         if (data.source === 'shopify_live') {
           setItems(data.items || []);
+          setBags(data.bags || []);
           setCategories(data.categories || []);
           setCounts({
             outOfStock: data.outOfStock ?? 0,
@@ -112,7 +114,7 @@ export default function InventoryContent() {
         <span>
           <strong>90-day supply target</strong> — velocity based on last 90 days of sales.
           Reorder Qty = units needed to bring stock back to 90 days of supply at current pace.
-          Products without Shopify inventory tracking (e.g. handbags) are excluded.
+          True bag stock is shown in its own section from the hidden &quot;bag only&quot; listings; the public mix-and-match handbag listings (untracked) are excluded.
         </span>
       </div>
 
@@ -162,6 +164,94 @@ export default function InventoryContent() {
             )}
           </div>
         </div>
+      )}
+
+      {/* ── Bags — True Stock Levels ── */}
+      {status === 'ok' && bags.length > 0 && (
+        <Card accentColor="#a78bfa" className="mb-5">
+          <div className="flex items-start gap-2 mb-1">
+            <span className="text-base">👜</span>
+            <div>
+              <h2 className="text-sm font-bold text-gray-700">Bags — True Stock Levels</h2>
+              <p className="text-xs text-gray-400">
+                Real physical bag counts from the hidden &quot;bag only&quot; listings. Straps &amp; inserts are tracked separately in the main list below.
+              </p>
+            </div>
+          </div>
+
+          {/* Mobile cards */}
+          <div className="flex flex-col gap-2.5 md:hidden mt-3">
+            {bags.map(bag => {
+              const cfg = STATUS_CONFIG[bag.status];
+              return (
+                <div key={bag.id} className="border border-gray-100 rounded-xl p-3 bg-white flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 leading-tight truncate">{bag.product}</p>
+                    {bag.variant && <p className="text-xs text-gray-500 mt-0.5">{bag.variant}</p>}
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <div className="text-right">
+                      <p className="text-[10px] text-gray-400 leading-none mb-0.5">In Stock</p>
+                      <p className="text-lg font-bold leading-none" style={{ color: cfg.text }}>{bag.currentStock}</p>
+                    </div>
+                    <span
+                      className="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                      style={{ background: cfg.bg, color: cfg.text }}
+                    >
+                      {cfg.label}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden md:block overflow-x-auto mt-3">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-3">Bag</th>
+                  <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-3">Variant</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">In Stock</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Sold 90d</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Days Left</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Reorder Qty</th>
+                  <th className="text-center text-xs font-semibold text-gray-400 uppercase pb-2 pl-3">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bags.map(bag => {
+                  const cfg = STATUS_CONFIG[bag.status];
+                  return (
+                    <tr key={bag.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                      <td className="py-2.5 pr-3 font-medium text-gray-800 text-xs">{bag.product}</td>
+                      <td className="py-2.5 pr-3 text-xs text-gray-500">{bag.variant || <span className="text-gray-300">—</span>}</td>
+                      <td className="py-2.5 px-3 text-right text-xs font-bold" style={{ color: cfg.text }}>{bag.currentStock.toLocaleString()}</td>
+                      <td className="py-2.5 px-3 text-right text-xs text-gray-600">{bag.unitsSold90d.toLocaleString()}</td>
+                      <td className="py-2.5 px-3 text-right text-xs font-semibold">
+                        {bag.daysRemaining === null
+                          ? <span className="text-gray-300">—</span>
+                          : <span style={{ color: bag.daysRemaining < 7 ? '#ef4444' : bag.daysRemaining < 14 ? '#eab308' : '#374151' }}>{bag.daysRemaining}</span>}
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-xs font-semibold">
+                        {bag.reorderQty > 0
+                          ? <span className="text-violet-600">{bag.reorderQty.toLocaleString()}</span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="py-2.5 pl-3 text-center">
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: cfg.bg, color: cfg.text }}>
+                          <span className="inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle" style={{ background: cfg.dot }} />
+                          {cfg.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
 
       <Card accentColor="#fdba74">
