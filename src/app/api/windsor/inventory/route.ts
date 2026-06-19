@@ -92,8 +92,9 @@ export async function GET() {
 
     // No "> 0" guard here: we want SKUs that sold out to zero to come through
     // so genuine sellouts can be flagged. The < 50000 cap still drops junk rows
-    // (e.g. non-physical "Return" products). Limit raised so slow movers with
-    // low stock aren't truncated off the bottom of the units-sold ordering.
+    // (e.g. non-physical "Return" products). High LIMIT so the hidden "bag only"
+    // listings — which have zero direct sales and therefore sort to the very
+    // bottom of the units-sold ordering — are never truncated off.
     const { rows, cell } = await runShopifyQL(
       `FROM inventory
        SHOW ending_inventory_units, inventory_units_sold, sell_through_rate
@@ -101,26 +102,33 @@ export async function GET() {
        SINCE ${SINCE} UNTIL ${UNTIL}
        HAVING ending_inventory_units < 50000
        ORDER BY inventory_units_sold DESC
-       LIMIT 500`
+       LIMIT 2000`
     );
 
-    const allRows: (InventoryItem & { _isBag: boolean })[] = rows.map((r, i) => {
+    type RawItem = InventoryItem & { _isBag: boolean; _isGiftCard: boolean; _isHandbag: boolean };
+    const allRows: RawItem[] = rows.map((r, i) => {
       const rawProduct = cell(r, 'product_title') || 'Unknown';
       const variant = cell(r, 'product_variant_title') || '';
       const category = cell(r, 'product_type') || 'Other';
-      const currentStock = Math.round(parseFloat(cell(r, 'ending_inventory_units') || '0'));
+      // Clamp oversold (negative) inventory to 0 — a SKU can't physically have
+      // negative units on hand; negative just means it oversold past its count.
+      const rawStock = Math.round(parseFloat(cell(r, 'ending_inventory_units') || '0'));
+      const currentStock = Math.max(0, rawStock);
       const unitsSold = Math.round(parseFloat(cell(r, 'inventory_units_sold') || '0'));
       const sellThroughRate = Math.round(parseFloat(cell(r, 'sell_through_rate') || '0') * 1000) / 10;
 
       const dailyVelocity = Math.round((unitsSold / PERIOD_DAYS) * 100) / 100;
-      const daysRemaining = dailyVelocity > 0
-        ? Math.round(currentStock / dailyVelocity)
-        : null;
+      // Days remaining only makes sense with stock on hand; zero/oversold = 0 days.
+      const daysRemaining = currentStock <= 0
+        ? (dailyVelocity > 0 ? 0 : null)
+        : dailyVelocity > 0
+          ? Math.round(currentStock / dailyVelocity)
+          : null;
       const status = statusFor(currentStock, daysRemaining);
 
       // Suggest enough stock to cover 90 days at current velocity, minus what's on hand.
       const reorderQty = dailyVelocity > 0
-        ? Math.max(0, Math.round(dailyVelocity * SUPPLY_TARGET_DAYS) - Math.max(currentStock, 0))
+        ? Math.max(0, Math.round(dailyVelocity * SUPPLY_TARGET_DAYS) - currentStock)
         : 0;
 
       const _isBag = isBagOnly(rawProduct);
@@ -137,24 +145,30 @@ export async function GET() {
         status,
         reorderQty,
         _isBag,
+        _isGiftCard: /gift\s*card/i.test(rawProduct),
+        _isHandbag: /handbag/i.test(category),
       };
     });
+
+    const strip = ({ _isBag, _isGiftCard, _isHandbag, ...rest }: RawItem): InventoryItem => rest;
 
     // Bags ("bag only" listings) are the true physical stock — always show them,
     // even at zero and even with no recent sales, sorted lowest stock first so
     // the ones that need attention surface at the top.
     const bags: InventoryItem[] = allRows
-      .filter(r => r._isBag)
-      .map(({ _isBag, ...rest }) => rest)
+      .filter(r => r._isBag && !r._isGiftCard)
+      .map(strip)
       .sort((a, b) => a.currentStock - b.currentStock);
 
-    // Main list: everything else. Keep a SKU if it has stock OR sold units in
-    // the window — a SKU that sold is genuinely tracked, so if it's now at 0
-    // that's a real sellout. Untracked handbags/bundles (0 stock, 0 sales) stay
-    // hidden, avoiding false "Out of Stock" badges.
+    // Main list: straps, inserts, jewelry, accessories, etc. Keep a SKU if it
+    // has stock OR sold units in the window. Excluded:
+    //  - bag-only listings (shown in the Bags section above)
+    //  - gift cards (not physical inventory)
+    //  - public handbag listings (untracked mix-and-match parents — their true
+    //    stock is the "bag only" listings, so the public ones are misleading)
     const items: InventoryItem[] = allRows
-      .filter(r => !r._isBag && (r.currentStock > 0 || r.unitsSold90d > 0))
-      .map(({ _isBag, ...rest }) => rest);
+      .filter(r => !r._isBag && !r._isGiftCard && !r._isHandbag && (r.currentStock > 0 || r.unitsSold90d > 0))
+      .map(strip);
 
     // Counts span the main list plus bags so the tiles reflect everything.
     const tileScope = [...items, ...bags];
