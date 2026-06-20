@@ -62,6 +62,7 @@ function bagLineKey(title: string): string {
 // matches a known bag line. "bag" wins over "strap": e.g. "BELT BAG + CHAIN
 // STRAP" is a bag, while "GEM Strap" is a real strap with its own inventory.
 function isPublicBag(title: string, category: string, keys: Set<string>): boolean {
+  if (/charm|keychain|key\s*ring/i.test(title)) return false; // accessory, not a bag
   if (/\bbag\b/i.test(title)) return true;       // a bag, even "... + X strap"
   if (/strap/i.test(title)) return false;        // a real strap product
   if (/handbag/i.test(category)) return true;
@@ -75,20 +76,32 @@ function isPublicBag(title: string, category: string, keys: Set<string>): boolea
 // clause — Rocknot splits one physical bag across multiple listings by strap
 // type (e.g. "... BELT BAG + CHAIN STRAP - Black" vs "+ LACE STRAP - Black"),
 // so they must group together and be counted once, not once per strap type.
-function bagGroupKey(title: string): string {
-  return title
-    .replace(/\s*\+\s*[^-–—]*?strap[^-–—]*/i, ' ')
-    .replace(/\s{2,}/g, ' ')
-    .trim()
-    .toLowerCase();
+// Strip every "+ <accessory>" clause that appears BEFORE the color dash —
+// covers straps (CHAIN/LACE STRAP, NO SWING STRAP), crowns (MAGNUM/PETITE
+// CROWN), TWIN, CHAIN, etc. A bag's color comes after the first " - ", and may
+// itself contain a "+" (e.g. "Olive + Antique Gold"), so we only strip add-on
+// clauses up to that first dash and leave the color intact.
+function stripBagAccessories(title: string): string {
+  const dash = title.search(/[-–—]/);
+  const head = dash >= 0 ? title.slice(0, dash) : title;
+  const tail = dash >= 0 ? title.slice(dash) : '';
+  return head.replace(/\s*\+\s*[^-–—]*/g, ' ') + tail;
 }
 
-// Display name for a grouped bag: strip the "+ <X> STRAP" clause and tidy up.
+function bagGroupKey(title: string): string {
+  return stripBagAccessories(title)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+// Display name for a grouped bag: strip "+ <accessory>" clauses and tidy up.
 function cleanBagDisplayName(title: string): string {
-  return title
-    .replace(/\s*\+\s*[^-–—]*?strap[^-–—]*/i, ' ')
+  return stripBagAccessories(title)
     .replace(/\s{2,}/g, ' ')
+    .replace(/\s*([-–—])\s*/g, ' $1 ')
     .replace(/\s*[-–—·|:]\s*$/, '')
+    .replace(/\s{2,}/g, ' ')
     .trim() || title.trim();
 }
 
@@ -173,10 +186,11 @@ export async function GET() {
 
     type RawItem = InventoryItem & {
       _isBag: boolean; _isGiftCard: boolean; _isHandbag: boolean;
-      _isPublicBag: boolean; _bagCovered: boolean; _rawProduct: string;
+      _isPublicBag: boolean; _bagCovered: boolean; _bagBare: boolean;
+      _isSale: boolean; _rawProduct: string;
       _startingStock: number;
     };
-    const allRows: RawItem[] = rows.map((r, i) => {
+    const allRowsMapped: RawItem[] = rows.map((r, i) => {
       const rawProduct = cell(r, 'product_title') || 'Unknown';
       const variant = cell(r, 'product_variant_title') || '';
       const category = cell(r, 'product_type') || 'Other';
@@ -229,12 +243,19 @@ export async function GET() {
         _isHandbag: /handbag/i.test(category),
         _isPublicBag,
         _bagCovered,
+        // A "bare" bag listing has no "+ accessory" clause before the color dash
+        // (the strapless / standalone bag) — its count is the true on-hand.
+        _bagBare: !/\+/.test((rawProduct.split(/[-–—]/)[0] || '')),
+        // Sample-sale and final-sale listings aren't regular sellable stock.
+        _isSale: /\b(sample|final)\s*sale\b/i.test(rawProduct) || /\b(sample|final)\s*sale\b/i.test(category),
         _rawProduct: rawProduct,
         _startingStock: startingStock,
       };
     });
+    // Drop sample-sale / final-sale listings entirely — not regular inventory.
+    const allRows = allRowsMapped.filter(r => !r._isSale);
 
-    const strip = ({ _isBag, _isGiftCard, _isHandbag, _isPublicBag, _bagCovered, _rawProduct, _startingStock, ...rest }: RawItem): InventoryItem => rest;
+    const strip = ({ _isBag, _isGiftCard, _isHandbag, _isPublicBag, _bagCovered, _bagBare, _isSale, _rawProduct, _startingStock, ...rest }: RawItem): InventoryItem => rest;
 
     // ── True bag stock ────────────────────────────────────────────────────
     // Bags come in several listing shapes; we reduce each to its TRUE count:
@@ -258,7 +279,15 @@ export async function GET() {
     }
     const representativeBags: RawItem[] = [];
     publicBagGroups.forEach(grp => {
-      const rep = grp.reduce((a, b) =>
+      // The true count comes from the bare (strapless) listing — the standalone
+      // bag whose title has no "+ accessory" clause (its highest-stock variant,
+      // e.g. ORI Hobo's "NO SWING STRAP", is the real on-hand). Bags that exist
+      // ONLY as "+ strap/crown/chain" mix-and-match combos have no trustworthy
+      // count (per-combo numbers are inconsistent) and aren't true bags, so they
+      // are excluded from the section entirely.
+      const bareRows = grp.filter(r => r._bagBare);
+      if (!bareRows.length) return;
+      const rep = bareRows.reduce((a, b) =>
         (b.currentStock > a.currentStock ||
           (b.currentStock === a.currentStock && b.stockValue > a.stockValue)) ? b : a);
       // Sum sales across all variants in the group — individual variants each
