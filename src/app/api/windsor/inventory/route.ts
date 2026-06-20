@@ -197,11 +197,19 @@ export async function GET() {
     const totalRetailValue = valued.reduce((s, r) => s + r.retailValue, 0);
     const potentialProfit = Math.max(0, totalRetailValue - totalCostValue);
 
-    // Slow / dead stock = cash that's depreciating on the shelf. "Dead" sold
-    // nothing in 90 days; "slow" is sitting on 180+ days of supply at its
-    // current pace. Either way it's money not turning over.
+    // Slow / dead stock = capital genuinely stuck on the shelf.
+    // Two tiers:
+    //  "Dead"  — zero sales in the 90-day window AND no velocity at all
+    //            (daysRemaining === null). These are truly stagnant SKUs.
+    //  "Slow"  — selling but at such a glacial pace there's more than 365
+    //            days of supply on hand (over a full year to sell through).
+    // We intentionally exclude items that just have low 90-day sales but
+    // are burning through stock at any reasonable velocity — those are fine.
     const isStale = (r: RawItem) =>
-      r.currentStock > 0 && (r.unitsSold90d === 0 || (r.daysRemaining !== null && r.daysRemaining > 180));
+      r.currentStock > 0 && r.stockValue > 0 && (
+        (r.unitsSold90d === 0 && r.daysRemaining === null) ||   // truly dead
+        (r.daysRemaining !== null && r.daysRemaining > 365)      // >1 yr supply
+      );
     const staleRows = valued.filter(isStale);
     const slowStockCostValue = staleRows.reduce((s, r) => s + r.stockValue, 0);
     const slowStockUnits = staleRows.reduce((s, r) => s + r.currentStock, 0);
