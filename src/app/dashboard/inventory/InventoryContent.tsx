@@ -43,6 +43,7 @@ export default function InventoryContent() {
   const [search, setSearch] = useState('');
   const [bagSortKey, setBagSortKey] = useState<BagSortKey>('currentStock');
   const [bagSortDir, setBagSortDir] = useState<'asc' | 'desc'>('asc');
+  const [restockExpanded, setRestockExpanded] = useState(false);
 
   useEffect(() => {
     setStatus('loading');
@@ -189,7 +190,7 @@ export default function InventoryContent() {
             Top sellers that are out or about to be — order quantity covers 90 days at current pace.
           </p>
           <div className="flex flex-col gap-1.5">
-            {restockNow.slice(0, 8).map(item => (
+            {(restockExpanded ? restockNow : restockNow.slice(0, 8)).map(item => (
               <div
                 key={item.id}
                 className="flex items-center gap-2 bg-white border border-orange-200 rounded-lg px-3 py-1.5"
@@ -207,7 +208,14 @@ export default function InventoryContent() {
             ))}
           </div>
           {restockNow.length > 8 && (
-            <p className="text-xs text-orange-500 mt-2">+{restockNow.length - 8} more fast movers — see table below</p>
+            <button
+              onClick={() => setRestockExpanded(e => !e)}
+              className="text-xs font-semibold text-orange-600 hover:text-orange-700 mt-2.5 flex items-center gap-1"
+            >
+              {restockExpanded
+                ? '↑ Show less'
+                : `↓ Show ${restockNow.length - 8} more fast mover${restockNow.length - 8 !== 1 ? 's' : ''}`}
+            </button>
           )}
         </div>
       )}
