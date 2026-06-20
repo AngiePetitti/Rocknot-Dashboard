@@ -187,10 +187,12 @@ export async function GET() {
     const categories = Array.from(new Set(items.map(i => i.category))).filter(Boolean).sort();
 
     // ── Inventory $ insights ──────────────────────────────────────────────
-    // Value over everything physically on hand (main items + bags), excluding
-    // gift cards. Bag value lives on the "bag only" listings; public handbag
+    // Value over everything physically on hand (main items + bags) that has a
+    // real cost figure entered in Shopify — items with no cost (stockValue 0)
+    // are left out so the dollar totals only reflect known costs. Gift cards
+    // excluded. Bag value lives on the "bag only" listings; public handbag
     // listings are untracked (0 value) so there's no double counting.
-    const valued = allRows.filter(r => !r._isGiftCard && r.currentStock > 0);
+    const valued = allRows.filter(r => !r._isGiftCard && r.currentStock > 0 && r.stockValue > 0);
     const totalCostValue = valued.reduce((s, r) => s + r.stockValue, 0);
     const totalRetailValue = valued.reduce((s, r) => s + r.retailValue, 0);
     const potentialProfit = Math.max(0, totalRetailValue - totalCostValue);
