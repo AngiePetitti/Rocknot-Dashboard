@@ -261,7 +261,28 @@ export async function GET() {
       const rep = grp.reduce((a, b) =>
         (b.currentStock > a.currentStock ||
           (b.currentStock === a.currentStock && b.stockValue > a.stockValue)) ? b : a);
-      representativeBags.push({ ...rep, product: cleanBagDisplayName(rep._rawProduct), variant: '' });
+      // Sum sales across all variants in the group — individual variants each
+      // only capture a slice of total bag sales (one strap option at a time).
+      const totalSold = grp.reduce((s, r) => s + r.unitsSold90d, 0);
+      const totalDailyVelocity = Math.round((totalSold / PERIOD_DAYS) * 100) / 100;
+      const daysRem = rep.currentStock <= 0
+        ? (totalDailyVelocity > 0 ? 0 : null)
+        : totalDailyVelocity > 0
+          ? Math.round(rep.currentStock / totalDailyVelocity)
+          : null;
+      const reorderQty = totalDailyVelocity > 0
+        ? Math.max(0, Math.round(totalDailyVelocity * SUPPLY_TARGET_DAYS) - rep.currentStock)
+        : 0;
+      representativeBags.push({
+        ...rep,
+        product: cleanBagDisplayName(rep._rawProduct),
+        variant: '',
+        unitsSold90d: totalSold,
+        dailyVelocity: totalDailyVelocity,
+        daysRemaining: daysRem,
+        status: statusFor(rep.currentStock, daysRem),
+        reorderQty,
+      });
     });
 
     // Bags section — true stock, always shown (even at zero), lowest first.

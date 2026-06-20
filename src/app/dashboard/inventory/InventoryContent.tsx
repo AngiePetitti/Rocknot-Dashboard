@@ -64,7 +64,9 @@ export default function InventoryContent() {
   const [search, setSearch] = useState('');
   const [bagSortKey, setBagSortKey] = useState<BagSortKey>('currentStock');
   const [bagSortDir, setBagSortDir] = useState<'asc' | 'desc'>('asc');
+  const [bagExpanded, setBagExpanded] = useState(false);
   const [restockExpanded, setRestockExpanded] = useState(false);
+  const BAG_PAGE = 10;
 
   useEffect(() => {
     setStatus('loading');
@@ -97,7 +99,8 @@ export default function InventoryContent() {
   };
   const bagArrow = (key: BagSortKey) => bagSortKey === key ? (bagSortDir === 'asc' ? ' ↑' : ' ↓') : '';
 
-  const sortedBags = useMemo(() => [...bags].sort((a, b) => {
+  const sortedBags = useMemo(() => {
+    const sorted = [...bags].sort((a, b) => {
     if (bagSortKey === 'daysRemaining') {
       if (a.daysRemaining === null && b.daysRemaining === null) return 0;
       if (a.daysRemaining === null) return 1;
@@ -106,7 +109,10 @@ export default function InventoryContent() {
     const av = a[bagSortKey] ?? 0;
     const bv = b[bagSortKey] ?? 0;
     return bagSortDir === 'asc' ? (av as number) - (bv as number) : (bv as number) - (av as number);
-  }), [bags, bagSortKey, bagSortDir]);
+    });
+    return sorted;
+  }, [bags, bagSortKey, bagSortDir]);
+  const visibleBags = bagExpanded ? sortedBags : sortedBags.slice(0, BAG_PAGE);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -321,14 +327,14 @@ export default function InventoryContent() {
             <div>
               <h2 className="text-sm font-bold text-gray-700">Bags — True Stock Levels</h2>
               <p className="text-xs text-gray-400">
-                Real physical bag counts from the hidden &quot;bag only&quot; listings. Straps &amp; inserts are tracked separately in the main list below.
+                Real physical counts — bag-only listings, NO SWING STRAP variants, and per-color simple handbag listings. Straps &amp; inserts tracked separately below.
               </p>
             </div>
           </div>
 
           {/* Mobile cards */}
           <div className="flex flex-col gap-2.5 md:hidden mt-3">
-            {sortedBags.map(bag => {
+            {visibleBags.map(bag => {
               const cfg = STATUS_CONFIG[bag.status];
               return (
                 <div key={bag.id} className="border border-gray-100 rounded-xl p-3 bg-white flex items-center justify-between gap-3">
@@ -368,7 +374,7 @@ export default function InventoryContent() {
                 </tr>
               </thead>
               <tbody>
-                {sortedBags.map(bag => {
+                {visibleBags.map(bag => {
                   const cfg = STATUS_CONFIG[bag.status];
                   return (
                     <tr key={bag.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
@@ -398,6 +404,17 @@ export default function InventoryContent() {
               </tbody>
             </table>
           </div>
+
+          {sortedBags.length > BAG_PAGE && (
+            <button
+              onClick={() => setBagExpanded(e => !e)}
+              className="mt-3 w-full text-xs text-violet-500 hover:text-violet-700 font-semibold py-1.5 rounded-lg border border-violet-100 hover:border-violet-200 transition-colors bg-violet-50 hover:bg-violet-100"
+            >
+              {bagExpanded
+                ? '↑ Show less'
+                : `↓ Show all ${sortedBags.length} bags (${sortedBags.length - BAG_PAGE} more)`}
+            </button>
+          )}
         </Card>
       )}
 
