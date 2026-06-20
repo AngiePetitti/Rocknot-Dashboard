@@ -30,14 +30,46 @@ function isBagOnly(title: string): boolean {
   return /bag\s*only/i.test(title);
 }
 
-// Strip the "bag only" / "bag only inventory" marker so the section reads as
-// the real bag name, then clean up any trailing separators left behind.
+// Strip the "bag only" / "bag only inventory" marker (in any of its messy
+// forms — "(BAG ONLY)", "BAG ONLY - INVENTORY", etc.) so the section reads as
+// the real bag name, cleaning up stray parens and separators left behind.
 function cleanBagName(title: string): string {
-  return title
-    .replace(/\s*[-–—·|:]?\s*bag\s*only(\s+inventory)?\b/i, '')
-    .replace(/[-–—·|:]\s*$/, '')
-    .replace(/\s*\(\s*\)\s*$/, '')
-    .trim() || title.trim();
+  let s = title;
+  s = s.replace(/bag\s*only/ig, ' ');     // the marker itself
+  s = s.replace(/\binventory\b/ig, ' ');  // trailing "- INVENTORY"
+  s = s.replace(/\(\s*\)/g, ' ');         // empty parens left behind
+  s = s.replace(/[()]/g, ' ');            // stray single parens
+  s = s.replace(/\s{2,}/g, ' ').trim();
+  s = s.replace(/^\s*[-–—·|:]\s*/, '');   // leading separator
+  s = s.replace(/\s*[-–—·|:]\s*$/, '');   // trailing separator
+  return s.trim() || title.trim();
+}
+
+// Build the set of bag "line keys" from the bag-only listings — the brand/line
+// stem (digits stripped, so "transformer2" → "transformer") — so we can spot
+// the PUBLIC mix-and-match versions of the same bag and exclude their phantom,
+// strap-multiplied inventory from the dollar totals. Bags are counted ONLY
+// from the bag-only listings (the true physical counts).
+const BAG_STOPWORDS = new Set(['the', 'a', 'an', 'new', 'phone', 'bag', 'mini']);
+function bagLineKey(title: string): string {
+  const cleaned = cleanBagName(title).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const tokens = cleaned.split(' ').filter(Boolean);
+  const stem = tokens.find(t => !BAG_STOPWORDS.has(t)) || tokens[0] || '';
+  return stem.replace(/\d+$/, ''); // drop trailing digits: transformer2 -> transformer
+}
+
+// A non-bag-only row is a PUBLIC bag listing (phantom inventory) if it's a
+// handbag, has "bag" in the name, or matches a known bag line — but never if
+// it's a strap (straps have their own real, tracked inventory).
+function isPublicBag(title: string, category: string, keys: Set<string>): boolean {
+  if (/strap/i.test(title)) return false;
+  const norm = title.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (/handbag/i.test(category)) return true;
+  if (/\bbag\b/i.test(title)) return true;
+  // Only trust longer, unambiguous line stems here (e.g. "transformer"); short
+  // stems like a color name would cause false matches, and those bags already
+  // carry "bag" in their public title so they're caught above.
+  return Array.from(keys).some(k => k.length >= 7 && norm.includes(k));
 }
 
 async function runShopifyQL(query: string) {
@@ -108,7 +140,18 @@ export async function GET() {
        LIMIT 2000`
     );
 
-    type RawItem = InventoryItem & { _isBag: boolean; _isGiftCard: boolean; _isHandbag: boolean; _startingStock: number };
+    // First pass: collect bag line keys from the bag-only listings so we can
+    // identify and drop the public mix-and-match versions below.
+    const bagKeys = new Set<string>();
+    for (const r of rows) {
+      const t = cell(r, 'product_title') || '';
+      if (isBagOnly(t)) {
+        const k = bagLineKey(t);
+        if (k) bagKeys.add(k);
+      }
+    }
+
+    type RawItem = InventoryItem & { _isBag: boolean; _isGiftCard: boolean; _isHandbag: boolean; _isPublicBag: boolean; _startingStock: number };
     const allRows: RawItem[] = rows.map((r, i) => {
       const rawProduct = cell(r, 'product_title') || 'Unknown';
       const variant = cell(r, 'product_variant_title') || '';
@@ -155,11 +198,12 @@ export async function GET() {
         _isBag,
         _isGiftCard: /gift\s*card/i.test(rawProduct),
         _isHandbag: /handbag/i.test(category),
+        _isPublicBag: !_isBag && isPublicBag(rawProduct, category, bagKeys),
         _startingStock: startingStock,
       };
     });
 
-    const strip = ({ _isBag, _isGiftCard, _isHandbag, _startingStock, ...rest }: RawItem): InventoryItem => rest;
+    const strip = ({ _isBag, _isGiftCard, _isHandbag, _isPublicBag, _startingStock, ...rest }: RawItem): InventoryItem => rest;
 
     // Bags ("bag only" listings) are the true physical stock — always show them,
     // even at zero and even with no recent sales, sorted lowest stock first so
@@ -173,10 +217,11 @@ export async function GET() {
     // has stock OR sold units in the window. Excluded:
     //  - bag-only listings (shown in the Bags section above)
     //  - gift cards (not physical inventory)
-    //  - public handbag listings (untracked mix-and-match parents — their true
-    //    stock is the "bag only" listings, so the public ones are misleading)
+    //  - public bag listings (mix-and-match parents — each bag is repeated once
+    //    per strap/length combo, so their inventory is phantom-inflated; the
+    //    true stock is the "bag only" listings)
     const items: InventoryItem[] = allRows
-      .filter(r => !r._isBag && !r._isGiftCard && !r._isHandbag && (r.currentStock > 0 || r.unitsSold90d > 0))
+      .filter(r => !r._isBag && !r._isGiftCard && !r._isHandbag && !r._isPublicBag && (r.currentStock > 0 || r.unitsSold90d > 0))
       .map(strip);
 
     // Counts span the main list plus bags so the tiles reflect everything.
@@ -189,12 +234,15 @@ export async function GET() {
     const categories = Array.from(new Set(items.map(i => i.category))).filter(Boolean).sort();
 
     // ── Inventory $ insights ──────────────────────────────────────────────
-    // Value over everything physically on hand (main items + bags) that has a
-    // real cost figure entered in Shopify — items with no cost (stockValue 0)
-    // are left out so the dollar totals only reflect known costs. Gift cards
-    // excluded. Bag value lives on the "bag only" listings; public handbag
-    // listings are untracked (0 value) so there's no double counting.
-    const valued = allRows.filter(r => !r._isGiftCard && r.currentStock > 0 && r.stockValue > 0);
+    // Value over everything physically on hand that has a real cost figure
+    // entered in Shopify (stockValue 0 = no cost set, left out so totals only
+    // reflect known costs). Excluded:
+    //  - gift cards (not physical inventory)
+    //  - public bag listings (phantom inventory — each bag counted once per
+    //    strap combo). Bag value comes ONLY from the "bag only" listings, which
+    //    ARE included here (they carry the true per-bag counts and cost).
+    const valued = allRows.filter(r =>
+      !r._isGiftCard && !r._isPublicBag && r.currentStock > 0 && r.stockValue > 0);
     const totalCostValue = valued.reduce((s, r) => s + r.stockValue, 0);
     const totalRetailValue = valued.reduce((s, r) => s + r.retailValue, 0);
     const potentialProfit = Math.max(0, totalRetailValue - totalCostValue);
