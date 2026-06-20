@@ -17,6 +17,24 @@ interface InventoryItem {
   sellThroughRate: number;
   status: 'out_of_stock' | 'critical' | 'low' | 'healthy';
   reorderQty: number;
+  stockValue: number;
+  retailValue: number;
+}
+
+interface InventoryFinance {
+  totalCostValue: number;
+  totalRetailValue: number;
+  potentialProfit: number;
+  slowStockCostValue: number;
+  slowStockUnits: number;
+  slowStockCount: number;
+}
+
+function fmtMoney(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 10_000) return `$${(n / 1_000).toFixed(0)}K`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${n.toLocaleString()}`;
 }
 
 const STATUS_CONFIG = {
@@ -35,6 +53,9 @@ export default function InventoryContent() {
   const [bags, setBags] = useState<InventoryItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [counts, setCounts] = useState({ outOfStock: 0, critical: 0, low: 0, healthy: 0 });
+  const [finance, setFinance] = useState<InventoryFinance | null>(null);
+  const [moveOrDiscount, setMoveOrDiscount] = useState<InventoryItem[]>([]);
+  const [moveExpanded, setMoveExpanded] = useState(false);
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [filterCategory, setFilterCategory] = useState<string>('all');
@@ -54,6 +75,8 @@ export default function InventoryContent() {
           setItems(data.items || []);
           setBags(data.bags || []);
           setCategories(data.categories || []);
+          setFinance(data.finance || null);
+          setMoveOrDiscount(data.moveOrDiscount || []);
           setCounts({
             outOfStock: data.outOfStock ?? 0,
             critical: data.critical ?? 0,
@@ -150,6 +173,36 @@ export default function InventoryContent() {
         </span>
       </div>
 
+      {/* Inventory $ cards — money tied up on the shelves */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        <MetricCard
+          title="Inventory Value (Cost)"
+          value={status === 'loading' || !finance ? '—' : fmtMoney(finance.totalCostValue)}
+          subtitle="Cash tied up in stock on hand"
+          accentColor="#818cf8"
+        />
+        <MetricCard
+          title="Retail Value on Hand"
+          value={status === 'loading' || !finance ? '—' : fmtMoney(finance.totalRetailValue)}
+          subtitle="Revenue sitting on the shelves"
+          accentColor="#34d399"
+        />
+        <MetricCard
+          title="Potential Profit"
+          value={status === 'loading' || !finance ? '—' : fmtMoney(finance.potentialProfit)}
+          subtitle="Retail minus cost, if it all sells"
+          accentColor="#22c55e"
+        />
+        <MetricCard
+          title="Slow / Dead Stock"
+          value={status === 'loading' || !finance ? '—' : fmtMoney(finance.slowStockCostValue)}
+          subtitle={finance
+            ? `${finance.slowStockCount} SKUs · ${finance.slowStockUnits.toLocaleString()} units depreciating`
+            : 'Cash not turning over'}
+          accentColor="#f87171"
+        />
+      </div>
+
       {/* Metric cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <MetricCard
@@ -215,6 +268,46 @@ export default function InventoryContent() {
               {restockExpanded
                 ? '↑ Show less'
                 : `↓ Show ${restockNow.length - 8} more fast mover${restockNow.length - 8 !== 1 ? 's' : ''}`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Move or discount — dead cash on the shelf ── */}
+      {status === 'ok' && moveOrDiscount.length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-5">
+          <p className="text-xs font-bold text-red-700 mb-1">
+            🐌 {finance?.slowStockCount ?? moveOrDiscount.length} slow / dead SKUs — move or discount
+          </p>
+          <p className="text-[11px] text-red-500/80 mb-2.5">
+            No sales in 90 days or 180+ days of supply on hand. Most cash tied up first — discount or bundle to free it up.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {(moveExpanded ? moveOrDiscount : moveOrDiscount.slice(0, 6)).map(item => (
+              <div
+                key={item.id}
+                className="flex items-center gap-2 bg-white border border-red-200 rounded-lg px-3 py-1.5"
+              >
+                <span className="text-xs font-semibold text-gray-800 flex-1 min-w-0 truncate">
+                  {item.product}{item.variant ? ` · ${item.variant}` : ''}
+                </span>
+                <span className="text-[11px] text-gray-500 whitespace-nowrap">
+                  {item.currentStock.toLocaleString()} units · {item.unitsSold90d === 0 ? 'no sales 90d' : `${item.sellThroughRate}% sell-through`}
+                </span>
+                <span className="text-xs font-bold text-red-700 whitespace-nowrap bg-red-100 rounded-full px-2 py-0.5">
+                  {fmtMoney(item.stockValue)} tied up
+                </span>
+              </div>
+            ))}
+          </div>
+          {moveOrDiscount.length > 6 && (
+            <button
+              onClick={() => setMoveExpanded(e => !e)}
+              className="text-xs font-semibold text-red-600 hover:text-red-700 mt-2.5 flex items-center gap-1"
+            >
+              {moveExpanded
+                ? '↑ Show less'
+                : `↓ Show ${moveOrDiscount.length - 6} more`}
             </button>
           )}
         </div>

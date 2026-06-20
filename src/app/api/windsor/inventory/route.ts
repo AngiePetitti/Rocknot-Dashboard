@@ -18,6 +18,8 @@ export interface InventoryItem {
   sellThroughRate: number;
   status: 'out_of_stock' | 'critical' | 'low' | 'healthy';
   reorderQty: number; // suggested 30-day restock
+  stockValue: number;  // cash tied up at cost (ending inventory value)
+  retailValue: number; // potential revenue on shelves (retail value)
 }
 
 // Hidden "bag only" listings hold the TRUE physical bag stock (the public
@@ -98,7 +100,7 @@ export async function GET() {
     // bottom of the units-sold ordering — are never truncated off.
     const { rows, cell } = await runShopifyQL(
       `FROM inventory
-       SHOW ending_inventory_units, inventory_units_sold, sell_through_rate
+       SHOW ending_inventory_units, inventory_units_sold, sell_through_rate, ending_inventory_value, ending_inventory_retail_value
        GROUP BY product_title, product_variant_title, product_type
        SINCE ${SINCE} UNTIL ${UNTIL}
        HAVING ending_inventory_units < 50000
@@ -117,6 +119,8 @@ export async function GET() {
       const currentStock = Math.max(0, rawStock);
       const unitsSold = Math.round(parseFloat(cell(r, 'inventory_units_sold') || '0'));
       const sellThroughRate = Math.round(parseFloat(cell(r, 'sell_through_rate') || '0') * 1000) / 10;
+      const stockValue = Math.max(0, Math.round(parseFloat(cell(r, 'ending_inventory_value') || '0')));
+      const retailValue = Math.max(0, Math.round(parseFloat(cell(r, 'ending_inventory_retail_value') || '0')));
 
       const dailyVelocity = Math.round((unitsSold / PERIOD_DAYS) * 100) / 100;
       // Days remaining only makes sense with stock on hand; zero/oversold = 0 days.
@@ -145,6 +149,8 @@ export async function GET() {
         sellThroughRate,
         status,
         reorderQty,
+        stockValue,
+        retailValue,
         _isBag,
         _isGiftCard: /gift\s*card/i.test(rawProduct),
         _isHandbag: /handbag/i.test(category),
@@ -180,8 +186,43 @@ export async function GET() {
 
     const categories = Array.from(new Set(items.map(i => i.category))).filter(Boolean).sort();
 
+    // ── Inventory $ insights ──────────────────────────────────────────────
+    // Value over everything physically on hand (main items + bags), excluding
+    // gift cards. Bag value lives on the "bag only" listings; public handbag
+    // listings are untracked (0 value) so there's no double counting.
+    const valued = allRows.filter(r => !r._isGiftCard && r.currentStock > 0);
+    const totalCostValue = valued.reduce((s, r) => s + r.stockValue, 0);
+    const totalRetailValue = valued.reduce((s, r) => s + r.retailValue, 0);
+    const potentialProfit = Math.max(0, totalRetailValue - totalCostValue);
+
+    // Slow / dead stock = cash that's depreciating on the shelf. "Dead" sold
+    // nothing in 90 days; "slow" is sitting on 180+ days of supply at its
+    // current pace. Either way it's money not turning over.
+    const isStale = (r: RawItem) =>
+      r.currentStock > 0 && (r.unitsSold90d === 0 || (r.daysRemaining !== null && r.daysRemaining > 180));
+    const staleRows = valued.filter(isStale);
+    const slowStockCostValue = staleRows.reduce((s, r) => s + r.stockValue, 0);
+    const slowStockUnits = staleRows.reduce((s, r) => s + r.currentStock, 0);
+
+    // Poor sellers to move/discount — most cash tied up in non-moving stock,
+    // worst offenders first. Exclude bags (managed in their own section).
+    const moveOrDiscount = staleRows
+      .filter(r => !r._isBag)
+      .map(strip)
+      .sort((a, b) => b.stockValue - a.stockValue)
+      .slice(0, 25);
+
+    const finance = {
+      totalCostValue,
+      totalRetailValue,
+      potentialProfit,
+      slowStockCostValue,
+      slowStockUnits,
+      slowStockCount: staleRows.length,
+    };
+
     return NextResponse.json(
-      { source: 'shopify_live', items, bags, outOfStock, critical, low, healthy, categories },
+      { source: 'shopify_live', items, bags, outOfStock, critical, low, healthy, categories, finance, moveOrDiscount },
       { headers: cacheHeaders(false) }
     );
   } catch (err) {
