@@ -112,7 +112,18 @@ export default function InventoryContent() {
     });
   }, [items, filterStatus, filterCategory, search, sortKey, sortDir]);
 
-  const urgentItems = items.filter(i => i.status === 'out_of_stock' || i.status === 'critical');
+  // "Restock now" = genuinely fast sellers that are running out, not just
+  // anything at zero. We rank by velocity (units/day over the 90-day window)
+  // and only surface items moving fast enough to matter, that are out or about
+  // to be (≤ 7 days of cover left). Sorted fastest-first.
+  const restockNow = useMemo(() => {
+    return items
+      .filter(i =>
+        i.dailyVelocity >= 0.25 && // ~1+ unit / 4 days — a real mover
+        (i.status === 'out_of_stock' || i.status === 'critical')
+      )
+      .sort((a, b) => b.dailyVelocity - a.dailyVelocity);
+  }, [items]);
 
   return (
     <div>
@@ -166,23 +177,38 @@ export default function InventoryContent() {
         />
       </div>
 
-      {/* Urgent reorder alert */}
-      {status === 'ok' && urgentItems.length > 0 && (
+      {/* Fast-mover restock alert — only the items selling fast enough to
+          warrant an immediate reorder, ranked fastest-first, with the
+          suggested order quantity. */}
+      {status === 'ok' && restockNow.length > 0 && (
         <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 mb-5">
-          <p className="text-xs font-bold text-orange-700 mb-2">
-            🚨 {urgentItems.length} SKU{urgentItems.length !== 1 ? 's' : ''} need immediate reorder
+          <p className="text-xs font-bold text-orange-700 mb-1">
+            🔥 {restockNow.length} fast-selling SKU{restockNow.length !== 1 ? 's' : ''} to restock now
           </p>
-          <div className="flex flex-wrap gap-2">
-            {urgentItems.slice(0, 8).map(item => (
-              <span key={item.id} className="text-xs bg-white border border-orange-200 rounded-full px-2.5 py-0.5 text-orange-700 font-medium">
-                {item.product}{item.variant ? ` · ${item.variant}` : ''}
-                {item.status === 'out_of_stock' ? ' (OUT)' : ` · ${item.daysRemaining}d left`}
-              </span>
+          <p className="text-[11px] text-orange-500/80 mb-2.5">
+            Top sellers that are out or about to be — order quantity covers 90 days at current pace.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {restockNow.slice(0, 8).map(item => (
+              <div
+                key={item.id}
+                className="flex items-center gap-2 bg-white border border-orange-200 rounded-lg px-3 py-1.5"
+              >
+                <span className="text-xs font-semibold text-gray-800 flex-1 min-w-0 truncate">
+                  {item.product}{item.variant ? ` · ${item.variant}` : ''}
+                </span>
+                <span className="text-[11px] text-gray-500 whitespace-nowrap">
+                  {item.dailyVelocity.toFixed(1)}/day · {item.status === 'out_of_stock' ? 'OUT' : `${item.daysRemaining}d left`}
+                </span>
+                <span className="text-xs font-bold text-orange-700 whitespace-nowrap bg-orange-100 rounded-full px-2 py-0.5">
+                  Order {item.reorderQty.toLocaleString()}
+                </span>
+              </div>
             ))}
-            {urgentItems.length > 8 && (
-              <span className="text-xs text-orange-500 py-0.5">+{urgentItems.length - 8} more</span>
-            )}
           </div>
+          {restockNow.length > 8 && (
+            <p className="text-xs text-orange-500 mt-2">+{restockNow.length - 8} more fast movers — see table below</p>
+          )}
         </div>
       )}
 
