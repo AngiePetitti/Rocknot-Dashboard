@@ -58,6 +58,14 @@ function bagLineKey(title: string): string {
   return stem.replace(/\d+$/, ''); // drop trailing digits: transformer2 -> transformer
 }
 
+// Some bag lines (e.g. ORI Hobo, Hezi) have NO separate "bag only" listing.
+// Instead the true bag count for each color lives in the "NO SWING STRAP"
+// variant of the public listing — the bare bag with no strap attached. The
+// other (strap) variants just repeat that bag's count, so they're phantom.
+function isNoStrapVariant(variant: string): boolean {
+  return /\bno\s+(swing\s+)?strap\b/i.test(variant);
+}
+
 // A non-bag-only row is a PUBLIC bag listing (phantom inventory) if it's a
 // handbag, has "bag" in the name, or matches a known bag line — but never if
 // it's a strap (straps have their own real, tracked inventory).
@@ -151,7 +159,10 @@ export async function GET() {
       }
     }
 
-    type RawItem = InventoryItem & { _isBag: boolean; _isGiftCard: boolean; _isHandbag: boolean; _isPublicBag: boolean; _startingStock: number };
+    type RawItem = InventoryItem & {
+      _isBag: boolean; _isGiftCard: boolean; _isHandbag: boolean;
+      _isPublicBag: boolean; _isTrueBag: boolean; _startingStock: number;
+    };
     const allRows: RawItem[] = rows.map((r, i) => {
       const rawProduct = cell(r, 'product_title') || 'Unknown';
       const variant = cell(r, 'product_variant_title') || '';
@@ -181,10 +192,20 @@ export async function GET() {
         : 0;
 
       const _isBag = isBagOnly(rawProduct);
+      const _isPublicBag = !_isBag && isPublicBag(rawProduct, category, bagKeys);
+      // A bag line is "covered" when it has its own bag-only listing (so its
+      // true count comes from there). If it's NOT covered, the bare-bag count
+      // lives in the "NO SWING STRAP" variant of the public listing instead.
+      const _bagCovered = bagKeys.has(bagLineKey(rawProduct));
+      const _isNoStrap = isNoStrapVariant(variant);
+      const _isTrueBag = _isBag || (_isPublicBag && !_bagCovered && _isNoStrap);
+      // For a NO SWING STRAP true-bag row, the color is already in the product
+      // title (e.g. "ORI Hobo Bag - Black"), so blank the variant label.
+      const displayVariant = (variant === 'Default Title' || _isNoStrap) ? '' : variant;
       return {
         id: String(i),
         product: _isBag ? cleanBagName(rawProduct) : rawProduct,
-        variant: variant === 'Default Title' ? '' : variant,
+        variant: displayVariant,
         category,
         currentStock,
         unitsSold90d: unitsSold,
@@ -198,18 +219,19 @@ export async function GET() {
         _isBag,
         _isGiftCard: /gift\s*card/i.test(rawProduct),
         _isHandbag: /handbag/i.test(category),
-        _isPublicBag: !_isBag && isPublicBag(rawProduct, category, bagKeys),
+        _isPublicBag,
+        _isTrueBag,
         _startingStock: startingStock,
       };
     });
 
-    const strip = ({ _isBag, _isGiftCard, _isHandbag, _isPublicBag, _startingStock, ...rest }: RawItem): InventoryItem => rest;
+    const strip = ({ _isBag, _isGiftCard, _isHandbag, _isPublicBag, _isTrueBag, _startingStock, ...rest }: RawItem): InventoryItem => rest;
 
-    // Bags ("bag only" listings) are the true physical stock — always show them,
-    // even at zero and even with no recent sales, sorted lowest stock first so
-    // the ones that need attention surface at the top.
+    // Bags = true physical stock: the "bag only" listings PLUS the "NO SWING
+    // STRAP" variants of bag lines that have no bag-only listing. Always shown,
+    // even at zero, sorted lowest stock first so attention items surface on top.
     const bags: InventoryItem[] = allRows
-      .filter(r => r._isBag && !r._isGiftCard)
+      .filter(r => r._isTrueBag && !r._isGiftCard)
       .map(strip)
       .sort((a, b) => a.currentStock - b.currentStock);
 
@@ -238,11 +260,11 @@ export async function GET() {
     // entered in Shopify (stockValue 0 = no cost set, left out so totals only
     // reflect known costs). Excluded:
     //  - gift cards (not physical inventory)
-    //  - public bag listings (phantom inventory — each bag counted once per
-    //    strap combo). Bag value comes ONLY from the "bag only" listings, which
-    //    ARE included here (they carry the true per-bag counts and cost).
+    //  - PHANTOM public bag variants (each bag counted once per strap combo).
+    // True bags ARE counted: the "bag only" listings and the "NO SWING STRAP"
+    // bare-bag variants both carry the real per-bag counts and cost.
     const valued = allRows.filter(r =>
-      !r._isGiftCard && !r._isPublicBag && r.currentStock > 0 && r.stockValue > 0);
+      !r._isGiftCard && !(r._isPublicBag && !r._isTrueBag) && r.currentStock > 0 && r.stockValue > 0);
     const totalCostValue = valued.reduce((s, r) => s + r.stockValue, 0);
     const totalRetailValue = valued.reduce((s, r) => s + r.retailValue, 0);
     const potentialProfit = Math.max(0, totalRetailValue - totalCostValue);
@@ -272,7 +294,7 @@ export async function GET() {
     // Poor sellers to move/discount — most cash tied up in non-moving stock,
     // worst offenders first. Exclude bags (managed in their own section).
     const moveOrDiscount = staleRows
-      .filter(r => !r._isBag)
+      .filter(r => !r._isTrueBag)
       .map(strip)
       .sort((a, b) => b.stockValue - a.stockValue)
       .slice(0, 25);
