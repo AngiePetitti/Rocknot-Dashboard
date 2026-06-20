@@ -100,7 +100,7 @@ export async function GET() {
     // bottom of the units-sold ordering — are never truncated off.
     const { rows, cell } = await runShopifyQL(
       `FROM inventory
-       SHOW ending_inventory_units, inventory_units_sold, sell_through_rate, ending_inventory_value, ending_inventory_retail_value
+       SHOW ending_inventory_units, starting_inventory_units, inventory_units_sold, sell_through_rate, ending_inventory_value, ending_inventory_retail_value
        GROUP BY product_title, product_variant_title, product_type
        SINCE ${SINCE} UNTIL ${UNTIL}
        HAVING ending_inventory_units < 50000
@@ -108,7 +108,7 @@ export async function GET() {
        LIMIT 2000`
     );
 
-    type RawItem = InventoryItem & { _isBag: boolean; _isGiftCard: boolean; _isHandbag: boolean };
+    type RawItem = InventoryItem & { _isBag: boolean; _isGiftCard: boolean; _isHandbag: boolean; _startingStock: number };
     const allRows: RawItem[] = rows.map((r, i) => {
       const rawProduct = cell(r, 'product_title') || 'Unknown';
       const variant = cell(r, 'product_variant_title') || '';
@@ -117,6 +117,7 @@ export async function GET() {
       // negative units on hand; negative just means it oversold past its count.
       const rawStock = Math.round(parseFloat(cell(r, 'ending_inventory_units') || '0'));
       const currentStock = Math.max(0, rawStock);
+      const startingStock = Math.max(0, Math.round(parseFloat(cell(r, 'starting_inventory_units') || '0')));
       const unitsSold = Math.round(parseFloat(cell(r, 'inventory_units_sold') || '0'));
       const sellThroughRate = Math.round(parseFloat(cell(r, 'sell_through_rate') || '0') * 1000) / 10;
       const stockValue = Math.max(0, Math.round(parseFloat(cell(r, 'ending_inventory_value') || '0')));
@@ -154,10 +155,11 @@ export async function GET() {
         _isBag,
         _isGiftCard: /gift\s*card/i.test(rawProduct),
         _isHandbag: /handbag/i.test(category),
+        _startingStock: startingStock,
       };
     });
 
-    const strip = ({ _isBag, _isGiftCard, _isHandbag, ...rest }: RawItem): InventoryItem => rest;
+    const strip = ({ _isBag, _isGiftCard, _isHandbag, _startingStock, ...rest }: RawItem): InventoryItem => rest;
 
     // Bags ("bag only" listings) are the true physical stock — always show them,
     // even at zero and even with no recent sales, sorted lowest stock first so
@@ -198,17 +200,22 @@ export async function GET() {
     const potentialProfit = Math.max(0, totalRetailValue - totalCostValue);
 
     // Slow / dead stock = capital genuinely stuck on the shelf.
+    //
+    // CRITICAL: only count items that actually HAD stock available to sell.
+    // A SKU with zero sales that was out of stock all period isn't "dead" —
+    // it just had nothing to sell. We require stock at the START of the window
+    // (it was on the shelf and available) as well as on hand now, so what's
+    // left is genuinely "in stock the whole time and still not moving."
+    //
     // Two tiers:
-    //  "Dead"  — zero sales in the 90-day window AND no velocity at all
-    //            (daysRemaining === null). These are truly stagnant SKUs.
+    //  "Dead"  — was in stock at the start, still in stock now, and sold
+    //            nothing in 90 days (no velocity at all).
     //  "Slow"  — selling but at such a glacial pace there's more than 365
     //            days of supply on hand (over a full year to sell through).
-    // We intentionally exclude items that just have low 90-day sales but
-    // are burning through stock at any reasonable velocity — those are fine.
     const isStale = (r: RawItem) =>
       r.currentStock > 0 && r.stockValue > 0 && (
-        (r.unitsSold90d === 0 && r.daysRemaining === null) ||   // truly dead
-        (r.daysRemaining !== null && r.daysRemaining > 365)      // >1 yr supply
+        (r._startingStock > 0 && r.unitsSold90d === 0 && r.daysRemaining === null) || // dead despite being in stock
+        (r.daysRemaining !== null && r.daysRemaining > 365)                            // >1 yr supply, clearly slow
       );
     const staleRows = valued.filter(isStale);
     const slowStockCostValue = staleRows.reduce((s, r) => s + r.stockValue, 0);
