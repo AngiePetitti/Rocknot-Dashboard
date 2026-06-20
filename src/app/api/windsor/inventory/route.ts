@@ -34,6 +34,7 @@ function cleanBagName(title: string): string {
   return title
     .replace(/\s*[-–—·|:]?\s*bag\s*only(\s+inventory)?\b/i, '')
     .replace(/[-–—·|:]\s*$/, '')
+    .replace(/\s*\(\s*\)\s*$/, '')
     .trim() || title.trim();
 }
 

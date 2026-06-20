@@ -28,6 +28,7 @@ const STATUS_CONFIG = {
 
 type FilterStatus = 'all' | 'out_of_stock' | 'critical' | 'low' | 'healthy';
 type SortKey = 'daysRemaining' | 'currentStock' | 'unitsSold90d' | 'sellThroughRate' | 'reorderQty';
+type BagSortKey = 'currentStock' | 'unitsSold90d' | 'daysRemaining' | 'reorderQty';
 
 export default function InventoryContent() {
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -40,6 +41,8 @@ export default function InventoryContent() {
   const [sortKey, setSortKey] = useState<SortKey>('daysRemaining');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [search, setSearch] = useState('');
+  const [bagSortKey, setBagSortKey] = useState<BagSortKey>('currentStock');
+  const [bagSortDir, setBagSortDir] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
     setStatus('loading');
@@ -63,6 +66,23 @@ export default function InventoryContent() {
       })
       .catch(() => setStatus('error'));
   }, []);
+
+  const handleBagSort = (key: BagSortKey) => {
+    if (bagSortKey === key) setBagSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setBagSortKey(key); setBagSortDir('asc'); }
+  };
+  const bagArrow = (key: BagSortKey) => bagSortKey === key ? (bagSortDir === 'asc' ? ' ↑' : ' ↓') : '';
+
+  const sortedBags = useMemo(() => [...bags].sort((a, b) => {
+    if (bagSortKey === 'daysRemaining') {
+      if (a.daysRemaining === null && b.daysRemaining === null) return 0;
+      if (a.daysRemaining === null) return 1;
+      if (b.daysRemaining === null) return -1;
+    }
+    const av = a[bagSortKey] ?? 0;
+    const bv = b[bagSortKey] ?? 0;
+    return bagSortDir === 'asc' ? (av as number) - (bv as number) : (bv as number) - (av as number);
+  }), [bags, bagSortKey, bagSortDir]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -181,7 +201,7 @@ export default function InventoryContent() {
 
           {/* Mobile cards */}
           <div className="flex flex-col gap-2.5 md:hidden mt-3">
-            {bags.map(bag => {
+            {sortedBags.map(bag => {
               const cfg = STATUS_CONFIG[bag.status];
               return (
                 <div key={bag.id} className="border border-gray-100 rounded-xl p-3 bg-white flex items-center justify-between gap-3">
@@ -213,15 +233,15 @@ export default function InventoryContent() {
                 <tr className="border-b border-gray-100">
                   <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-3">Bag</th>
                   <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-3">Variant</th>
-                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">In Stock</th>
-                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Sold 90d</th>
-                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Days Left</th>
-                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Reorder Qty</th>
+                  <th onClick={() => handleBagSort('currentStock')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">In Stock{bagArrow('currentStock')}</th>
+                  <th onClick={() => handleBagSort('unitsSold90d')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Sold 90d{bagArrow('unitsSold90d')}</th>
+                  <th onClick={() => handleBagSort('daysRemaining')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Days Left{bagArrow('daysRemaining')}</th>
+                  <th onClick={() => handleBagSort('reorderQty')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Reorder Qty{bagArrow('reorderQty')}</th>
                   <th className="text-center text-xs font-semibold text-gray-400 uppercase pb-2 pl-3">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {bags.map(bag => {
+                {sortedBags.map(bag => {
                   const cfg = STATUS_CONFIG[bag.status];
                   return (
                     <tr key={bag.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
