@@ -32,8 +32,8 @@ export async function GET(request: NextRequest) {
     const has = (c: string) => colNames.has(c);
 
     // The number the dashboard currently shows.
-    const dashboard = await runQuery<{ spend: number; rows: number }>(
-      `SELECT SUM(CAST(spend AS FLOAT64)) AS spend, COUNT(*) AS rows
+    const dashboard = await runQuery<{ spend: number; row_count: number }>(
+      `SELECT SUM(CAST(spend AS FLOAT64)) AS spend, COUNT(*) AS row_count
        FROM \`${ds}.facebook_ads\`
        WHERE DATE(date) = @date AND LOWER(account_name) = 'rocknot'`,
       params
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
 
     // Breakdown by account_name — catches "other accounts inflating the total".
     const byAccount = await runQuery(
-      `SELECT account_name, COUNT(*) AS rows, SUM(CAST(spend AS FLOAT64)) AS spend
+      `SELECT account_name, COUNT(*) AS row_count, SUM(CAST(spend AS FLOAT64)) AS spend
        FROM \`${ds}.facebook_ads\`
        WHERE DATE(date) = @date
        GROUP BY account_name ORDER BY spend DESC`,
@@ -58,11 +58,11 @@ export async function GET(request: NextRequest) {
     if (keyCol) {
       // How many rows per key on this date? >1 means duplication.
       perKey = await runQuery(
-        `SELECT ${keyCol} AS k, COUNT(*) AS rows, COUNT(DISTINCT CAST(spend AS STRING)) AS distinct_spend,
+        `SELECT ${keyCol} AS k, COUNT(*) AS row_count, COUNT(DISTINCT CAST(spend AS STRING)) AS distinct_spend,
                 SUM(CAST(spend AS FLOAT64)) AS summed_spend, MAX(CAST(spend AS FLOAT64)) AS max_spend
          FROM \`${ds}.facebook_ads\`
          WHERE DATE(date) = @date AND LOWER(account_name) = 'rocknot'
-         GROUP BY k HAVING COUNT(*) > 1 ORDER BY rows DESC LIMIT 20`,
+         GROUP BY k HAVING COUNT(*) > 1 ORDER BY row_count DESC LIMIT 20`,
         params
       );
 
