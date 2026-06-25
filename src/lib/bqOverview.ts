@@ -149,13 +149,21 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const params = { date_from: dateFrom, date_to: dateTo };
 
   const adsSql = `
-    WITH meta AS (
-      SELECT DATE(date) AS d,
-             SUM(CAST(spend AS FLOAT64)) AS spend,
-             SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
+    WITH meta_deduped AS (
+      -- Windsor stores one row per campaign per datasource/placement, each
+      -- carrying the full campaign spend — summing directly inflates the total.
+      -- Dedup to one row per (date, campaign) before aggregating.
+      SELECT DATE(date) AS d, campaign,
+             MAX(CAST(spend AS FLOAT64)) AS spend,
+             MAX(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.facebook_ads\`
       WHERE DATE(date) BETWEEN @date_from AND @date_to
         AND LOWER(account_name) = 'rocknot'
+      GROUP BY d, campaign
+    ),
+    meta AS (
+      SELECT d, SUM(spend) AS spend, SUM(revenue) AS revenue
+      FROM meta_deduped
       GROUP BY d
     ),
     google AS (

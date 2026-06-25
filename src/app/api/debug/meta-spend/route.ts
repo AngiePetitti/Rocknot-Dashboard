@@ -53,46 +53,36 @@ export async function GET(request: NextRequest) {
     // A sync/version timestamp, if Windsor stamps one, to pick the latest row.
     const tsCol = ['_airbyte_emitted_at', 'updated_at', 'synced_at', '_synced_at', 'last_updated', 'date_start'].find(has) || null;
 
-    let perKey: unknown = 'no key column (ad_id/adset_id/campaign_id) present';
-    let dedupCandidate: unknown = null;
-    if (keyCol) {
-      // How many rows per key on this date? >1 means duplication.
-      perKey = await runQuery(
-        `SELECT ${keyCol} AS k, COUNT(*) AS row_count, COUNT(DISTINCT CAST(spend AS STRING)) AS distinct_spend,
-                SUM(CAST(spend AS FLOAT64)) AS summed_spend, MAX(CAST(spend AS FLOAT64)) AS max_spend
+    // Per-campaign + per-datasource breakdown — reveals whether datasource
+    // is the dimension that splits rows (same campaign spend repeated per datasource).
+    const byCampaign = await runQuery(
+      `SELECT campaign, datasource, COUNT(*) AS row_count,
+              SUM(CAST(spend AS FLOAT64)) AS summed_spend,
+              MAX(CAST(spend AS FLOAT64)) AS max_spend,
+              MIN(CAST(spend AS FLOAT64)) AS min_spend
+       FROM \`${ds}.facebook_ads\`
+       WHERE DATE(date) = @date AND LOWER(account_name) = 'rocknot'
+       GROUP BY campaign, datasource
+       ORDER BY summed_spend DESC`,
+      params
+    );
+
+    // Dedup candidate: one row per campaign (MAX spend), then sum.
+    const dedupByCampaign = await runQuery<{ deduped_spend: number; campaign_count: number }>(
+      `SELECT SUM(max_spend) AS deduped_spend, COUNT(*) AS campaign_count FROM (
+         SELECT campaign, MAX(CAST(spend AS FLOAT64)) AS max_spend
          FROM \`${ds}.facebook_ads\`
          WHERE DATE(date) = @date AND LOWER(account_name) = 'rocknot'
-         GROUP BY k HAVING COUNT(*) > 1 ORDER BY row_count DESC LIMIT 20`,
-        params
-      );
-
-      // Candidate deduped total: one row per key. If a sync timestamp exists,
-      // take the latest row's spend; otherwise take the max (a re-synced full
-      // duplicate carries the same value, so max == the true per-ad spend).
-      const dedupSql = tsCol
-        ? `WITH ranked AS (
-             SELECT ${keyCol} AS k, CAST(spend AS FLOAT64) AS spend,
-                    ROW_NUMBER() OVER (PARTITION BY ${keyCol} ORDER BY ${tsCol} DESC) AS rn
-             FROM \`${ds}.facebook_ads\`
-             WHERE DATE(date) = @date AND LOWER(account_name) = 'rocknot'
-           )
-           SELECT SUM(spend) AS spend, COUNT(*) AS keys FROM ranked WHERE rn = 1`
-        : `SELECT SUM(max_spend) AS spend, COUNT(*) AS keys FROM (
-             SELECT ${keyCol} AS k, MAX(CAST(spend AS FLOAT64)) AS max_spend
-             FROM \`${ds}.facebook_ads\`
-             WHERE DATE(date) = @date AND LOWER(account_name) = 'rocknot'
-             GROUP BY k
-           )`;
-      dedupCandidate = await runQuery(dedupSql, params);
-    }
+         GROUP BY campaign
+       )`,
+      params
+    );
 
     return NextResponse.json({
       date,
       dashboardShows: dashboard[0],
-      keyColumnUsed: keyCol,
-      timestampColumnUsed: tsCol,
-      dedupedSpendCandidate: dedupCandidate,
-      duplicateKeysOnThisDate: perKey,
+      dedupByCampaign: dedupByCampaign[0],
+      perCampaignDatasource: byCampaign,
       spendByAccountName: byAccount,
       allColumns: cols.map(c => c.column_name),
     });

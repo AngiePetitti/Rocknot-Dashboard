@@ -73,15 +73,27 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   const params = { date_from: dateFrom, date_to: dateTo };
 
   const metaSql = `
+    -- Dedup to one row per (date, campaign) before summing — Windsor stores one
+    -- row per campaign per datasource/placement, each with the full campaign
+    -- spend, so a plain SUM inflates the total by the number of datasources.
+    WITH meta_deduped AS (
+      SELECT DATE(date) AS d, campaign,
+             MAX(CAST(spend AS FLOAT64)) AS spend,
+             MAX(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
+             MAX(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS conversions,
+             MAX(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks
+      FROM \`${ds}.facebook_ads\`
+      WHERE DATE(date) BETWEEN @date_from AND @date_to
+        AND LOWER(account_name) = 'rocknot'
+      GROUP BY d, campaign
+    )
     SELECT
-      SUM(CAST(spend AS FLOAT64)) AS spend,
-      SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
-      SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS conversions,
-      SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+      SUM(spend) AS spend,
+      SUM(revenue) AS revenue,
+      SUM(conversions) AS conversions,
+      SUM(clicks) AS clicks,
       0 AS impressions
-    FROM \`${ds}.facebook_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
-      AND LOWER(account_name) = 'rocknot'
+    FROM meta_deduped
   `;
 
   const googleSql = `
@@ -123,10 +135,13 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   `;
 
   const metaDailySql = `
-    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
-    FROM \`${ds}.facebook_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
-      AND LOWER(account_name) = 'rocknot'
+    SELECT d, SUM(spend) AS spend FROM (
+      SELECT DATE(date) AS d, campaign, MAX(CAST(spend AS FLOAT64)) AS spend
+      FROM \`${ds}.facebook_ads\`
+      WHERE DATE(date) BETWEEN @date_from AND @date_to
+        AND LOWER(account_name) = 'rocknot'
+      GROUP BY d, campaign
+    )
     GROUP BY d
   `;
 
@@ -145,12 +160,18 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   // Safe fallbacks using only columns confirmed to exist in BigQuery
   // Minimal fallbacks — spend + revenue only — in case Windsor changes the schema
   const metaSqlMin = `
-    SELECT SUM(CAST(spend AS FLOAT64)) AS spend,
-           SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
+    WITH meta_deduped AS (
+      SELECT DATE(date) AS d, campaign,
+             MAX(CAST(spend AS FLOAT64)) AS spend,
+             MAX(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
+      FROM \`${ds}.facebook_ads\`
+      WHERE DATE(date) BETWEEN @date_from AND @date_to
+        AND LOWER(account_name) = 'rocknot'
+      GROUP BY d, campaign
+    )
+    SELECT SUM(spend) AS spend, SUM(revenue) AS revenue,
            0 AS conversions, 0 AS clicks, 0 AS impressions
-    FROM \`${ds}.facebook_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
-      AND LOWER(account_name) = 'rocknot'
+    FROM meta_deduped
   `;
   const googleSqlMin = `
     SELECT SUM(CAST(spend AS FLOAT64)) AS spend,
