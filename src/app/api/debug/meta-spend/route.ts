@@ -78,11 +78,28 @@ export async function GET(request: NextRequest) {
       params
     );
 
+    // Dump all columns for any campaign with >1 row — lets us see what differs
+    // between rows (adset_daily_budget, source, spend etc.) to understand the
+    // duplication structure and pick the right dedup key / aggregation method.
+    const rawMultiRows = await runQuery(
+      `SELECT *
+       FROM \`${ds}.facebook_ads\`
+       WHERE DATE(date) = @date AND LOWER(account_name) = 'rocknot'
+         AND campaign IN (
+           SELECT campaign FROM \`${ds}.facebook_ads\`
+           WHERE DATE(date) = @date AND LOWER(account_name) = 'rocknot'
+           GROUP BY campaign HAVING COUNT(*) > 1
+         )
+       ORDER BY campaign, CAST(spend AS FLOAT64)`,
+      params
+    );
+
     return NextResponse.json({
       date,
       dashboardShows: dashboard[0],
       dedupByCampaign: dedupByCampaign[0],
       perCampaignDatasource: byCampaign,
+      rawRowsForMultiRowCampaigns: rawMultiRows,
       spendByAccountName: byAccount,
       allColumns: cols.map(c => c.column_name),
     });
