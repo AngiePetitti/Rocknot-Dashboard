@@ -54,6 +54,21 @@ interface CreativeRow {
 
 type AdSortKey = 'name' | 'platform' | 'spend' | 'roas' | 'ctr' | 'conversions' | 'costPerConversion' | 'clicks';
 
+interface ReconcilePlatform {
+  platform: string;
+  dashboardSpend: number;
+  referenceSpend: number | null;
+  referenceSource: string;
+  diff: number | null;
+  diffPct: number | null;
+  status: 'ok' | 'warn' | 'unavailable';
+}
+interface ReconcileResult {
+  range: { from: string; to: string };
+  allOk: boolean;
+  platforms: ReconcilePlatform[];
+}
+
 function formatDate(dateStr: string) {
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -71,6 +86,7 @@ export default function AdsContent() {
   const [creatives, setCreatives] = useState<CreativeRow[]>([]);
   const [status, setStatus] = useState<'loading' | 'live' | 'error'>('loading');
   const [adSort, setAdSort] = useState<{ key: AdSortKey; dir: 'asc' | 'desc' }>({ key: 'spend', dir: 'desc' });
+  const [reconcile, setReconcile] = useState<ReconcileResult | null>(null);
 
   useEffect(() => {
     setStatus('loading');
@@ -90,6 +106,15 @@ export default function AdsContent() {
       })
       .catch(() => setStatus('error'));
   }, [tfRaw, dateFrom, dateTo]);
+
+  // Reconciliation self-check runs over its own trailing window of complete
+  // days (independent of the selected timeframe), so it loads once on mount.
+  useEffect(() => {
+    fetch('/api/windsor/reconcile')
+      .then(r => r.json())
+      .then((data: ReconcileResult) => { if (Array.isArray(data?.platforms)) setReconcile(data); })
+      .catch(() => {});
+  }, []);
 
   const totalSpend = platforms.reduce((s, p) => s + p.spend, 0);
   const totalRevenue = platforms.reduce((s, p) => s + p.revenue, 0);
@@ -135,6 +160,34 @@ export default function AdsContent() {
       <Header title="Ad Performance" subtitle={subtitle}>
         <TimeframeSelector />
       </Header>
+
+      {reconcile && (() => {
+        const warns = reconcile.platforms.filter(p => p.status === 'warn');
+        const fmt = (n: number) => `$${Math.round(n).toLocaleString()}`;
+        if (warns.length === 0) {
+          return (
+            <div className="mb-4 flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+              <span>✓</span>
+              <span>
+                Ad spend reconciled against Meta Ads Manager &amp; Windsor for {reconcile.range.from} → {reconcile.range.to} — all platforms match.
+              </span>
+            </div>
+          );
+        }
+        return (
+          <div className="mb-4 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            <p className="font-semibold mb-1">⚠ Ad spend may be off (checked {reconcile.range.from} → {reconcile.range.to})</p>
+            <ul className="space-y-0.5">
+              {warns.map(p => (
+                <li key={p.platform}>
+                  <span className="font-medium">{p.platform}:</span> dashboard {fmt(p.dashboardSpend)} vs {p.referenceSource} {fmt(p.referenceSpend ?? 0)}
+                  {p.diff !== null && <> ({p.diff > 0 ? '+' : ''}{fmt(p.diff)}, {p.diffPct}%)</>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })()}
 
       {status === 'loading' && (
         <Card><p className="text-sm text-gray-400 text-center py-12">Loading ad performance data…</p></Card>
