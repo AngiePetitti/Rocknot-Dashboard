@@ -43,8 +43,8 @@ export async function GET(request: NextRequest) {
 
     // (2) Deduped candidate over the range: one row per (date, campaign) via
     //     MAX(spend), then summed.
-    const dedup = await runQuery<{ deduped_spend: number; groups: number }>(
-      `SELECT SUM(mx) AS deduped_spend, COUNT(*) AS groups FROM (
+    const dedup = await runQuery<{ deduped_spend: number; group_count: number }>(
+      `SELECT SUM(mx) AS deduped_spend, COUNT(*) AS group_count FROM (
          SELECT DATE(date) AS d, campaign, MAX(CAST(spend AS FLOAT64)) AS mx
          FROM \`${ds}.facebook_ads\` ${WHERE}
          GROUP BY d, campaign
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
       `SELECT d AS date,
               SUM(summed) AS summed_spend,
               SUM(mx) AS deduped_spend,
-              SUM(row_count) AS rows,
+              SUM(row_count) AS total_rows,
               COUNTIF(row_count > 1) AS multi_row_campaigns
        FROM (
          SELECT DATE(date) AS d, campaign,
