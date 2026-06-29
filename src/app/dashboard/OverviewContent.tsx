@@ -284,58 +284,6 @@ export default function OverviewContent() {
         </div>
       )}
 
-      {/* ── Login briefing: what's going well / what needs attention ── */}
-      {isLive && (callouts.good.length > 0 || callouts.attention.length > 0) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-          <Card accentColor="#86efac">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-base">✅</span>
-              <h2 className="text-sm font-bold text-gray-700">What&apos;s going well</h2>
-            </div>
-            {callouts.good.length === 0 ? (
-              <p className="text-xs text-gray-400 py-2">Nothing standout to highlight for this period.</p>
-            ) : (
-              <ul className="space-y-2.5">
-                {callouts.good.map((c, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span className="text-emerald-400 mt-0.5 text-xs">●</span>
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800 leading-tight">{c.title}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{c.detail}</p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          <Card accentColor="#fca5a5">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-base">⚠️</span>
-              <h2 className="text-sm font-bold text-gray-700">Needs attention</h2>
-            </div>
-            {callouts.attention.length === 0 ? (
-              <p className="text-xs text-gray-400 py-2">No issues flagged — looking clean.</p>
-            ) : (
-              <ul className="space-y-2.5">
-                {callouts.attention.map((c, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span className="text-red-400 mt-0.5 text-xs">●</span>
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800 leading-tight">{c.title}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{c.detail}</p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          <p className="lg:col-span-2 text-[11px] text-gray-400 -mt-1">
-            Sales, ads, customers &amp; returns reflect {isCustom && dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : (TIMEFRAME_LABELS[tf] || tf)}{compareOn ? ' (vs prior period)' : ''}. Inventory &amp; stock alerts are always current.
-          </p>
-        </div>
-      )}
 
       {revenueSource === 'none' && isLive && (
         <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-blue-700">
@@ -502,6 +450,59 @@ export default function OverviewContent() {
             subtitle="Sessions that checked out"
             accentColor="#a7f3d0"
           />
+        </div>
+      )}
+
+      {/* ── Briefing: what's going well / what needs attention ── */}
+      {isLive && (callouts.good.length > 0 || callouts.attention.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+          <Card accentColor="#86efac">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-base">✅</span>
+              <h2 className="text-sm font-bold text-gray-700">What&apos;s going well</h2>
+            </div>
+            {callouts.good.length === 0 ? (
+              <p className="text-xs text-gray-400 py-2">Nothing standout to highlight for this period.</p>
+            ) : (
+              <ul className="space-y-2.5">
+                {callouts.good.map((c, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-emerald-400 mt-0.5 text-xs">●</span>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800 leading-tight">{c.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{c.detail}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card accentColor="#fca5a5">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-base">⚠️</span>
+              <h2 className="text-sm font-bold text-gray-700">Needs attention</h2>
+            </div>
+            {callouts.attention.length === 0 ? (
+              <p className="text-xs text-gray-400 py-2">No issues flagged — looking clean.</p>
+            ) : (
+              <ul className="space-y-2.5">
+                {callouts.attention.map((c, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-red-400 mt-0.5 text-xs">●</span>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800 leading-tight">{c.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{c.detail}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <p className="lg:col-span-2 text-[11px] text-gray-400 -mt-1">
+            Sales, ads, customers &amp; returns reflect {isCustom && dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : (TIMEFRAME_LABELS[tf] || tf)}{compareOn ? ' (vs prior period)' : ''}. Inventory &amp; stock alerts are always current.
+          </p>
         </div>
       )}
 
