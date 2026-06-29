@@ -9,6 +9,8 @@ export interface DailyRevenue {
   revenue: number;
   orders: number;
   adSpend: number;
+  newCustomers?: number;
+  totalCustomers?: number;
 }
 
 export interface PlatformSpend {

@@ -9,6 +9,7 @@ import MetricCard from '@/src/components/ui/MetricCard';
 import Card from '@/src/components/ui/Card';
 import TimeframeSelector from '@/src/components/ui/TimeframeSelector';
 import RevenueChart from '@/src/components/charts/RevenueChart';
+import CACChart from '@/src/components/charts/CACChart';
 import SpendDonut from '@/src/components/charts/SpendDonut';
 
 const MER_GOAL = 3.5;
@@ -377,6 +378,20 @@ export default function OverviewContent() {
                 accentColor="#bbf7d0"
                 trend={metrics.returningCustomerRevenue ? { value: formatCurrency(metrics.returningCustomerRevenue) + ' revenue', positive: true } : undefined}
               />
+              <MetricCard
+                title="New Customer CAC"
+                value={metrics.newCustomers ? formatCurrency(metrics.totalAdSpend / metrics.newCustomers) : '—'}
+                subtitle="Ad spend ÷ new customers"
+                accentColor="#c7d2fe"
+              />
+              <MetricCard
+                title="Blended CAC"
+                value={(metrics.newCustomers ?? 0) + (metrics.returningCustomers ?? 0) > 0
+                  ? formatCurrency(metrics.totalAdSpend / ((metrics.newCustomers ?? 0) + (metrics.returningCustomers ?? 0)))
+                  : '—'}
+                subtitle="Ad spend ÷ all buyers"
+                accentColor="#bbf7d0"
+              />
             </>
           )}
           <MetricCard
@@ -469,6 +484,19 @@ export default function OverviewContent() {
           <SpendDonut data={livePlatformSpend ?? []} />
         </Card>
       </div>
+
+      {/* CAC over time — how acquisition cost moves with spend */}
+      {tfRaw !== 'today' && tfRaw !== 'yesterday' && revenueData.some(d => (d.newCustomers ?? 0) > 0 || (d.totalCustomers ?? 0) > 0) && (
+        <Card accentColor="#818cf8" className="mb-6">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-sm font-bold text-gray-700">Customer Acquisition Cost Trend</h2>
+          </div>
+          <p className="text-xs text-gray-400 mb-4">
+            Indigo = New CAC (spend ÷ new customers) · Green = Blended CAC (spend ÷ all buyers). Watch New CAC climb as spend scales.
+          </p>
+          <CACChart data={revenueData} />
+        </Card>
+      )}
 
       {/* Platform Performance Table */}
       <Card accentColor="#86efac">

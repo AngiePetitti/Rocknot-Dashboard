@@ -22,7 +22,7 @@ export interface OverviewResult {
     pctNew: number;
     pctReturning: number;
   };
-  revenueData: Array<{ date: string; revenue: number; orders: number; adSpend: number }>;
+  revenueData: Array<{ date: string; revenue: number; orders: number; adSpend: number; newCustomers: number; totalCustomers: number }>;
   revenueSource: 'shopify' | 'none';
 }
 
@@ -225,14 +225,50 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   `;
 
 
+  // Per-day customer counts for the CAC-over-time chart: new customers
+  // (first-ever order falls on that day) and total buyers (distinct customers
+  // who ordered that day). Combined with daily ad spend, the frontend derives
+  // New CAC (spend / new) and Blended CAC (spend / all buyers) per day.
+  const customerDailySql = `
+    WITH order_revenue AS (${dedupedOrdersCte(ds)}),
+    firsts AS (
+      SELECT order_customer_id AS cid, MIN(order_date) AS first_order
+      FROM order_revenue WHERE order_customer_id IS NOT NULL GROUP BY cid
+    ),
+    new_by_day AS (
+      SELECT first_order AS d, COUNT(*) AS new_customers
+      FROM firsts WHERE first_order BETWEEN @date_from AND @date_to GROUP BY d
+    ),
+    buyers_by_day AS (
+      SELECT order_date AS d, COUNT(DISTINCT order_customer_id) AS buyers
+      FROM order_revenue
+      WHERE order_date BETWEEN @date_from AND @date_to AND order_customer_id IS NOT NULL
+      GROUP BY d
+    ),
+    days AS (SELECT d FROM UNNEST(GENERATE_DATE_ARRAY(@date_from, @date_to)) AS d)
+    SELECT FORMAT_DATE('%Y-%m-%d', days.d) AS date,
+           IFNULL(new_by_day.new_customers, 0) AS new_customers,
+           IFNULL(buyers_by_day.buyers, 0)     AS buyers
+    FROM days
+    LEFT JOIN new_by_day   ON new_by_day.d   = days.d
+    LEFT JOIN buyers_by_day ON buyers_by_day.d = days.d
+    ORDER BY days.d
+  `;
+
   let adsQueryError: string | undefined;
-  const [shopifyDays, adsRows, custRows] = await Promise.all([
+  const [shopifyDays, adsRows, custRows, custDaily] = await Promise.all([
     fetchShopifyDaily(dateFrom, dateTo).catch(() => [] as ShopifyDay[]),
     runQuery<AdsRow>(adsSql, params)
       .catch(() => runQuery<AdsRow>(adsSqlLegacyTiktok, params))
       .catch((err: unknown) => { adsQueryError = String(err); return [] as AdsRow[]; }),
     runQuery<CustomerRow>(customerSql, params).catch(() => [] as CustomerRow[]),
+    runQuery<{ date: string; new_customers: number | null; buyers: number | null }>(customerDailySql, params).catch(() => [] as Array<{ date: string; new_customers: number | null; buyers: number | null }>),
   ]);
+
+  const custDailyByDate: Record<string, { newCustomers: number; totalCustomers: number }> = {};
+  for (const r of custDaily) {
+    custDailyByDate[r.date] = { newCustomers: Number(r.new_customers || 0), totalCustomers: Number(r.buyers || 0) };
+  }
 
   const cust = custRows[0] ?? {
     new_customers: 0,
@@ -271,7 +307,12 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     googleRevenue += Number(a?.google_revenue || 0);
     tiktokRevenue += Number(a?.tiktok_revenue || 0);
 
-    return { date, revenue: Math.round(revenue), orders, adSpend: Math.round(adSpend) };
+    const cd = custDailyByDate[date];
+    return {
+      date, revenue: Math.round(revenue), orders, adSpend: Math.round(adSpend),
+      newCustomers: cd?.newCustomers ?? 0,
+      totalCustomers: cd?.totalCustomers ?? 0,
+    };
   });
 
   const totalAdSpend = metaSpend + googleSpend + tiktokSpend;
