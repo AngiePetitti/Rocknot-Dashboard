@@ -108,12 +108,12 @@ export function buildCallouts(input: CalloutInput): CalloutResult {
 
   // ── Returns (reflects the selected period) ──
   if (returns && returns.returnRate !== undefined && returns.returnRate > 0) {
-    if (returns.returnRate > 5) {
+    if (returns.returnRate > 15) {
       attention.push({ title: 'Return rate high', detail: `Returns are ${returns.returnRate.toFixed(1)}% of sales this period.` });
-    } else if (returns.returnRate <= 3) {
-      good.push({ title: 'Returns low', detail: `Return rate is just ${returns.returnRate.toFixed(1)}% of sales.` });
+    } else if (returns.returnRate <= 8) {
+      good.push({ title: 'Returns in check', detail: `Return rate is ${returns.returnRate.toFixed(1)}% of sales — healthy for the category.` });
     }
-    const worst = returns.topReturnedProducts?.find(p => p.returnRate >= 15);
+    const worst = returns.topReturnedProducts?.find(p => p.returnRate >= 30);
     if (worst) attention.push({ title: 'High-return product', detail: `${worst.name} is being returned ${worst.returnRate.toFixed(0)}% of the time — check sizing/quality.` });
   }
 
