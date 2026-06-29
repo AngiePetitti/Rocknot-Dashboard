@@ -9,12 +9,14 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
+  ReferenceLine,
 } from 'recharts';
 import { DailyRevenue } from '@/src/lib/mockData';
 import { formatCurrency } from '@/src/lib/utils';
 
 interface CACChartProps {
   data: DailyRevenue[];
+  target?: number;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,7 +40,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 // Per-day CAC: New CAC = ad spend / new customers, Blended CAC = ad spend / all
 // buyers. Days with no acquired/served customers show a gap (null) rather than a
 // misleading spike or zero.
-export default function CACChart({ data }: CACChartProps) {
+export default function CACChart({ data, target }: CACChartProps) {
   const chartData = data.map(d => {
     const newCust = d.newCustomers ?? 0;
     const totalCust = d.totalCustomers ?? 0;
@@ -71,6 +73,14 @@ export default function CACChart({ data }: CACChartProps) {
         />
         <Tooltip content={<CustomTooltip />} />
         <Legend wrapperStyle={{ fontSize: 11 }} iconType="plainline" />
+        {target && target > 0 && (
+          <ReferenceLine
+            y={target}
+            stroke="#ef4444"
+            strokeDasharray="5 4"
+            label={{ value: `Target $${target}`, position: 'insideTopRight', fontSize: 10, fill: '#ef4444' }}
+          />
+        )}
         <Line
           type="monotone"
           dataKey="New CAC"

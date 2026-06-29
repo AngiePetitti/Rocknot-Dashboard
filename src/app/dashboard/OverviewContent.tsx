@@ -13,6 +13,7 @@ import CACChart from '@/src/components/charts/CACChart';
 import SpendDonut from '@/src/components/charts/SpendDonut';
 
 const MER_GOAL = 3.5;
+const TARGET_CAC = 100; // target New Customer CAC — flagged when exceeded
 
 const EMPTY_METRICS: LiveMetrics = {
   totalRevenue: 0,
@@ -382,8 +383,11 @@ export default function OverviewContent() {
               <MetricCard
                 title="New Customer CAC"
                 value={metrics.newCustomers ? formatCurrency(metrics.totalAdSpend / metrics.newCustomers) : '—'}
-                subtitle="Ad spend ÷ new customers"
+                subtitle={`Ad spend ÷ new customers · target $${TARGET_CAC}`}
                 accentColor="#c7d2fe"
+                valueColor={metrics.newCustomers
+                  ? (metrics.totalAdSpend / metrics.newCustomers > TARGET_CAC ? '#ef4444' : '#22c55e')
+                  : undefined}
               />
               <MetricCard
                 title="Blended CAC"
@@ -505,9 +509,9 @@ export default function OverviewContent() {
             <h2 className="text-sm font-bold text-gray-700">Customer Acquisition Cost Trend</h2>
           </div>
           <p className="text-xs text-gray-400 mb-4">
-            Indigo = New CAC (spend ÷ new customers) · Green = Blended CAC (spend ÷ all buyers). Watch New CAC climb as spend scales.
+            Indigo = New CAC (spend ÷ new customers) · Green = Blended CAC (spend ÷ all buyers) · Red dashes = ${TARGET_CAC} target. Watch New CAC climb as spend scales.
           </p>
-          <CACChart data={revenueData} />
+          <CACChart data={revenueData} target={TARGET_CAC} />
         </Card>
       )}
 

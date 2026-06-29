@@ -244,8 +244,11 @@ export default function AdsContent() {
               <MetricCard
                 title="New Customer CAC"
                 value={cac.newCustomers ? formatCurrency(cac.totalAdSpend / cac.newCustomers) : '—'}
-                subtitle={`Ad spend ÷ ${cac.newCustomers} new customers`}
+                subtitle={`Ad spend ÷ ${cac.newCustomers} new customers · target $100`}
                 accentColor="#c7d2fe"
+                valueColor={cac.newCustomers
+                  ? (cac.totalAdSpend / cac.newCustomers > 100 ? '#ef4444' : '#22c55e')
+                  : undefined}
               />
               <MetricCard
                 title="Blended CAC"
