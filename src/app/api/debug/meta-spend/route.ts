@@ -3,10 +3,11 @@ import { runQuery, getDataset, isBigQueryConfigured } from '@/src/lib/bigquery';
 
 export const dynamic = 'force-dynamic';
 
-// Diagnostic for the "Meta spend looks inflated" problem. Hit:
-//   /api/debug/meta-spend?date=2026-06-24
-// (defaults to yesterday, America/Los_Angeles). Reveals whether the
-// facebook_ads table has duplicate / multi-level rows that the dashboard's
+// Diagnostic for the "Meta spend looks inflated" problem.
+//   /api/debug/meta-spend                       → June-to-yesterday range
+//   /api/debug/meta-spend?from=2026-06-01&to=2026-06-28
+//   /api/debug/meta-spend?date=2026-06-24       → single day (also sets from=to)
+// Reveals whether facebook_ads has duplicate / multi-level rows the dashboard's
 // SUM(spend) is double-counting — the same class of bug already fixed for
 // Shopify orders via dedupedOrdersCte.
 export async function GET(request: NextRequest) {
@@ -16,94 +17,93 @@ export async function GET(request: NextRequest) {
   const ds = getDataset();
 
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  const d = new Date(todayStr);
-  d.setDate(d.getDate() - 1);
-  const yesterday = d.toISOString().split('T')[0];
-  const date = request.nextUrl.searchParams.get('date') || yesterday;
-  const params = { date, ds_unused: 0 } as Record<string, string | number>;
+  const yd = new Date(todayStr);
+  yd.setDate(yd.getDate() - 1);
+  const yesterday = yd.toISOString().split('T')[0];
+  const monthStart = `${todayStr.slice(0, 7)}-01`;
+
+  const single = request.nextUrl.searchParams.get('date');
+  const from = single || request.nextUrl.searchParams.get('from') || monthStart;
+  const to = single || request.nextUrl.searchParams.get('to') || yesterday;
+  const params = { from, to } as Record<string, string | number>;
+  const WHERE = `WHERE DATE(date) BETWEEN @from AND @to AND LOWER(account_name) = 'rocknot'`;
 
   try {
-    // What columns exist? Used to pick a per-ad key + a sync timestamp.
-    const cols = await runQuery<{ column_name: string; data_type: string }>(
-      `SELECT column_name, data_type FROM \`${ds}\`.INFORMATION_SCHEMA.COLUMNS WHERE table_name = 'facebook_ads' ORDER BY column_name`,
+    const cols = await runQuery<{ column_name: string }>(
+      `SELECT column_name FROM \`${ds}\`.INFORMATION_SCHEMA.COLUMNS WHERE table_name = 'facebook_ads' ORDER BY column_name`,
       {}
     );
-    const colNames = new Set(cols.map(c => c.column_name));
-    const has = (c: string) => colNames.has(c);
 
-    // The number the dashboard currently shows.
+    // (1) The number the dashboard currently shows over the range (plain SUM).
     const dashboard = await runQuery<{ spend: number; row_count: number }>(
       `SELECT SUM(CAST(spend AS FLOAT64)) AS spend, COUNT(*) AS row_count
-       FROM \`${ds}.facebook_ads\`
-       WHERE DATE(date) = @date AND LOWER(account_name) = 'rocknot'`,
+       FROM \`${ds}.facebook_ads\` ${WHERE}`,
       params
     );
 
-    // Breakdown by account_name — catches "other accounts inflating the total".
-    const byAccount = await runQuery(
-      `SELECT account_name, COUNT(*) AS row_count, SUM(CAST(spend AS FLOAT64)) AS spend
-       FROM \`${ds}.facebook_ads\`
-       WHERE DATE(date) = @date
-       GROUP BY account_name ORDER BY spend DESC`,
-      params
-    );
-
-    // Pick a granular key column to test for duplicate rows.
-    const keyCol = ['ad_id', 'adset_id', 'campaign_id', 'campaign_name'].find(has) || null;
-    // A sync/version timestamp, if Windsor stamps one, to pick the latest row.
-    const tsCol = ['_airbyte_emitted_at', 'updated_at', 'synced_at', '_synced_at', 'last_updated', 'date_start'].find(has) || null;
-
-    // Per-campaign + per-datasource breakdown — reveals whether datasource
-    // is the dimension that splits rows (same campaign spend repeated per datasource).
-    const byCampaign = await runQuery(
-      `SELECT campaign, datasource, COUNT(*) AS row_count,
-              SUM(CAST(spend AS FLOAT64)) AS summed_spend,
-              MAX(CAST(spend AS FLOAT64)) AS max_spend,
-              MIN(CAST(spend AS FLOAT64)) AS min_spend
-       FROM \`${ds}.facebook_ads\`
-       WHERE DATE(date) = @date AND LOWER(account_name) = 'rocknot'
-       GROUP BY campaign, datasource
-       ORDER BY summed_spend DESC`,
-      params
-    );
-
-    // Dedup candidate: one row per campaign (MAX spend), then sum.
-    const dedupByCampaign = await runQuery<{ deduped_spend: number; campaign_count: number }>(
-      `SELECT SUM(max_spend) AS deduped_spend, COUNT(*) AS campaign_count FROM (
-         SELECT campaign, MAX(CAST(spend AS FLOAT64)) AS max_spend
-         FROM \`${ds}.facebook_ads\`
-         WHERE DATE(date) = @date AND LOWER(account_name) = 'rocknot'
-         GROUP BY campaign
+    // (2) Deduped candidate over the range: one row per (date, campaign) via
+    //     MAX(spend), then summed.
+    const dedup = await runQuery<{ deduped_spend: number; groups: number }>(
+      `SELECT SUM(mx) AS deduped_spend, COUNT(*) AS groups FROM (
+         SELECT DATE(date) AS d, campaign, MAX(CAST(spend AS FLOAT64)) AS mx
+         FROM \`${ds}.facebook_ads\` ${WHERE}
+         GROUP BY d, campaign
        )`,
       params
     );
 
-    // Dump all columns for any campaign with >1 row — lets us see what differs
-    // between rows (adset_daily_budget, source, spend etc.) to understand the
-    // duplication structure and pick the right dedup key / aggregation method.
-    const rawMultiRows = await runQuery(
-      `SELECT *
-       FROM \`${ds}.facebook_ads\`
-       WHERE DATE(date) = @date AND LOWER(account_name) = 'rocknot'
-         AND campaign IN (
-           SELECT campaign FROM \`${ds}.facebook_ads\`
-           WHERE DATE(date) = @date AND LOWER(account_name) = 'rocknot'
-           GROUP BY campaign HAVING COUNT(*) > 1
-         )
-       ORDER BY campaign, CAST(spend AS FLOAT64)`,
+    // (3) Per-day: summed vs deduped, and how many (date,campaign) groups have
+    //     more than one row (the duplication signal).
+    const perDay = await runQuery(
+      `SELECT d AS date,
+              SUM(summed) AS summed_spend,
+              SUM(mx) AS deduped_spend,
+              SUM(row_count) AS rows,
+              COUNTIF(row_count > 1) AS multi_row_campaigns
+       FROM (
+         SELECT DATE(date) AS d, campaign,
+                SUM(CAST(spend AS FLOAT64)) AS summed,
+                MAX(CAST(spend AS FLOAT64)) AS mx,
+                COUNT(*) AS row_count
+         FROM \`${ds}.facebook_ads\` ${WHERE}
+         GROUP BY d, campaign
+       )
+       GROUP BY date ORDER BY date`,
       params
     );
 
+    // (4) Raw rows for one day's multi-row campaigns, so we can see EXACTLY what
+    //     differs between duplicate rows (date timestamp, datasource, source,
+    //     budgets, spend). Uses the single date if given, else the worst day.
+    const inspectDate = single
+      || (perDay as Array<{ date: { value?: string } | string; multi_row_campaigns: number }>)
+        .filter(r => Number(r.multi_row_campaigns) > 0)
+        .map(r => (typeof r.date === 'string' ? r.date : r.date.value || ''))
+        .pop()
+      || to;
+    const rawMultiRows = await runQuery(
+      `SELECT *
+       FROM \`${ds}.facebook_ads\`
+       WHERE DATE(date) = @inspect AND LOWER(account_name) = 'rocknot'
+         AND campaign IN (
+           SELECT campaign FROM \`${ds}.facebook_ads\`
+           WHERE DATE(date) = @inspect AND LOWER(account_name) = 'rocknot'
+           GROUP BY campaign HAVING COUNT(*) > 1
+         )
+       ORDER BY campaign, date, CAST(spend AS FLOAT64)`,
+      { inspect: inspectDate }
+    );
+
     return NextResponse.json({
-      date,
-      dashboardShows: dashboard[0],
-      dedupByCampaign: dedupByCampaign[0],
-      perCampaignDatasource: byCampaign,
+      range: { from, to },
+      dashboardShowsForRange: dashboard[0],
+      dedupedCandidateForRange: dedup[0],
+      perDay,
+      rawRowsInspectDate: inspectDate,
       rawRowsForMultiRowCampaigns: rawMultiRows,
-      spendByAccountName: byAccount,
       allColumns: cols.map(c => c.column_name),
     });
   } catch (err) {
-    return NextResponse.json({ error: String(err), date });
+    return NextResponse.json({ error: String(err), from, to });
   }
 }
