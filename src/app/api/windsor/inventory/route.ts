@@ -76,35 +76,6 @@ function isPublicBag(title: string, category: string, keys: Set<string>): boolea
 // clause — Rocknot splits one physical bag across multiple listings by strap
 // type (e.g. "... BELT BAG + CHAIN STRAP - Black" vs "+ LACE STRAP - Black"),
 // so they must group together and be counted once, not once per strap type.
-// Strip every "+ <accessory>" clause that appears BEFORE the color dash —
-// covers straps (CHAIN/LACE STRAP, NO SWING STRAP), crowns (MAGNUM/PETITE
-// CROWN), TWIN, CHAIN, etc. A bag's color comes after the first " - ", and may
-// itself contain a "+" (e.g. "Olive + Antique Gold"), so we only strip add-on
-// clauses up to that first dash and leave the color intact.
-function stripBagAccessories(title: string): string {
-  const dash = title.search(/[-–—]/);
-  const head = dash >= 0 ? title.slice(0, dash) : title;
-  const tail = dash >= 0 ? title.slice(dash) : '';
-  return head.replace(/\s*\+\s*[^-–—]*/g, ' ') + tail;
-}
-
-function bagGroupKey(title: string): string {
-  return stripBagAccessories(title)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
-// Display name for a grouped bag: strip "+ <accessory>" clauses and tidy up.
-function cleanBagDisplayName(title: string): string {
-  return stripBagAccessories(title)
-    .replace(/\s{2,}/g, ' ')
-    .replace(/\s*([-–—])\s*/g, ' $1 ')
-    .replace(/\s*[-–—·|:]\s*$/, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim() || title.trim();
-}
-
 async function runShopifyQL(query: string) {
   const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
@@ -257,73 +228,133 @@ export async function GET() {
 
     const strip = ({ _isBag, _isGiftCard, _isHandbag, _isPublicBag, _bagCovered, _bagBare, _isSale, _rawProduct, _startingStock, ...rest }: RawItem): InventoryItem => rest;
 
-    // ── True bag stock ────────────────────────────────────────────────────
-    // Bags come in several listing shapes; we reduce each to its TRUE count:
-    //  1. "bag only" listings        → every variant is a real count (keep all)
-    //  2. simple handbags            → one "Default Title" variant per color
-    //  3. bare-bag variant present   → "NO SWING STRAP" is the true count
-    //  4. strap mix-match only       → all variants repeat the same bag count
-    // Cases 2-4 are all handled by ONE rule: per color-group, the true on-hand
-    // is the MAX units across that group's variants (the bare bag is never less
-    // than any strap subset, and identical repeats collapse to themselves).
-    // Public listings for a line that HAS a bag-only listing are skipped — the
-    // bag-only listing is the source of truth (avoids double counting).
-    const bagOnlyRows = allRows.filter(r => r._isBag && !r._isGiftCard);
+    // ── Curated Bags section ──────────────────────────────────────────────
+    // The Bags section shows ONLY actual handbags in stock — one row per bag
+    // per color, with no strap-type variants and no "+ strap/crown/chain"
+    // bundle listings. Each bag's true on-hand is read by an explicit rule
+    // confirmed listing-by-listing with the Rocknot team (June 2026). Anything
+    // not matched below is intentionally excluded from the section. Rows
+    // consumed as bags are also excluded from the main list and counted once
+    // in valuation, so nothing double-counts.
+    const consumed = new Set<string>();
+    const keyOf = (r: RawItem) => `${r._rawProduct}||${r.variant}`;
+    const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+    const disp = (t: string) => t.replace(/\s{2,}/g, ' ').trim();
+    const sumBy = (rows: RawItem[], f: (r: RawItem) => number) => rows.reduce((s, r) => s + f(r), 0);
+    const maxBy = (rows: RawItem[], f: (r: RawItem) => number) => rows.reduce((a, b) => (f(b) > f(a) ? b : a));
 
-    const publicBagGroups = new Map<string, RawItem[]>();
+    const byTitle = new Map<string, RawItem[]>();
     for (const r of allRows) {
-      if (!r._isPublicBag || r._isGiftCard || r._bagCovered) continue;
-      const key = bagGroupKey(r._rawProduct);
-      const g = publicBagGroups.get(key);
-      if (g) g.push(r); else publicBagGroups.set(key, [r]);
+      const t = norm(r._rawProduct);
+      const g = byTitle.get(t);
+      if (g) g.push(r); else byTitle.set(t, [r]);
     }
-    const representativeBags: RawItem[] = [];
-    publicBagGroups.forEach(grp => {
-      // The true count comes from the bare (strapless) listing — the standalone
-      // bag whose title has no "+ accessory" clause (its highest-stock variant,
-      // e.g. ORI Hobo's "NO SWING STRAP", is the real on-hand). Bags that exist
-      // ONLY as "+ strap/crown/chain" mix-and-match combos have no trustworthy
-      // count (per-combo numbers are inconsistent) and aren't true bags, so they
-      // are excluded from the section entirely.
-      const bareRows = grp.filter(r => r._bagBare);
-      if (!bareRows.length) return;
-      const rep = bareRows.reduce((a, b) =>
-        (b.currentStock > a.currentStock ||
-          (b.currentStock === a.currentStock && b.stockValue > a.stockValue)) ? b : a);
-      // Sum sales across all variants in the group — individual variants each
-      // only capture a slice of total bag sales (one strap option at a time).
-      const totalSold = grp.reduce((s, r) => s + r.unitsSold90d, 0);
-      const totalDailyVelocity = Math.round((totalSold / PERIOD_DAYS) * 100) / 100;
-      const daysRem = rep.currentStock <= 0
-        ? (totalDailyVelocity > 0 ? 0 : null)
-        : totalDailyVelocity > 0
-          ? Math.round(rep.currentStock / totalDailyVelocity)
-          : null;
-      const reorderQty = totalDailyVelocity > 0
-        ? Math.max(0, Math.round(totalDailyVelocity * SUPPLY_TARGET_DAYS) - rep.currentStock)
-        : 0;
-      representativeBags.push({
-        ...rep,
-        product: cleanBagDisplayName(rep._rawProduct),
-        variant: '',
-        unitsSold90d: totalSold,
-        dailyVelocity: totalDailyVelocity,
-        daysRemaining: daysRem,
-        status: statusFor(rep.currentStock, daysRem),
-        reorderQty,
-      });
-    });
 
-    // Bags section — true stock, always shown (even at zero), lowest first.
-    const bags: InventoryItem[] = [...bagOnlyRows, ...representativeBags]
-      .map(strip)
-      .sort((a, b) => a.currentStock - b.currentStock);
+    const mkBag = (label: string, stock: number, sold: number, value: number, retail: number): InventoryItem => {
+      const dailyVelocity = Math.round((sold / PERIOD_DAYS) * 100) / 100;
+      const daysRemaining = stock <= 0
+        ? (dailyVelocity > 0 ? 0 : null)
+        : dailyVelocity > 0 ? Math.round(stock / dailyVelocity) : null;
+      const reorderQty = dailyVelocity > 0
+        ? Math.max(0, Math.round(dailyVelocity * SUPPLY_TARGET_DAYS) - stock) : 0;
+      return {
+        id: `bag:${label}`,
+        product: label, variant: '', category: 'Handbags',
+        currentStock: stock, unitsSold90d: sold, dailyVelocity, daysRemaining,
+        sellThroughRate: 0, status: statusFor(stock, daysRemaining), reorderQty,
+        stockValue: value, retailValue: retail,
+      };
+    };
+    const consume = (rows: RawItem[]) => { for (const r of rows) consumed.add(keyOf(r)); };
 
-    // Main list: straps, inserts, jewelry, accessories, etc. (everything that
-    // isn't a bag). Keep a SKU if it has stock OR sold units in the window.
-    // Gift cards and ALL bag listings are excluded (bags have their own section).
+    const bags: InventoryItem[] = [];
+
+    // A) Simple bags (sold without a strap): one row per product title. Stock is
+    //    the shared on-hand (MAX across variants — collapses identical strap-
+    //    length repeats), sales summed across variants.
+    const SIMPLE = [/^alli\b.*bucket/i, /^ariel\b.*bag/i, /^duo bag\b/i, /^evy\b/i,
+      /^fia\b/i, /^infinity belt bag\b/i, /^lyla\b.*pouch/i, /^max belt bag\b/i,
+      /^noa fold over\b/i, /^zuma straw tote\b/i];
+
+    // B) Single listings counted per color variant.
+    const PER_VARIANT: Array<{ test: (t: string) => boolean; label: (v: string) => string }> = [
+      { test: t => /^pebble coin purse/i.test(t), label: v => `Pebble Coin Purse - ${v}` },
+      { test: t => norm(t) === 'eden 2-in-1 clutch', label: v => `Eden 2-in-1 Clutch - ${v}` },
+      { test: t => norm(t) === 'maya phone bag (bag only)', label: v => `MAYA Phone Bag - ${v}` },
+    ];
+
+    // F) The original Transformer — the clean "Transformer - <Color>" listings.
+    const ORIG_TRANSFORMER = new Set([
+      'transformer - crystal', 'transformer - gunmetal', 'transformer - champagne bubbles',
+    ]);
+
+    for (const rows of Array.from(byTitle.values())) {
+      const title = rows[0]._rawProduct;
+      const t = norm(title);
+
+      // A) Simple no-strap families (skip any "+"/strap bundle listing).
+      if (!/\+|strap/i.test(title) && SIMPLE.some(re => re.test(title))) {
+        const rep = maxBy(rows, r => r.currentStock);
+        bags.push(mkBag(disp(title), rep.currentStock, sumBy(rows, r => r.unitsSold90d), rep.stockValue, rep.retailValue));
+        consume(rows); continue;
+      }
+
+      // B) Per-color single listings.
+      const pv = PER_VARIANT.find(s => s.test(title));
+      if (pv) {
+        for (const r of rows) bags.push(mkBag(pv.label(r.variant), r.currentStock, r.unitsSold90d, r.stockValue, r.retailValue));
+        consume(rows); continue;
+      }
+
+      // C) Galaxy bag-only: sum the closure sub-variants per color.
+      if (t === 'galaxy bag (bag only)') {
+        const byColor = new Map<string, RawItem[]>();
+        for (const r of rows) {
+          const color = (r.variant.split('/')[0] || '').trim() || r.variant;
+          const g = byColor.get(color); if (g) g.push(r); else byColor.set(color, [r]);
+        }
+        byColor.forEach((cr, color) => bags.push(mkBag(`Galaxy Bag - ${color}`,
+          sumBy(cr, r => r.currentStock), sumBy(cr, r => r.unitsSold90d), sumBy(cr, r => r.stockValue), sumBy(cr, r => r.retailValue))));
+        consume(rows); continue;
+      }
+
+      // D) Drink Bag — single bag-only listing.
+      if (t === 'drink bag (bag only)') {
+        bags.push(mkBag('Drink Bag', sumBy(rows, r => r.currentStock), sumBy(rows, r => r.unitsSold90d), sumBy(rows, r => r.stockValue), sumBy(rows, r => r.retailValue)));
+        consume(rows); continue;
+      }
+
+      // E) Transformer 2 — the two "BAG ONLY - INVENTORY" listings.
+      if (/^transformer2\b.*bag only/i.test(title)) {
+        const color = /anti(que)?\s*gold/i.test(title) ? 'Antique Gold' : 'Crystal';
+        bags.push(mkBag(`TRANSFORMER 2 - ${color}`, sumBy(rows, r => r.currentStock), sumBy(rows, r => r.unitsSold90d), sumBy(rows, r => r.stockValue), sumBy(rows, r => r.retailValue)));
+        consume(rows); continue;
+      }
+
+      // F) The original Transformer — clean "Transformer - <Color>" listings.
+      if (ORIG_TRANSFORMER.has(t)) {
+        const color = (title.split(/[-–—]/)[1] || '').trim();
+        const rep = maxBy(rows, r => r.currentStock);
+        bags.push(mkBag(`THE TRANSFORMER - ${color}`, rep.currentStock, sumBy(rows, r => r.unitsSold90d), rep.stockValue, rep.retailValue));
+        consume(rows); continue;
+      }
+
+      // G) NO SWING STRAP bags (ORI Hobo, Hezi): the bare bag count per color.
+      if (/^ori hobo bag\s*-/i.test(title) || /^hezi (leather )?shoulder bag\s*-/i.test(title)) {
+        const nss = rows.find(r => norm(r.variant) === 'no swing strap');
+        if (nss) bags.push(mkBag(disp(title), nss.currentStock, sumBy(rows, r => r.unitsSold90d), nss.stockValue, nss.retailValue));
+        consume(rows); continue;
+      }
+    }
+
+    bags.sort((a, b) => a.currentStock - b.currentStock);
+
+    // Main list: everything that isn't a bag (straps, inserts, jewelry, etc.).
+    // Excludes gift cards, bag-ish rows, and anything consumed by the curated
+    // bag list. Keep a SKU if it has stock OR sold units in the window.
     const items: InventoryItem[] = allRows
-      .filter(r => !r._isBag && !r._isGiftCard && !r._isHandbag && !r._isPublicBag && (r.currentStock > 0 || r.unitsSold90d > 0))
+      .filter(r => !r._isGiftCard && !r._isBag && !r._isHandbag && !r._isPublicBag
+        && !consumed.has(keyOf(r)) && (r.currentStock > 0 || r.unitsSold90d > 0))
       .map(strip);
 
     // Counts span the main list plus bags so the tiles reflect everything.
@@ -336,17 +367,16 @@ export async function GET() {
     const categories = Array.from(new Set(items.map(i => i.category))).filter(Boolean).sort();
 
     // ── Inventory $ insights ──────────────────────────────────────────────
-    // Value over everything physically on hand that has a real cost figure
-    // entered in Shopify (stockValue 0 = no cost set, left out so totals only
-    // reflect known costs). Excluded:
-    //  - gift cards (not physical inventory)
-    //  - PHANTOM public bag variants — bags are counted ONCE via the true-bag
-    //    set (bag-only listings + one representative per public color-group).
-    const normalRows = allRows.filter(r => !r._isGiftCard && !r._isBag && !r._isPublicBag);
-    const valued = [...normalRows, ...bagOnlyRows, ...representativeBags]
-      .filter(r => r.currentStock > 0 && r.stockValue > 0);
-    const totalCostValue = valued.reduce((s, r) => s + r.stockValue, 0);
-    const totalRetailValue = valued.reduce((s, r) => s + r.retailValue, 0);
+    // Value everything physically on hand that has a real cost figure in
+    // Shopify (stockValue 0 = no cost set, left out). Bags are counted ONCE via
+    // the curated set; their source rows are excluded from normalRows via
+    // `consumed`, so nothing double-counts. Gift cards and phantom bag/bundle
+    // listings are excluded too.
+    const normalRows = allRows.filter(r => !r._isGiftCard && !r._isBag && !r._isPublicBag && !r._isHandbag && !consumed.has(keyOf(r)));
+    const valued = normalRows.filter(r => r.currentStock > 0 && r.stockValue > 0);
+    const bagsValued = bags.filter(b => b.currentStock > 0 && b.stockValue > 0);
+    const totalCostValue = valued.reduce((s, r) => s + r.stockValue, 0) + bagsValued.reduce((s, b) => s + b.stockValue, 0);
+    const totalRetailValue = valued.reduce((s, r) => s + r.retailValue, 0) + bagsValued.reduce((s, b) => s + b.retailValue, 0);
     const potentialProfit = Math.max(0, totalRetailValue - totalCostValue);
 
     // Slow / dead stock = capital genuinely stuck on the shelf.
