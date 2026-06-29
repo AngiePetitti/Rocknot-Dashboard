@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isBigQueryConfigured, tableExists } from '@/src/lib/bigquery';
-import { getProductSales } from '@/src/lib/bqProducts';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 
 export const dynamic = 'force-dynamic';
@@ -83,10 +82,8 @@ export async function GET(request: NextRequest) {
   try {
     const { from, to } = rangeForTf(tfRaw, dateFrom, dateTo);
 
-    // BigQuery path — uses Windsor-synced shopify_products table
-    const hasBqProducts = isBigQueryConfigured() && await tableExists('shopify_products');
-
     if (searchParams.get('debug') === 'true' && isBigQueryConfigured()) {
+      const hasBqProducts = await tableExists('shopify_products');
       const { runQuery, getDataset } = await import('@/src/lib/bigquery');
       const ds = getDataset();
       const cols = hasBqProducts ? await runQuery(`
@@ -110,17 +107,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ hasBqProducts, columns: cols, sample, withTitle, counts, from, to });
     }
 
-    if (hasBqProducts) {
-      const bqResult = await getProductSales(from, to).catch(() => null);
-      // Only use BigQuery if it actually returned products. The shopify_products
-      // table can be empty/stale (e.g. not synced for recent days), in which case
-      // we fall through to ShopifyQL — the source of truth that always has data.
-      if (bqResult && bqResult.products.length > 0) {
-        const { products, totalRevenue, totalUnits } = bqResult;
-        return NextResponse.json({ source: 'shopify_live', products, totalRevenue, totalUnits }, { headers: cacheHeaders(tfRaw === 'today') });
-      }
-      // BigQuery table empty or query failed — fall through to ShopifyQL
-    }
+    // Products come straight from ShopifyQL — the source of truth that has
+    // category, COGS and gross profit per product. (The Windsor-synced
+    // shopify_products BigQuery table has no cost data and is not used here.)
 
     // Per-product breakdown (top 50) plus a store-wide aggregate so the
     // "Total Revenue" card and "% of total" reflect ALL products, not just
