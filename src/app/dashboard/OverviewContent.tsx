@@ -1,7 +1,8 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { buildCallouts } from '@/src/lib/callouts';
 import { Timeframe, PlatformSpend, DailyRevenue } from '@/src/lib/mockData';
 import { formatCurrency, formatROAS, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
@@ -76,6 +77,10 @@ export default function OverviewContent() {
   const [latestAvailableDate, setLatestAvailableDate] = useState<string | null>(null);
   const [shopifyDataLag, setShopifyDataLag] = useState<boolean>(false);
   const [shopifyLatestDate, setShopifyLatestDate] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [invSnapshot, setInvSnapshot] = useState<any | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [returnsSnapshot, setReturnsSnapshot] = useState<any | null>(null);
   const [revenueSource, setRevenueSource] = useState<'shopify' | 'none' | null>(null);
   const [adsError, setAdsError] = useState<string | null>(null);
 
@@ -153,6 +158,27 @@ export default function OverviewContent() {
         setLastUpdated(new Date().toLocaleTimeString());
       });
   }, [tfRaw, dateFrom, dateTo, compareOn]);
+
+  // Inventory (current stock — same regardless of timeframe) and returns (for
+  // the selected period) power the login briefing. Fetched separately so they
+  // never delay the main metric cards.
+  useEffect(() => {
+    const p = new URLSearchParams({ tf: tfRaw });
+    if (dateFrom) p.set('date_from', dateFrom);
+    if (dateTo) p.set('date_to', dateTo);
+    fetch('/api/windsor/inventory').then(r => r.json()).then(setInvSnapshot).catch(() => setInvSnapshot(null));
+    fetch(`/api/windsor/returns?${p}`).then(r => r.json()).then(setReturnsSnapshot).catch(() => setReturnsSnapshot(null));
+  }, [tfRaw, dateFrom, dateTo]);
+
+  const callouts = useMemo(() => buildCallouts({
+    metrics,
+    prior: priorPeriod,
+    inventory: invSnapshot && invSnapshot.source === 'shopify_live' ? invSnapshot : null,
+    returns: returnsSnapshot && returnsSnapshot.source === 'shopify_live' ? returnsSnapshot : null,
+    merGoal: MER_GOAL,
+    targetCac: TARGET_CAC,
+    comparing: compareOn,
+  }), [metrics, priorPeriod, invSnapshot, returnsSnapshot, compareOn]);
 
   const merColor = metrics.mer >= MER_GOAL ? '#22c55e' : '#ef4444';
   const merLabel = metrics.mer >= MER_GOAL ? '✓ Above Goal' : '✗ Below Goal';
@@ -255,6 +281,59 @@ export default function OverviewContent() {
         <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-red-700">
           <span>⚠</span>
           <span>Ad spend data unavailable — BigQuery query failed. Revenue and order data are unaffected. Check the API logs for details.</span>
+        </div>
+      )}
+
+      {/* ── Login briefing: what's going well / what needs attention ── */}
+      {isLive && (callouts.good.length > 0 || callouts.attention.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+          <Card accentColor="#86efac">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-base">✅</span>
+              <h2 className="text-sm font-bold text-gray-700">What&apos;s going well</h2>
+            </div>
+            {callouts.good.length === 0 ? (
+              <p className="text-xs text-gray-400 py-2">Nothing standout to highlight for this period.</p>
+            ) : (
+              <ul className="space-y-2.5">
+                {callouts.good.map((c, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-emerald-400 mt-0.5 text-xs">●</span>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800 leading-tight">{c.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{c.detail}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card accentColor="#fca5a5">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-base">⚠️</span>
+              <h2 className="text-sm font-bold text-gray-700">Needs attention</h2>
+            </div>
+            {callouts.attention.length === 0 ? (
+              <p className="text-xs text-gray-400 py-2">No issues flagged — looking clean.</p>
+            ) : (
+              <ul className="space-y-2.5">
+                {callouts.attention.map((c, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-red-400 mt-0.5 text-xs">●</span>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800 leading-tight">{c.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{c.detail}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <p className="lg:col-span-2 text-[11px] text-gray-400 -mt-1">
+            Sales, ads, customers &amp; returns reflect {isCustom && dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : (TIMEFRAME_LABELS[tf] || tf)}{compareOn ? ' (vs prior period)' : ''}. Inventory &amp; stock alerts are always current.
+          </p>
         </div>
       )}
 
