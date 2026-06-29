@@ -42,6 +42,7 @@ interface LiveMetrics {
   returningCustomerRevenue?: number;
   pctNew?: number;
   pctReturning?: number;
+  conversionRate?: number;
 }
 
 interface PriorPeriod {
@@ -405,6 +406,18 @@ export default function OverviewContent() {
             value={formatCurrency(metrics.googleSpend ?? 0)}
             subtitle={`${metrics.googleSpend && metrics.totalAdSpend ? ((metrics.googleSpend / metrics.totalAdSpend) * 100).toFixed(0) : 0}% of total spend`}
             accentColor="#fef08a"
+          />
+          <MetricCard
+            title="TikTok Spend"
+            value={formatCurrency(metrics.tiktokSpend ?? 0)}
+            subtitle={`${metrics.tiktokSpend && metrics.totalAdSpend ? ((metrics.tiktokSpend / metrics.totalAdSpend) * 100).toFixed(0) : 0}% of total spend`}
+            accentColor="#fbcfe8"
+          />
+          <MetricCard
+            title="Website Conversion Rate"
+            value={metrics.conversionRate ? `${metrics.conversionRate.toFixed(1)}%` : '—'}
+            subtitle="Sessions that checked out"
+            accentColor="#a7f3d0"
           />
         </div>
       )}

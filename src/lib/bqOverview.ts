@@ -21,6 +21,7 @@ export interface OverviewResult {
     returningCustomerRevenue: number;
     pctNew: number;
     pctReturning: number;
+    conversionRate: number;
   };
   revenueData: Array<{ date: string; revenue: number; orders: number; adSpend: number; newCustomers: number; totalCustomers: number }>;
   revenueSource: 'shopify' | 'none';
@@ -94,6 +95,44 @@ export async function fetchShopifyDaily(from: string, to: string): Promise<Shopi
     netSales: parseFloat(cell(r, 'net_sales') || '0'),
     totalSales: parseFloat(cell(r, 'total_sales') || '0'),
   }));
+}
+
+// Website conversion rate from ShopifyQL sessions — the same number Shopify's
+// own reports show: converting sessions ÷ total sessions, as a percentage.
+export async function fetchShopifyConversion(from: string, to: string): Promise<number | null> {
+  if (!SHOPIFY_TOKEN) return null;
+  const ql = `FROM sessions SHOW sessions, sessions_that_completed_checkout SINCE ${from} UNTIL ${to}`;
+  try {
+    const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
+      body: JSON.stringify({
+        query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) {
+          tableData { rows columns { name } } parseErrors
+        }}`,
+      }),
+      cache: 'no-store',
+    });
+    const json = await res.json();
+    const q = json?.data?.shopifyqlQuery;
+    if (typeof q?.parseErrors === 'string' && q.parseErrors) return null;
+    const cols: { name: string }[] = q?.tableData?.columns || [];
+    const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
+    if (!rows.length) return null;
+    const cell = (r: Record<string, string> | string[], name: string): string => {
+      if (Array.isArray(r)) {
+        const i = cols.findIndex(c => c.name === name);
+        return i >= 0 ? (r[i] ?? '') : '';
+      }
+      return r[name] ?? '';
+    };
+    const sessions = parseFloat(cell(rows[0], 'sessions') || '0');
+    const converted = parseFloat(cell(rows[0], 'sessions_that_completed_checkout') || '0');
+    if (sessions <= 0) return null;
+    return Math.round((converted / sessions) * 1000) / 10; // one-decimal %
+  } catch {
+    return null;
+  }
 }
 
 export interface ShopifyCustomerSplit {
@@ -256,13 +295,14 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   `;
 
   let adsQueryError: string | undefined;
-  const [shopifyDays, adsRows, custRows, custDaily] = await Promise.all([
+  const [shopifyDays, adsRows, custRows, custDaily, conversionRate] = await Promise.all([
     fetchShopifyDaily(dateFrom, dateTo).catch(() => [] as ShopifyDay[]),
     runQuery<AdsRow>(adsSql, params)
       .catch(() => runQuery<AdsRow>(adsSqlLegacyTiktok, params))
       .catch((err: unknown) => { adsQueryError = String(err); return [] as AdsRow[]; }),
     runQuery<CustomerRow>(customerSql, params).catch(() => [] as CustomerRow[]),
     runQuery<{ date: string; new_customers: number | null; buyers: number | null }>(customerDailySql, params).catch(() => [] as Array<{ date: string; new_customers: number | null; buyers: number | null }>),
+    fetchShopifyConversion(dateFrom, dateTo).catch(() => null),
   ]);
 
   const custDailyByDate: Record<string, { newCustomers: number; totalCustomers: number }> = {};
@@ -342,6 +382,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       returningCustomerRevenue: Math.round(returningCustomerRevenue),
       pctNew: totalCust > 0 ? Math.round((newCustomers / totalCust) * 1000) / 10 : 0,
       pctReturning: totalCust > 0 ? Math.round((returningCustomers / totalCust) * 1000) / 10 : 0,
+      conversionRate: conversionRate ?? 0,
     },
     revenueData,
     revenueSource: totalRevenue > 0 ? 'shopify' : 'none',

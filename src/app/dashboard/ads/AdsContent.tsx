@@ -87,6 +87,7 @@ export default function AdsContent() {
   const [status, setStatus] = useState<'loading' | 'live' | 'error'>('loading');
   const [adSort, setAdSort] = useState<{ key: AdSortKey; dir: 'asc' | 'desc' }>({ key: 'spend', dir: 'desc' });
   const [reconcile, setReconcile] = useState<ReconcileResult | null>(null);
+  const [cac, setCac] = useState<{ newCustomers: number; returningCustomers: number; totalAdSpend: number } | null>(null);
 
   useEffect(() => {
     setStatus('loading');
@@ -97,11 +98,17 @@ export default function AdsContent() {
     Promise.all([
       fetch(`/api/windsor/ads?${adsParams}`).then(r => r.json()),
       fetch(`/api/windsor/creatives?tf=${tfRaw}`).then(r => r.json()),
+      // Customer counts (for CAC) come from the overview endpoint, same timeframe.
+      fetch(`/api/windsor?${adsParams}`).then(r => r.json()).catch(() => null),
     ])
-      .then(([adsData, creativesData]) => {
+      .then(([adsData, creativesData, overviewData]) => {
         setPlatforms(adsData.platforms || []);
         setDailySpend(adsData.dailySpend || []);
         setCreatives((creativesData.creatives || []).slice(0, 20));
+        const m = overviewData?.metrics;
+        setCac(m && m.newCustomers !== undefined
+          ? { newCustomers: m.newCustomers ?? 0, returningCustomers: m.returningCustomers ?? 0, totalAdSpend: m.totalAdSpend ?? 0 }
+          : null);
         setStatus('live');
       })
       .catch(() => setStatus('error'));
@@ -229,6 +236,27 @@ export default function AdsContent() {
               accentColor="#fde68a"
             />
           </div>
+
+          {/* CAC — acquisition cost for the period (hidden on Today: the
+              new/returning split hasn't settled mid-day) */}
+          {cac && cac.newCustomers > 0 && tfRaw !== 'today' && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <MetricCard
+                title="New Customer CAC"
+                value={cac.newCustomers ? formatCurrency(cac.totalAdSpend / cac.newCustomers) : '—'}
+                subtitle={`Ad spend ÷ ${cac.newCustomers} new customers`}
+                accentColor="#c7d2fe"
+              />
+              <MetricCard
+                title="Blended CAC"
+                value={cac.newCustomers + cac.returningCustomers > 0
+                  ? formatCurrency(cac.totalAdSpend / (cac.newCustomers + cac.returningCustomers))
+                  : '—'}
+                subtitle={`Ad spend ÷ ${cac.newCustomers + cac.returningCustomers} all buyers`}
+                accentColor="#bbf7d0"
+              />
+            </div>
+          )}
 
           {/* Platform cards */}
           <div className={`grid gap-4 mb-6 ${platforms.length === 1 ? 'grid-cols-1 max-w-sm' : platforms.length === 2 ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'}`}>
