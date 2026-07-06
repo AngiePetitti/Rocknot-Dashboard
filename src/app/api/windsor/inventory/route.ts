@@ -104,6 +104,50 @@ async function runShopifyQL(query: string) {
   return { rows, cell };
 }
 
+// Current listing prices straight from the Shopify catalog (Admin GraphQL), so
+// we can show a price even for out-of-stock items (where retail-value-on-hand
+// is 0). Returns a per-variant map plus a per-product fallback, both keyed on
+// normalized titles that match the ShopifyQL product/variant titles.
+const priceNorm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+async function fetchVariantPrices(): Promise<{ byKey: Map<string, number>; byProduct: Map<string, number> }> {
+  const byKey = new Map<string, number>();
+  const byProduct = new Map<string, number>();
+  try {
+    let cursor: string | null = null;
+    for (let page = 0; page < 20; page++) { // safety cap (~5000 variants)
+      const query = `query($cursor: String) {
+        productVariants(first: 250, after: $cursor) {
+          nodes { title price product { title } }
+          pageInfo { hasNextPage endCursor }
+        }
+      }`;
+      const res: Response = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
+        body: JSON.stringify({ query, variables: { cursor } }),
+        cache: 'no-store',
+      });
+      const json = await res.json();
+      const conn = json?.data?.productVariants;
+      if (!conn) break;
+      for (const n of conn.nodes || []) {
+        const price = Math.round(parseFloat(n.price || '0'));
+        if (price <= 0) continue;
+        const product = n.product?.title || '';
+        byKey.set(`${priceNorm(product)}||${priceNorm(n.title || '')}`, price);
+        // Per-product fallback: keep the highest variant price seen.
+        const pk = priceNorm(product);
+        byProduct.set(pk, Math.max(byProduct.get(pk) ?? 0, price));
+      }
+      if (!conn.pageInfo?.hasNextPage) break;
+      cursor = conn.pageInfo.endCursor;
+    }
+  } catch {
+    // Non-fatal — fall back to retail-value-derived price.
+  }
+  return { byKey, byProduct };
+}
+
 function statusFor(stock: number, days: number | null): InventoryItem['status'] {
   if (stock <= 0) return 'out_of_stock';
   if (days === null) return 'healthy'; // no recent sales — not burning down
@@ -135,15 +179,27 @@ export async function GET() {
     // (e.g. non-physical "Return" products). High LIMIT so the hidden "bag only"
     // listings — which have zero direct sales and therefore sort to the very
     // bottom of the units-sold ordering — are never truncated off.
-    const { rows, cell } = await runShopifyQL(
-      `FROM inventory
-       SHOW ending_inventory_units, starting_inventory_units, inventory_units_sold, sell_through_rate, ending_inventory_value, ending_inventory_retail_value
-       GROUP BY product_title, product_variant_title, product_type
-       SINCE ${SINCE} UNTIL ${UNTIL}
-       HAVING ending_inventory_units < 50000
-       ORDER BY inventory_units_sold DESC
-       LIMIT 2000`
-    );
+    const [{ rows, cell }, prices] = await Promise.all([
+      runShopifyQL(
+        `FROM inventory
+         SHOW ending_inventory_units, starting_inventory_units, inventory_units_sold, sell_through_rate, ending_inventory_value, ending_inventory_retail_value
+         GROUP BY product_title, product_variant_title, product_type
+         SINCE ${SINCE} UNTIL ${UNTIL}
+         HAVING ending_inventory_units < 50000
+         ORDER BY inventory_units_sold DESC
+         LIMIT 2000`
+      ),
+      fetchVariantPrices(),
+    ]);
+
+    // Current listing price for a (product, variant), from the live catalog;
+    // falls back to the per-product price, then to retail-value-per-unit.
+    const priceFor = (product: string, variant: string, retailValue: number, stock: number): number => {
+      const k = `${priceNorm(product)}||${priceNorm(variant)}`;
+      return prices.byKey.get(k)
+        ?? prices.byProduct.get(priceNorm(product))
+        ?? (stock > 0 ? Math.round(retailValue / stock) : 0);
+    };
 
     // First pass: collect bag line keys from the bag-only listings so we can
     // identify and drop the public mix-and-match versions below.
@@ -210,8 +266,8 @@ export async function GET() {
         reorderQty,
         stockValue,
         retailValue,
-        // Current listing price per unit = retail value of on-hand stock ÷ units.
-        unitPrice: currentStock > 0 ? Math.round(retailValue / currentStock) : 0,
+        // Current listing price from the live catalog (works even at 0 stock).
+        unitPrice: priceFor(rawProduct, variant, retailValue, currentStock),
         _isBag,
         _isGiftCard: /gift\s*card/i.test(rawProduct),
         _isHandbag: /handbag/i.test(category),
@@ -253,7 +309,11 @@ export async function GET() {
       if (g) g.push(r); else byTitle.set(t, [r]);
     }
 
-    const mkBag = (label: string, stock: number, sold: number, value: number, retail: number): InventoryItem => {
+    // Bag listing price = the highest catalog price among the bag's source
+    // rows (works even when the bag is out of stock).
+    const gp = (rws: RawItem[]) => Math.max(0, ...rws.map(r => priceFor(r._rawProduct, r.variant, r.retailValue, r.currentStock)));
+
+    const mkBag = (label: string, stock: number, sold: number, value: number, retail: number, price: number): InventoryItem => {
       const dailyVelocity = Math.round((sold / PERIOD_DAYS) * 100) / 100;
       const daysRemaining = stock <= 0
         ? (dailyVelocity > 0 ? 0 : null)
@@ -266,7 +326,7 @@ export async function GET() {
         currentStock: stock, unitsSold90d: sold, dailyVelocity, daysRemaining,
         sellThroughRate: 0, status: statusFor(stock, daysRemaining), reorderQty,
         stockValue: value, retailValue: retail,
-        unitPrice: stock > 0 ? Math.round(retail / stock) : 0,
+        unitPrice: price || (stock > 0 ? Math.round(retail / stock) : 0),
       };
     };
     const consume = (rows: RawItem[]) => { for (const r of rows) consumed.add(keyOf(r)); };
@@ -299,14 +359,14 @@ export async function GET() {
       // A) Simple no-strap families (skip any "+"/strap bundle listing).
       if (!/\+|strap/i.test(title) && SIMPLE.some(re => re.test(title))) {
         const rep = maxBy(rows, r => r.currentStock);
-        bags.push(mkBag(disp(title), rep.currentStock, sumBy(rows, r => r.unitsSold90d), rep.stockValue, rep.retailValue));
+        bags.push(mkBag(disp(title), rep.currentStock, sumBy(rows, r => r.unitsSold90d), rep.stockValue, rep.retailValue, gp(rows)));
         consume(rows); continue;
       }
 
       // B) Per-color single listings.
       const pv = PER_VARIANT.find(s => s.test(title));
       if (pv) {
-        for (const r of rows) bags.push(mkBag(pv.label(r.variant), r.currentStock, r.unitsSold90d, r.stockValue, r.retailValue));
+        for (const r of rows) bags.push(mkBag(pv.label(r.variant), r.currentStock, r.unitsSold90d, r.stockValue, r.retailValue, gp([r])));
         consume(rows); continue;
       }
 
@@ -318,20 +378,20 @@ export async function GET() {
           const g = byColor.get(color); if (g) g.push(r); else byColor.set(color, [r]);
         }
         byColor.forEach((cr, color) => bags.push(mkBag(`Galaxy Bag - ${color}`,
-          sumBy(cr, r => r.currentStock), sumBy(cr, r => r.unitsSold90d), sumBy(cr, r => r.stockValue), sumBy(cr, r => r.retailValue))));
+          sumBy(cr, r => r.currentStock), sumBy(cr, r => r.unitsSold90d), sumBy(cr, r => r.stockValue), sumBy(cr, r => r.retailValue), gp(cr))));
         consume(rows); continue;
       }
 
       // D) Drink Bag — single bag-only listing.
       if (t === 'drink bag (bag only)') {
-        bags.push(mkBag('Drink Bag', sumBy(rows, r => r.currentStock), sumBy(rows, r => r.unitsSold90d), sumBy(rows, r => r.stockValue), sumBy(rows, r => r.retailValue)));
+        bags.push(mkBag('Drink Bag', sumBy(rows, r => r.currentStock), sumBy(rows, r => r.unitsSold90d), sumBy(rows, r => r.stockValue), sumBy(rows, r => r.retailValue), gp(rows)));
         consume(rows); continue;
       }
 
       // E) Transformer 2 — the two "BAG ONLY - INVENTORY" listings.
       if (/^transformer2\b.*bag only/i.test(title)) {
         const color = /anti(que)?\s*gold/i.test(title) ? 'Antique Gold' : 'Crystal';
-        bags.push(mkBag(`TRANSFORMER 2 - ${color}`, sumBy(rows, r => r.currentStock), sumBy(rows, r => r.unitsSold90d), sumBy(rows, r => r.stockValue), sumBy(rows, r => r.retailValue)));
+        bags.push(mkBag(`TRANSFORMER 2 - ${color}`, sumBy(rows, r => r.currentStock), sumBy(rows, r => r.unitsSold90d), sumBy(rows, r => r.stockValue), sumBy(rows, r => r.retailValue), gp(rows)));
         consume(rows); continue;
       }
 
@@ -339,14 +399,14 @@ export async function GET() {
       if (ORIG_TRANSFORMER.has(t)) {
         const color = (title.split(/[-–—]/)[1] || '').trim();
         const rep = maxBy(rows, r => r.currentStock);
-        bags.push(mkBag(`THE TRANSFORMER - ${color}`, rep.currentStock, sumBy(rows, r => r.unitsSold90d), rep.stockValue, rep.retailValue));
+        bags.push(mkBag(`THE TRANSFORMER - ${color}`, rep.currentStock, sumBy(rows, r => r.unitsSold90d), rep.stockValue, rep.retailValue, gp(rows)));
         consume(rows); continue;
       }
 
       // G) NO SWING STRAP bags (ORI Hobo, Hezi): the bare bag count per color.
       if (/^ori hobo bag\s*-/i.test(title) || /^hezi (leather )?shoulder bag\s*-/i.test(title)) {
         const nss = rows.find(r => norm(r.variant) === 'no swing strap');
-        if (nss) bags.push(mkBag(disp(title), nss.currentStock, sumBy(rows, r => r.unitsSold90d), nss.stockValue, nss.retailValue));
+        if (nss) bags.push(mkBag(disp(title), nss.currentStock, sumBy(rows, r => r.unitsSold90d), nss.stockValue, nss.retailValue, gp(rows)));
         consume(rows); continue;
       }
     }
