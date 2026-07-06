@@ -83,6 +83,20 @@ export default function OverviewContent() {
   const [returnsSnapshot, setReturnsSnapshot] = useState<any | null>(null);
   const [revenueSource, setRevenueSource] = useState<'shopify' | 'none' | null>(null);
   const [adsError, setAdsError] = useState<string | null>(null);
+  const [health, setHealth] = useState<null | {
+    allOk: boolean;
+    platforms: Array<{ platform: string; dashboardSpend: number; referenceSpend: number | null; referenceSource: string; diff: number | null; diffPct: number | null; status: string }>;
+  }>(null);
+
+  // Ad-data health check (reconciliation) — runs on mount so the Overview flags
+  // when a platform's spend is stale/behind (a broken/deactivated connector or a
+  // sync still catching up) instead of silently showing low numbers.
+  useEffect(() => {
+    fetch('/api/windsor/reconcile?days=7')
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d?.platforms)) setHealth(d); })
+      .catch(() => {});
+  }, []);
 
   function buildLivePlatformSpend(m: LiveMetrics): PlatformSpend[] | null {
     if (!m.metaSpend && !m.googleSpend && !m.tiktokSpend) return null;
@@ -284,6 +298,20 @@ export default function OverviewContent() {
         </div>
       )}
 
+      {/* Ad-data health: flags a platform whose dashboard (BigQuery) spend is
+          behind its source — a stale/deactivated connector or a sync still
+          backfilling. Self-clears once syncing catches up. */}
+      {health && !health.allOk && health.platforms.some(p => p.status === 'warn') && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-amber-800">
+          <p className="font-semibold mb-0.5">⚠️ Ad-spend data may be catching up</p>
+          {health.platforms.filter(p => p.status === 'warn').map(p => (
+            <p key={p.platform} className="text-amber-700">
+              {p.platform}: dashboard {formatCurrency(p.dashboardSpend)} vs {p.referenceSource} {formatCurrency(p.referenceSpend ?? 0)}
+              {p.diffPct !== null && <> ({p.diffPct}%)</>} — clears automatically once syncing catches up.
+            </p>
+          ))}
+        </div>
+      )}
 
       {revenueSource === 'none' && isLive && (
         <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-blue-700">
