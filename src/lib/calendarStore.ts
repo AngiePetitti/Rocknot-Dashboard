@@ -1,13 +1,15 @@
-// Persistence for the Marketing Calendar. Stores the events array as a single
-// JSON metafield on the Shopify shop, so it reuses the Shopify Admin token the
-// dashboard already has — no separate database/KV to provision. Shared across
-// everyone who loads the dashboard, and survives deploys.
+// Persistence for the Marketing Calendar — a small key-value store (Redis).
+// Works with either a Vercel-connected Redis/KV store or an Upstash Redis
+// database, by reading whichever REST credentials are present. No SDK needed:
+// both speak the Upstash REST protocol, so we call it directly.
+//
+// To connect one (once): Vercel project → Storage → Create/Connect a Redis
+// (Upstash) database → it injects the env vars below → redeploy.
 
-const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
-const DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com').trim();
+const REST_URL = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || '').trim();
+const REST_TOKEN = (process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || '').trim();
 
-const NAMESPACE = 'dashboard';
-const KEY = 'marketing_calendar';
+const STORAGE_KEY = 'marketing_calendar_events';
 
 export interface MarketingEvent {
   id: string;
@@ -29,28 +31,29 @@ export const TYPE_COLORS: Record<MarketingEvent['type'], string> = {
   other: '#6b7280',
 };
 
-async function adminGraphQL<T = unknown>(query: string, variables?: Record<string, unknown>): Promise<T> {
-  if (!TOKEN) throw new Error('Shopify access token not configured');
-  const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
+export function isStorageConfigured(): boolean {
+  return Boolean(REST_URL && REST_TOKEN);
+}
+
+// Run a single Redis command via the Upstash-compatible REST API.
+async function redis(command: (string)[]): Promise<unknown> {
+  if (!isStorageConfigured()) {
+    throw new Error('Calendar storage is not connected yet — add a Redis (Upstash) database to the project in Vercel → Storage.');
+  }
+  const res = await fetch(REST_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
-    body: JSON.stringify({ query, variables }),
+    headers: { Authorization: `Bearer ${REST_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(command),
     cache: 'no-store',
   });
   const json = await res.json();
-  if (json.errors) {
-    // Surface Shopify's access-scope errors clearly (e.g. missing write_metafields).
-    throw new Error(json.errors.map((e: { message: string }) => e.message).join('; '));
-  }
-  return json.data as T;
+  if (json.error) throw new Error(json.error);
+  return json.result;
 }
 
 export async function getEvents(): Promise<MarketingEvent[]> {
-  const data = await adminGraphQL<{ shop: { metafield: { value: string } | null } }>(
-    `{ shop { metafield(namespace: "${NAMESPACE}", key: "${KEY}") { value } } }`
-  );
-  const value = data?.shop?.metafield?.value;
-  if (!value) return [];
+  const value = await redis(['GET', STORAGE_KEY]);
+  if (typeof value !== 'string' || !value) return [];
   try {
     const parsed = JSON.parse(value);
     return Array.isArray(parsed) ? parsed as MarketingEvent[] : [];
@@ -60,17 +63,5 @@ export async function getEvents(): Promise<MarketingEvent[]> {
 }
 
 export async function saveEvents(events: MarketingEvent[]): Promise<void> {
-  const shop = await adminGraphQL<{ shop: { id: string } }>(`{ shop { id } }`);
-  const ownerId = shop.shop.id;
-  const data = await adminGraphQL<{ metafieldsSet: { userErrors: { field: string[]; message: string }[] } }>(
-    `mutation Save($mfs: [MetafieldsSetInput!]!) {
-      metafieldsSet(metafields: $mfs) {
-        metafields { id }
-        userErrors { field message }
-      }
-    }`,
-    { mfs: [{ ownerId, namespace: NAMESPACE, key: KEY, type: 'json', value: JSON.stringify(events) }] }
-  );
-  const errs = data?.metafieldsSet?.userErrors ?? [];
-  if (errs.length) throw new Error(errs.map(e => e.message).join('; '));
+  await redis(['SET', STORAGE_KEY, JSON.stringify(events)]);
 }
