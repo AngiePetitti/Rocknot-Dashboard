@@ -19,6 +19,7 @@ interface InventoryItem {
   reorderQty: number;
   stockValue: number;
   retailValue: number;
+  unitPrice: number;
 }
 
 interface InventoryFinance {
@@ -45,8 +46,8 @@ const STATUS_CONFIG = {
 };
 
 type FilterStatus = 'all' | 'out_of_stock' | 'critical' | 'low' | 'healthy';
-type SortKey = 'daysRemaining' | 'currentStock' | 'unitsSold90d' | 'sellThroughRate' | 'reorderQty';
-type BagSortKey = 'currentStock' | 'unitsSold90d' | 'daysRemaining' | 'reorderQty';
+type SortKey = 'daysRemaining' | 'currentStock' | 'unitsSold90d' | 'sellThroughRate' | 'reorderQty' | 'unitPrice';
+type BagSortKey = 'currentStock' | 'unitsSold90d' | 'daysRemaining' | 'reorderQty' | 'unitPrice';
 
 export default function InventoryContent() {
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -341,6 +342,7 @@ export default function InventoryContent() {
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-800 leading-tight truncate">{bag.product}</p>
                     {bag.variant && <p className="text-xs text-gray-500 mt-0.5">{bag.variant}</p>}
+                    {bag.unitPrice > 0 && <p className="text-xs font-semibold text-gray-600 mt-0.5">${bag.unitPrice.toLocaleString()}</p>}
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <div className="text-right">
@@ -366,6 +368,7 @@ export default function InventoryContent() {
                 <tr className="border-b border-gray-100">
                   <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-3">Bag</th>
                   <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-3">Variant</th>
+                  <th onClick={() => handleBagSort('unitPrice')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Price{bagArrow('unitPrice')}</th>
                   <th onClick={() => handleBagSort('currentStock')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">In Stock{bagArrow('currentStock')}</th>
                   <th onClick={() => handleBagSort('unitsSold90d')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Sold 90d{bagArrow('unitsSold90d')}</th>
                   <th onClick={() => handleBagSort('daysRemaining')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Days Left{bagArrow('daysRemaining')}</th>
@@ -380,6 +383,9 @@ export default function InventoryContent() {
                     <tr key={bag.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                       <td className="py-2.5 pr-3 font-medium text-gray-800 text-xs">{bag.product}</td>
                       <td className="py-2.5 pr-3 text-xs text-gray-500">{bag.variant || <span className="text-gray-300">—</span>}</td>
+                      <td className="py-2.5 px-3 text-right text-xs font-semibold text-gray-700">
+                        {bag.unitPrice > 0 ? `$${bag.unitPrice.toLocaleString()}` : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="py-2.5 px-3 text-right text-xs font-bold" style={{ color: cfg.text }}>{bag.currentStock.toLocaleString()}</td>
                       <td className="py-2.5 px-3 text-right text-xs text-gray-600">{bag.unitsSold90d.toLocaleString()}</td>
                       <td className="py-2.5 px-3 text-right text-xs font-semibold">
@@ -506,12 +512,17 @@ export default function InventoryContent() {
                       </span>
                     </div>
 
-                    {/* Category pill */}
-                    {item.category && (
-                      <span className="inline-block text-xs bg-gray-100 text-gray-500 rounded-full px-2 py-0.5 mb-2">
-                        {item.category}
-                      </span>
-                    )}
+                    {/* Category pill + listing price */}
+                    <div className="flex items-center gap-2 mb-2">
+                      {item.category && (
+                        <span className="inline-block text-xs bg-gray-100 text-gray-500 rounded-full px-2 py-0.5">
+                          {item.category}
+                        </span>
+                      )}
+                      {item.unitPrice > 0 && (
+                        <span className="inline-block text-xs font-semibold text-gray-600">${item.unitPrice.toLocaleString()}</span>
+                      )}
+                    </div>
 
                     {/* Stats grid */}
                     <div className="grid grid-cols-3 gap-2 text-center">
@@ -562,6 +573,7 @@ export default function InventoryContent() {
                     <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-3">Product</th>
                     <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-3">Variant</th>
                     <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-3">Category</th>
+                    <th onClick={() => handleSort('unitPrice')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Price{arrow('unitPrice')}</th>
                     <th onClick={() => handleSort('currentStock')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Stock{arrow('currentStock')}</th>
                     <th onClick={() => handleSort('unitsSold90d')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Sold 90d{arrow('unitsSold90d')}</th>
                     <th onClick={() => handleSort('daysRemaining')} className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3 cursor-pointer select-none hover:text-gray-600">Days Left{arrow('daysRemaining')}</th>
@@ -579,6 +591,9 @@ export default function InventoryContent() {
                         <td className="py-2.5 pr-3 text-xs text-gray-500">{item.variant || <span className="text-gray-300">—</span>}</td>
                         <td className="py-2.5 pr-3 text-xs">
                           <span className="bg-gray-100 text-gray-500 rounded-full px-2 py-0.5">{item.category}</span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-xs font-semibold text-gray-700">
+                          {item.unitPrice > 0 ? `$${item.unitPrice.toLocaleString()}` : <span className="text-gray-300">—</span>}
                         </td>
                         <td className="py-2.5 px-3 text-right text-xs font-semibold text-gray-800">{item.currentStock.toLocaleString()}</td>
                         <td className="py-2.5 px-3 text-right text-xs text-gray-600">{item.unitsSold90d.toLocaleString()}</td>

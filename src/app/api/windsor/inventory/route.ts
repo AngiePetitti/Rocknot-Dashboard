@@ -20,6 +20,7 @@ export interface InventoryItem {
   reorderQty: number; // suggested 30-day restock
   stockValue: number;  // cash tied up at cost (ending inventory value)
   retailValue: number; // potential revenue on shelves (retail value)
+  unitPrice: number;   // current listing price per unit (retail value / units)
 }
 
 // Hidden "bag only" listings hold the TRUE physical bag stock (the public
@@ -209,6 +210,8 @@ export async function GET() {
         reorderQty,
         stockValue,
         retailValue,
+        // Current listing price per unit = retail value of on-hand stock ÷ units.
+        unitPrice: currentStock > 0 ? Math.round(retailValue / currentStock) : 0,
         _isBag,
         _isGiftCard: /gift\s*card/i.test(rawProduct),
         _isHandbag: /handbag/i.test(category),
@@ -263,6 +266,7 @@ export async function GET() {
         currentStock: stock, unitsSold90d: sold, dailyVelocity, daysRemaining,
         sellThroughRate: 0, status: statusFor(stock, daysRemaining), reorderQty,
         stockValue: value, retailValue: retail,
+        unitPrice: stock > 0 ? Math.round(retail / stock) : 0,
       };
     };
     const consume = (rows: RawItem[]) => { for (const r of rows) consumed.add(keyOf(r)); };
