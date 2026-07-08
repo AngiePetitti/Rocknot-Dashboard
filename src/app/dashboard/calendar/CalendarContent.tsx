@@ -73,7 +73,6 @@ export default function CalendarContent() {
   const [editEvent, setEditEvent] = useState<MarketingEvent | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   useEffect(() => {
@@ -108,14 +107,12 @@ export default function CalendarContent() {
 
   function openNew(date?: string) {
     setEditEvent(null);
-    setSaveError(null);
     setForm({ ...EMPTY_FORM, date: date || todayStr() });
     setShowModal(true);
   }
 
   function openEdit(ev: MarketingEvent) {
     setEditEvent(ev);
-    setSaveError(null);
     setForm({ title: ev.title, date: ev.date, endDate: ev.endDate || '', type: ev.type, description: ev.description || '' });
     setShowModal(true);
   }
@@ -123,37 +120,27 @@ export default function CalendarContent() {
   async function saveEvent() {
     if (!form.title || !form.date) return;
     setSaving(true);
-    setSaveError(null);
     try {
       const body = { title: form.title, date: form.date, endDate: form.endDate || undefined, type: form.type, description: form.description || undefined, color: TYPE_COLORS[form.type] };
-      const url = editEvent ? `/api/calendar/${editEvent.id}` : '/api/calendar';
-      const r = await fetch(url, { method: editEvent ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const d = await r.json();
-      if (!r.ok || !d.event) {
-        setSaveError(d.error ? `Couldn't save — ${d.error}` : "Couldn't save this event.");
-        return;
+      if (editEvent) {
+        const r = await fetch(`/api/calendar/${editEvent.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await r.json();
+        setEvents(prev => prev.map(e => e.id === editEvent.id ? d.event : e));
+      } else {
+        const r = await fetch('/api/calendar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await r.json();
+        setEvents(prev => [...prev, d.event]);
       }
-      if (editEvent) setEvents(prev => prev.map(e => e.id === editEvent.id ? d.event : e));
-      else setEvents(prev => [...prev, d.event]);
       setShowModal(false);
-    } catch (err) {
-      setSaveError(`Couldn't save — ${String(err)}`);
     } finally {
       setSaving(false);
     }
   }
 
   async function deleteEvent(id: string) {
-    setSaveError(null);
-    try {
-      const r = await fetch(`/api/calendar/${id}`, { method: 'DELETE' });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setSaveError(d.error ? `Couldn't delete — ${d.error}` : "Couldn't delete this event."); return; }
-      setEvents(prev => prev.filter(e => e.id !== id));
-      setShowModal(false);
-    } catch (err) {
-      setSaveError(`Couldn't delete — ${String(err)}`);
-    }
+    await fetch(`/api/calendar/${id}`, { method: 'DELETE' });
+    setEvents(prev => prev.filter(e => e.id !== id));
+    setShowModal(false);
   }
 
   function prevMonth() {
@@ -642,12 +629,6 @@ export default function CalendarContent() {
                   />
                 </div>
               </div>
-
-              {saveError && (
-                <div className="mt-4 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                  {saveError}
-                </div>
-              )}
 
               <div className="flex gap-2 mt-6">
                 {editEvent && (
