@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import type { MarketingEvent } from '@/src/app/api/calendar/route';
@@ -35,6 +35,15 @@ const TYPE_BG: Record<MarketingEvent['type'], string> = {
   other: 'bg-gray-100 text-gray-600',
 };
 
+const CHANNEL_OPTIONS = ['Email', 'SMS', 'Paid', 'Organic', 'Other'];
+type Status = 'planned' | 'live' | 'done';
+const STATUS_OPTIONS: { value: Status; label: string; color: string; bg: string }[] = [
+  { value: 'planned', label: 'Planned', color: '#64748b', bg: 'bg-slate-100 text-slate-600' },
+  { value: 'live', label: 'Live', color: '#16a34a', bg: 'bg-green-100 text-green-700' },
+  { value: 'done', label: 'Done', color: '#94a3b8', bg: 'bg-gray-100 text-gray-400' },
+];
+const STATUS_META = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s])) as Record<Status, typeof STATUS_OPTIONS[number]>;
+
 const DAYS_SHORT = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const DAYS_FULL = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -60,10 +69,12 @@ interface FormState {
   date: string;
   endDate: string;
   type: MarketingEvent['type'];
+  channels: string[];
+  status: Status;
   description: string;
 }
 
-const EMPTY_FORM: FormState = { title: '', date: '', endDate: '', type: 'launch', description: '' };
+const EMPTY_FORM: FormState = { title: '', date: '', endDate: '', type: 'launch', channels: [], status: 'planned', description: '' };
 
 export default function CalendarContent() {
   const [events, setEvents] = useState<MarketingEvent[]>([]);
@@ -73,14 +84,40 @@ export default function CalendarContent() {
   const [editEvent, setEditEvent] = useState<MarketingEvent | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [lastSynced, setLastSynced] = useState<string>('');
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    fetch('/api/calendar')
-      .then(r => r.json())
-      .then(d => { setEvents(d.events || []); setStatus('ok'); })
-      .catch(() => setStatus('error'));
+  const showModalRef = useRef(false);
+  useEffect(() => { showModalRef.current = showModal; }, [showModal]);
+
+  const refreshEvents = useCallback(async (manual = false) => {
+    if (manual) setRefreshing(true);
+    try {
+      const r = await fetch('/api/calendar', { cache: 'no-store' });
+      const d = await r.json();
+      if (!r.ok) { setLoadError(d.error || 'Could not load calendar events.'); setStatus('error'); return; }
+      setEvents(d.events || []);
+      setLoadError(null);
+      setStatus('ok');
+      setLastSynced(new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+    } catch {
+      setLoadError('Could not reach the calendar.');
+      setStatus('error');
+    } finally {
+      if (manual) setRefreshing(false);
+    }
   }, []);
+
+  // Initial load + gentle auto-refresh so Google Sheet edits show up on their
+  // own (paused while the add/edit modal is open, to not clobber typing).
+  useEffect(() => {
+    refreshEvents();
+    const id = setInterval(() => { if (!showModalRef.current) refreshEvents(); }, 60000);
+    return () => clearInterval(id);
+  }, [refreshEvents]);
 
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -105,42 +142,72 @@ export default function CalendarContent() {
     return eventsForDate(cellDate(day));
   }
 
+  const isMultiDay = (e: MarketingEvent) => Boolean(e.endDate && e.endDate !== e.date);
+  // Multi-day events that cover this date (for the colored band across the run).
+  function spansForDate(dateStr: string): MarketingEvent[] {
+    return events.filter(e => isMultiDay(e) && dateStr >= e.date && dateStr <= (e.endDate as string));
+  }
+  // Single-day events that land on this date (rendered as pills).
+  function singlesForDate(dateStr: string): MarketingEvent[] {
+    return events.filter(e => !isMultiDay(e) && e.date === dateStr);
+  }
+
+  function parseChannels(ch?: string): string[] {
+    return (ch || '').split(',').map(s => s.trim()).filter(Boolean);
+  }
+
   function openNew(date?: string) {
     setEditEvent(null);
+    setSaveError(null);
     setForm({ ...EMPTY_FORM, date: date || todayStr() });
     setShowModal(true);
   }
 
   function openEdit(ev: MarketingEvent) {
     setEditEvent(ev);
-    setForm({ title: ev.title, date: ev.date, endDate: ev.endDate || '', type: ev.type, description: ev.description || '' });
+    setSaveError(null);
+    setForm({
+      title: ev.title, date: ev.date, endDate: ev.endDate || '', type: ev.type,
+      channels: parseChannels(ev.channel), status: ev.status || 'planned', description: ev.description || '',
+    });
     setShowModal(true);
   }
 
   async function saveEvent() {
     if (!form.title || !form.date) return;
     setSaving(true);
+    setSaveError(null);
     try {
-      const body = { title: form.title, date: form.date, endDate: form.endDate || undefined, type: form.type, description: form.description || undefined, color: TYPE_COLORS[form.type] };
-      if (editEvent) {
-        const r = await fetch(`/api/calendar/${editEvent.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const d = await r.json();
-        setEvents(prev => prev.map(e => e.id === editEvent.id ? d.event : e));
-      } else {
-        const r = await fetch('/api/calendar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const d = await r.json();
-        setEvents(prev => [...prev, d.event]);
-      }
+      const body = {
+        title: form.title, date: form.date, endDate: form.endDate || undefined, type: form.type,
+        channel: form.channels.join(', ') || undefined, status: form.status,
+        description: form.description || undefined, color: TYPE_COLORS[form.type],
+      };
+      const url = editEvent ? `/api/calendar/${editEvent.id}` : '/api/calendar';
+      const r = await fetch(url, { method: editEvent ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (!r.ok || !d.event) { setSaveError(d.error ? `Couldn't save — ${d.error}` : "Couldn't save this event."); return; }
+      if (editEvent) setEvents(prev => prev.map(e => e.id === editEvent.id ? d.event : e));
+      else setEvents(prev => [...prev, d.event]);
       setShowModal(false);
+    } catch (err) {
+      setSaveError(`Couldn't save — ${String(err)}`);
     } finally {
       setSaving(false);
     }
   }
 
   async function deleteEvent(id: string) {
-    await fetch(`/api/calendar/${id}`, { method: 'DELETE' });
-    setEvents(prev => prev.filter(e => e.id !== id));
-    setShowModal(false);
+    setSaveError(null);
+    try {
+      const r = await fetch(`/api/calendar/${id}`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setSaveError(d.error ? `Couldn't delete — ${d.error}` : "Couldn't delete this event."); return; }
+      setEvents(prev => prev.filter(e => e.id !== id));
+      setShowModal(false);
+    } catch (err) {
+      setSaveError(`Couldn't delete — ${String(err)}`);
+    }
   }
 
   function prevMonth() {
@@ -195,20 +262,30 @@ export default function CalendarContent() {
 
   return (
     <div>
-      <Header title="Marketing Calendar" subtitle="Plan launches, deadlines & campaigns">
-        <button
-          onClick={() => openNew()}
-          className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold rounded-xl transition-colors"
-        >
-          <span className="text-lg leading-none">+</span>
-          <span>Add Event</span>
-        </button>
+      <Header title="Marketing Calendar" subtitle="Plan launches, deadlines & campaigns · synced with Google Sheet">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => refreshEvents(true)}
+            title="Sync now"
+            className="flex items-center gap-1.5 px-3 py-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 text-xs font-medium rounded-xl transition-colors"
+          >
+            <span className={refreshing ? 'inline-block animate-spin' : ''}>↻</span>
+            <span className="hidden sm:inline">{lastSynced ? `Synced ${lastSynced}` : 'Sync'}</span>
+          </button>
+          <button
+            onClick={() => openNew()}
+            className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold rounded-xl transition-colors"
+          >
+            <span className="text-lg leading-none">+</span>
+            <span>Add Event</span>
+          </button>
+        </div>
       </Header>
 
       {status === 'error' && (
-        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-red-700">
+        <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-red-700">
           <span>⚠️</span>
-          <span>Could not load calendar events. Make sure Vercel KV is configured.</span>
+          <span>Couldn&apos;t load the calendar{loadError ? ` — ${loadError}` : '.'} Check that the Google Sheet is shared with the service account and <code>CALENDAR_SHEET_ID</code> is set in Vercel.</span>
         </div>
       )}
 
@@ -318,9 +395,11 @@ export default function CalendarContent() {
             {cells.map((day, i) => {
               if (!day) return <div key={i} className="bg-gray-50 min-h-[72px]" />;
               const dateStr = cellDate(day);
-              const dayEvents = eventsForDay(day);
+              const spans = spansForDate(dateStr);
+              const singles = singlesForDate(dateStr);
               const isToday = dateStr === todayDateStr;
               const isSelected = selectedDate === dateStr;
+              const isWeekStart = i % 7 === 0;
               return (
                 <div
                   key={i}
@@ -331,18 +410,41 @@ export default function CalendarContent() {
                     {day}
                   </div>
                   <div className="space-y-0.5">
-                    {dayEvents.slice(0, 2).map(ev => (
+                    {/* Multi-day campaigns: a colored band spanning the run. Title
+                        shows on the start day (or the first day of each week). */}
+                    {spans.slice(0, 3).map(ev => {
+                      const isStart = dateStr === ev.date;
+                      const isEnd = dateStr === ev.endDate;
+                      const done = ev.status === 'done';
+                      return (
+                        <div
+                          key={ev.id}
+                          onClick={e => { e.stopPropagation(); openEdit(ev); }}
+                          className={`h-4 flex items-center overflow-hidden cursor-pointer hover:opacity-80 ${isStart ? 'rounded-l pl-1' : 'pl-1 -ml-1'} ${isEnd ? 'rounded-r pr-1' : '-mr-1 pr-1'}`}
+                          style={{ backgroundColor: ev.color + (done ? '18' : '30'), borderLeft: isStart ? `2px solid ${ev.color}` : undefined }}
+                          title={ev.title}
+                        >
+                          {(isStart || isWeekStart) && (
+                            <span className={`truncate text-[10px] font-semibold ${done ? 'line-through opacity-60' : ''}`} style={{ color: ev.color }}>
+                              {ev.title}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {/* Single-day events as pills */}
+                    {singles.slice(0, Math.max(0, 2 - Math.min(spans.length, 2))).map(ev => (
                       <div
                         key={ev.id}
                         onClick={e => { e.stopPropagation(); openEdit(ev); }}
-                        className="truncate text-[10px] font-medium px-1 py-0.5 rounded cursor-pointer hover:opacity-80"
+                        className={`truncate text-[10px] font-medium px-1 py-0.5 rounded cursor-pointer hover:opacity-80 ${ev.status === 'done' ? 'line-through opacity-60' : ''}`}
                         style={{ backgroundColor: ev.color + '20', color: ev.color }}
                       >
-                        {ev.title}
+                        {ev.status === 'live' && '● '}{ev.title}
                       </div>
                     ))}
-                    {dayEvents.length > 2 && (
-                      <div className="text-[10px] text-gray-400 px-1">+{dayEvents.length - 2} more</div>
+                    {(spans.length + singles.length) > 3 && (
+                      <div className="text-[10px] text-gray-400 px-1">+{spans.length + singles.length - 3} more</div>
                     )}
                   </div>
                 </div>
@@ -364,8 +466,14 @@ export default function CalendarContent() {
                     <div key={ev.id} onClick={() => openEdit(ev)} className="flex items-start gap-2 p-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
                       <div className="w-2 h-2 rounded-full mt-1 shrink-0" style={{ backgroundColor: ev.color }} />
                       <div className="min-w-0">
-                        <p className="text-xs font-semibold text-gray-800 truncate">{ev.title}</p>
-                        <p className="text-[10px] text-gray-400">{TYPE_LABELS[ev.type]}{ev.description ? ` · ${ev.description}` : ''}</p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-xs font-semibold text-gray-800 truncate">{ev.title}</p>
+                          {ev.status && <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${STATUS_META[ev.status].bg}`}>{STATUS_META[ev.status].label}</span>}
+                        </div>
+                        <p className="text-[10px] text-gray-400">
+                          {TYPE_LABELS[ev.type]}{ev.channel ? ` · ${ev.channel}` : ''}
+                          {ev.endDate && ev.endDate !== ev.date ? ` · thru ${MONTHS_SHORT[parseInt(ev.endDate.split('-')[1]) - 1]} ${parseInt(ev.endDate.split('-')[2])}` : ''}
+                        </p>
                       </div>
                     </div>
                   ))}
@@ -498,7 +606,11 @@ export default function CalendarContent() {
                     <div className="w-1 self-stretch rounded-full shrink-0" style={{ backgroundColor: ev.color }} />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-gray-800 leading-tight">{ev.title}</p>
-                      <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full mt-1 ${TYPE_BG[ev.type]}`}>{TYPE_LABELS[ev.type]}</span>
+                      <span className="mt-1 inline-flex flex-wrap items-center gap-1">
+                        <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${TYPE_BG[ev.type]}`}>{TYPE_LABELS[ev.type]}</span>
+                        {ev.status && <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_META[ev.status].bg}`}>{STATUS_META[ev.status].label}</span>}
+                        {ev.channel && <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-violet-50 text-violet-600">{ev.channel}</span>}
+                      </span>
                       {ev.description && <p className="text-xs text-gray-500 mt-1 leading-snug">{ev.description}</p>}
                       {ev.endDate && ev.endDate !== ev.date && <p className="text-[11px] text-gray-400 mt-1">Ends {formatDisplayDate(ev.endDate)}</p>}
                     </div>
@@ -532,7 +644,11 @@ export default function CalendarContent() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-gray-800 leading-tight truncate">{ev.title}</p>
-                      <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full mt-1 ${TYPE_BG[ev.type]}`}>{TYPE_LABELS[ev.type]}</span>
+                      <span className="mt-1 inline-flex flex-wrap items-center gap-1">
+                        <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${TYPE_BG[ev.type]}`}>{TYPE_LABELS[ev.type]}</span>
+                        {ev.status && <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_META[ev.status].bg}`}>{STATUS_META[ev.status].label}</span>}
+                        {ev.channel && <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-violet-50 text-violet-600">{ev.channel}</span>}
+                      </span>
                       {ev.description && <p className="text-xs text-gray-500 mt-0.5 leading-snug line-clamp-2">{ev.description}</p>}
                     </div>
                     <svg className="w-4 h-4 text-gray-300 shrink-0 mt-1" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -619,6 +735,42 @@ export default function CalendarContent() {
                 </div>
 
                 <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-2">Channel</label>
+                  <div className="flex flex-wrap gap-2">
+                    {CHANNEL_OPTIONS.map(ch => {
+                      const on = form.channels.includes(ch);
+                      return (
+                        <button
+                          key={ch}
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, channels: on ? f.channels.filter(c => c !== ch) : [...f.channels, ch] }))}
+                          className={`px-3 py-1.5 rounded-full text-xs font-medium border-2 transition-all ${on ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-transparent bg-gray-50 text-gray-500 hover:bg-gray-100'}`}
+                        >
+                          {ch}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-2">Status</label>
+                  <div className="flex gap-2">
+                    {STATUS_OPTIONS.map(s => (
+                      <button
+                        key={s.value}
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, status: s.value }))}
+                        className={`flex-1 px-3 py-2 rounded-xl text-xs font-semibold border-2 transition-all ${form.status === s.value ? 'border-current' : 'border-transparent bg-gray-50 text-gray-500'}`}
+                        style={form.status === s.value ? { color: s.color, borderColor: s.color, backgroundColor: s.color + '15' } : {}}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Notes</label>
                   <textarea
                     value={form.description}
@@ -629,6 +781,12 @@ export default function CalendarContent() {
                   />
                 </div>
               </div>
+
+              {saveError && (
+                <div className="mt-4 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  {saveError}
+                </div>
+              )}
 
               <div className="flex gap-2 mt-6">
                 {editEvent && (
