@@ -3,6 +3,7 @@
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { buildCallouts } from '@/src/lib/callouts';
+import type { MarketingEvent } from '@/src/app/api/calendar/route';
 import { Timeframe, PlatformSpend, DailyRevenue } from '@/src/lib/mockData';
 import { formatCurrency, formatROAS, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
@@ -87,6 +88,27 @@ export default function OverviewContent() {
     allOk: boolean;
     platforms: Array<{ platform: string; dashboardSpend: number; referenceSpend: number | null; referenceSource: string; diff: number | null; diffPct: number | null; status: string }>;
   }>(null);
+
+  const [calEvents, setCalEvents] = useState<MarketingEvent[]>([]);
+  useEffect(() => {
+    fetch('/api/calendar').then(r => r.json()).then(d => { if (Array.isArray(d?.events)) setCalEvents(d.events); }).catch(() => {});
+  }, []);
+
+  // "This week's marketing" — campaigns live right now, plus what launches in
+  // the next 7 days. Pulled from the Marketing Calendar.
+  const marketingThisWeek = useMemo(() => {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const in7 = new Date(today); in7.setDate(in7.getDate() + 7);
+    const to = in7.toISOString().split('T')[0];
+    const live = calEvents.filter(e => e.date <= today && (e.endDate || e.date) >= today);
+    const upcoming = calEvents.filter(e => e.date > today && e.date <= to);
+    const daysUntil = (d: string) => Math.round((Date.parse(d) - Date.parse(today)) / 86400000);
+    return {
+      live: [...live].sort((a, b) => a.date.localeCompare(b.date)),
+      upcoming: [...upcoming].sort((a, b) => a.date.localeCompare(b.date)),
+      daysUntil,
+    };
+  }, [calEvents]);
 
   // Ad-data health check (reconciliation) — runs on mount so the Overview flags
   // when a platform's spend is stale/behind (a broken/deactivated connector or a
@@ -479,6 +501,58 @@ export default function OverviewContent() {
             accentColor="#a7f3d0"
           />
         </div>
+      )}
+
+      {/* ── This week's marketing (from the Marketing Calendar) ── */}
+      {isLive && (marketingThisWeek.live.length > 0 || marketingThisWeek.upcoming.length > 0) && (
+        <Card accentColor="#8b5cf6" className="mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-base">📣</span>
+            <h2 className="text-sm font-bold text-gray-700">This Week&apos;s Marketing</h2>
+            <a href="/dashboard/calendar" className="ml-auto text-xs text-violet-500 hover:text-violet-700 font-medium">Open calendar →</a>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-2">Live now</p>
+              {marketingThisWeek.live.length === 0 ? (
+                <p className="text-xs text-gray-400">Nothing running right now.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {marketingThisWeek.live.map(e => (
+                    <li key={e.id} className="flex items-start gap-2">
+                      <span className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: e.color }} />
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800 leading-tight">{e.title}</p>
+                        <p className="text-xs text-gray-400">{e.type.replace('_', ' ')}{e.channel ? ` · ${e.channel}` : ''}{e.endDate && e.endDate !== e.date ? ' · ends ' + e.endDate.slice(5) : ''}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-2">Launching next 7 days</p>
+              {marketingThisWeek.upcoming.length === 0 ? (
+                <p className="text-xs text-gray-400">Nothing scheduled to launch.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {marketingThisWeek.upcoming.map(e => {
+                    const d = marketingThisWeek.daysUntil(e.date);
+                    return (
+                      <li key={e.id} className="flex items-start gap-2">
+                        <span className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: e.color }} />
+                        <div>
+                          <p className="text-sm font-semibold text-gray-800 leading-tight">{e.title}</p>
+                          <p className="text-xs text-gray-400">{d === 1 ? 'tomorrow' : `in ${d} days`}{e.channel ? ` · ${e.channel}` : ''}</p>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </Card>
       )}
 
       {/* ── Briefing: what's going well / what needs attention ── */}
