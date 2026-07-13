@@ -119,6 +119,70 @@ export default function CalendarContent() {
     return () => clearInterval(id);
   }, [refreshEvents]);
 
+  // ── Performance overlay ──
+  // Actual daily revenue + ad spend for the visible month, so you can see
+  // whether a launch/sale/campaign actually moved the needle.
+  const [perf, setPerf] = useState<Record<string, { revenue: number; spend: number }>>({});
+  const [showPerf, setShowPerf] = useState(true);
+
+  useEffect(() => {
+    const mm = String(month + 1).padStart(2, '0');
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    const from = `${year}-${mm}-01`;
+    const to = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
+    fetch(`/api/windsor?tf=custom&date_from=${from}&date_to=${to}`)
+      .then(r => r.json())
+      .then(d => {
+        const m: Record<string, { revenue: number; spend: number }> = {};
+        for (const row of (d.revenueData || [])) m[row.date] = { revenue: Number(row.revenue || 0), spend: Number(row.adSpend || 0) };
+        setPerf(m);
+      })
+      .catch(() => setPerf({}));
+  }, [year, month]);
+
+  // ── Filters ──
+  const [filterType, setFilterType] = useState<'all' | MarketingEvent['type']>('all');
+  const [filterChannel, setFilterChannel] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | Status>('all');
+  const matchesFilters = useCallback((e: MarketingEvent) => {
+    if (filterType !== 'all' && e.type !== filterType) return false;
+    if (filterStatus !== 'all' && (e.status || 'planned') !== filterStatus) return false;
+    if (filterChannel !== 'all' && !parseChannels(e.channel).includes(filterChannel)) return false;
+    return true;
+  }, [filterType, filterChannel, filterStatus]);
+
+  const money = (n: number) => n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${Math.round(n)}`;
+  function shiftDate(dateStr: string, n: number): string {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() + n);
+    return dt.toISOString().split('T')[0];
+  }
+
+  // When editing a past/running event, pull its window's revenue and the
+  // equivalent window right before it, to show whether it moved the needle.
+  const [eventResults, setEventResults] = useState<null | { windowRev: number; priorRev: number | null; days: number }>(null);
+  useEffect(() => {
+    if (!editEvent || !editEvent.date) { setEventResults(null); return; }
+    const start = editEvent.date;
+    const end = editEvent.endDate || editEvent.date;
+    if (start > todayStr()) { setEventResults(null); return; } // future — no results yet
+    const days = Math.max(1, Math.round((Date.parse(end) - Date.parse(start)) / 86400000) + 1);
+    const priorEnd = shiftDate(start, -1);
+    const priorStart = shiftDate(start, -days);
+    fetch(`/api/windsor?tf=custom&date_from=${priorStart}&date_to=${end}`)
+      .then(r => r.json())
+      .then(d => {
+        const rev: Record<string, number> = {};
+        for (const row of (d.revenueData || [])) rev[row.date] = Number(row.revenue || 0);
+        const sum = (a: string, b: string) => Object.entries(rev).reduce((s, [dt, v]) => (dt >= a && dt <= b ? s + v : s), 0);
+        const windowRev = sum(start, end);
+        const priorRev = sum(priorStart, priorEnd);
+        setEventResults({ windowRev, priorRev: priorRev > 0 ? priorRev : null, days });
+      })
+      .catch(() => setEventResults(null));
+  }, [editEvent]);
+
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const cells: (number | null)[] = [
@@ -132,10 +196,9 @@ export default function CalendarContent() {
   }
 
   function eventsForDate(dateStr: string): MarketingEvent[] {
-    return events.filter(e => {
-      if (e.endDate) return dateStr >= e.date && dateStr <= e.endDate;
-      return e.date === dateStr;
-    });
+    return events.filter(e => matchesFilters(e) && (
+      e.endDate ? (dateStr >= e.date && dateStr <= e.endDate) : e.date === dateStr
+    ));
   }
 
   function eventsForDay(day: number): MarketingEvent[] {
@@ -145,11 +208,11 @@ export default function CalendarContent() {
   const isMultiDay = (e: MarketingEvent) => Boolean(e.endDate && e.endDate !== e.date);
   // Multi-day events that cover this date (for the colored band across the run).
   function spansForDate(dateStr: string): MarketingEvent[] {
-    return events.filter(e => isMultiDay(e) && dateStr >= e.date && dateStr <= (e.endDate as string));
+    return events.filter(e => matchesFilters(e) && isMultiDay(e) && dateStr >= e.date && dateStr <= (e.endDate as string));
   }
   // Single-day events that land on this date (rendered as pills).
   function singlesForDate(dateStr: string): MarketingEvent[] {
-    return events.filter(e => !isMultiDay(e) && e.date === dateStr);
+    return events.filter(e => matchesFilters(e) && !isMultiDay(e) && e.date === dateStr);
   }
 
   function parseChannels(ch?: string): string[] {
@@ -222,7 +285,7 @@ export default function CalendarContent() {
   const todayDateStr = todayStr();
 
   const upcomingEvents = [...events]
-    .filter(e => e.date >= todayDateStr)
+    .filter(e => matchesFilters(e) && e.date >= todayDateStr)
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 15);
 
@@ -230,7 +293,7 @@ export default function CalendarContent() {
   const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
   const monthEvents = [...events]
     .filter(e => {
-      // include if event overlaps with this month
+      if (!matchesFilters(e)) return false;
       const start = e.date.slice(0, 7);
       const end = (e.endDate || e.date).slice(0, 7);
       return start <= monthPrefix && end >= monthPrefix;
@@ -247,6 +310,7 @@ export default function CalendarContent() {
     d.setMonth(d.getMonth() + i);
     const prefix = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     const evts = events.filter(e => {
+      if (!matchesFilters(e)) return false;
       const start = e.date.slice(0, 7);
       const end = (e.endDate || e.date).slice(0, 7);
       return start <= prefix && end >= prefix;
@@ -373,6 +437,46 @@ export default function CalendarContent() {
         </div>
       </div>
 
+      {/* ── Controls: filters + revenue overlay ── */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <select
+          value={filterType}
+          onChange={e => setFilterType(e.target.value as typeof filterType)}
+          className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-violet-300"
+        >
+          <option value="all">All types</option>
+          {(Object.keys(TYPE_LABELS) as MarketingEvent['type'][]).map(t => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
+        </select>
+        <select
+          value={filterChannel}
+          onChange={e => setFilterChannel(e.target.value)}
+          className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-violet-300"
+        >
+          <option value="all">All channels</option>
+          {CHANNEL_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select
+          value={filterStatus}
+          onChange={e => setFilterStatus(e.target.value as typeof filterStatus)}
+          className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-violet-300"
+        >
+          <option value="all">All statuses</option>
+          {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+        </select>
+        {(filterType !== 'all' || filterChannel !== 'all' || filterStatus !== 'all') && (
+          <button onClick={() => { setFilterType('all'); setFilterChannel('all'); setFilterStatus('all'); }} className="text-xs text-violet-600 hover:text-violet-700 font-medium px-1">Clear</button>
+        )}
+        <label className="ml-auto flex items-center gap-1.5 cursor-pointer select-none text-xs text-gray-500 font-medium">
+          <span
+            onClick={() => setShowPerf(v => !v)}
+            className={`w-8 h-4 rounded-full transition-colors relative cursor-pointer ${showPerf ? 'bg-violet-400' : 'bg-gray-200'}`}
+          >
+            <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${showPerf ? 'translate-x-4' : 'translate-x-0.5'}`} />
+          </span>
+          Revenue overlay
+        </label>
+      </div>
+
       {/* ── DESKTOP layout (md+) ── */}
       <div className="hidden md:grid md:grid-cols-3 gap-4">
         {/* Calendar grid — 2 cols */}
@@ -447,6 +551,11 @@ export default function CalendarContent() {
                       <div className="text-[10px] text-gray-400 px-1">+{spans.length + singles.length - 3} more</div>
                     )}
                   </div>
+                  {showPerf && perf[dateStr] && perf[dateStr].revenue > 0 && (
+                    <div className="mt-0.5 text-[9px] font-semibold text-emerald-600 text-right leading-none" title={`Revenue ${money(perf[dateStr].revenue)} · Ad spend ${money(perf[dateStr].spend)}`}>
+                      {money(perf[dateStr].revenue)}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -781,6 +890,26 @@ export default function CalendarContent() {
                   />
                 </div>
               </div>
+
+              {editEvent && eventResults && (eventResults.windowRev > 0 || eventResults.priorRev !== null) && (
+                <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <p className="text-[11px] font-bold text-gray-500 uppercase mb-1">Results</p>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-lg font-bold text-gray-800">{money(eventResults.windowRev)}</span>
+                    <span className="text-xs text-gray-400">revenue {eventResults.days === 1 ? 'that day' : `over these ${eventResults.days} days`}</span>
+                  </div>
+                  {eventResults.priorRev !== null && (() => {
+                    const lift = Math.round(((eventResults.windowRev - eventResults.priorRev) / eventResults.priorRev) * 100);
+                    const up = lift >= 0;
+                    return (
+                      <p className={`text-xs font-semibold mt-0.5 ${up ? 'text-emerald-600' : 'text-red-500'}`}>
+                        {up ? '▲' : '▼'} {Math.abs(lift)}% vs the prior {eventResults.days === 1 ? 'day' : `${eventResults.days} days`} ({money(eventResults.priorRev)})
+                      </p>
+                    );
+                  })()}
+                  <p className="text-[10px] text-gray-400 mt-1">Total Shopify revenue in the window — a directional read, not strictly attributed to this event.</p>
+                </div>
+              )}
 
               {saveError && (
                 <div className="mt-4 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
