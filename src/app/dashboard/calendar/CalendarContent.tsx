@@ -129,7 +129,12 @@ export default function CalendarContent() {
     const mm = String(month + 1).padStart(2, '0');
     const lastDay = new Date(year, month + 1, 0).getDate();
     const from = `${year}-${mm}-01`;
-    const to = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
+    const monthEnd = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    // Never ask for future dates — a future UNTIL makes ShopifyQL return a
+    // single collapsed total instead of a per-day series.
+    if (from > today) { setPerf({}); return; }
+    const to = monthEnd > today ? today : monthEnd;
     fetch(`/api/windsor?tf=custom&date_from=${from}&date_to=${to}`)
       .then(r => r.json())
       .then(d => {
@@ -551,7 +556,7 @@ export default function CalendarContent() {
                       <div className="text-[10px] text-gray-400 px-1">+{spans.length + singles.length - 3} more</div>
                     )}
                   </div>
-                  {showPerf && perf[dateStr] && perf[dateStr].revenue > 0 && (
+                  {showPerf && dateStr <= todayDateStr && perf[dateStr] && perf[dateStr].revenue > 0 && (
                     <div className="mt-0.5 text-[9px] font-semibold text-emerald-600 text-right leading-none" title={`Revenue ${money(perf[dateStr].revenue)} · Ad spend ${money(perf[dateStr].spend)}`}>
                       {money(perf[dateStr].revenue)}
                     </div>
