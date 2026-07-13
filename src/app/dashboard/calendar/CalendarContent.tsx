@@ -131,10 +131,13 @@ export default function CalendarContent() {
     const from = `${year}-${mm}-01`;
     const monthEnd = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    // Never ask for future dates — a future UNTIL makes ShopifyQL return a
-    // single collapsed total instead of a per-day series.
-    if (from > today) { setPerf({}); return; }
-    const to = monthEnd > today ? today : monthEnd;
+    // Request only through YESTERDAY. Any range that includes today makes
+    // /api/windsor take its "live" branch, which lumps the whole range's
+    // revenue onto day 1; ending yesterday routes to the clean per-day path.
+    const yd = new Date(today); yd.setDate(yd.getDate() - 1);
+    const yesterday = yd.toISOString().split('T')[0];
+    if (from > yesterday) { setPerf({}); return; } // month hasn't started yet
+    const to = monthEnd > yesterday ? yesterday : monthEnd;
     fetch(`/api/windsor?tf=custom&date_from=${from}&date_to=${to}`)
       .then(r => r.json())
       .then(d => {
@@ -171,11 +174,14 @@ export default function CalendarContent() {
     if (!editEvent || !editEvent.date) { setEventResults(null); return; }
     const start = editEvent.date;
     const end = editEvent.endDate || editEvent.date;
-    if (start > todayStr()) { setEventResults(null); return; } // future — no results yet
+    const yesterday = shiftDate(todayStr(), -1);
+    if (start > yesterday) { setEventResults(null); return; } // future/today — no results yet
     const days = Math.max(1, Math.round((Date.parse(end) - Date.parse(start)) / 86400000) + 1);
     const priorEnd = shiftDate(start, -1);
     const priorStart = shiftDate(start, -days);
-    fetch(`/api/windsor?tf=custom&date_from=${priorStart}&date_to=${end}`)
+    // End the query at yesterday so /api/windsor uses its per-day (not live) path.
+    const fetchTo = end > yesterday ? yesterday : end;
+    fetch(`/api/windsor?tf=custom&date_from=${priorStart}&date_to=${fetchTo}`)
       .then(r => r.json())
       .then(d => {
         const rev: Record<string, number> = {};
