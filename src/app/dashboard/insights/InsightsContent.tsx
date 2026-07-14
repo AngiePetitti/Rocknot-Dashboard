@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 
@@ -10,6 +10,7 @@ interface Insight {
 }
 
 interface InsightSet {
+  summary?: string;
   creatives: Insight[];
   products: Insight[];
   promos: Insight[];
@@ -24,7 +25,11 @@ interface Snapshot {
   metrics: Record<string, number>;
   productsCount: number;
   platforms: string[];
+  hasInventoryContext?: boolean;
+  hasCalendarContext?: boolean;
 }
+
+const STORAGE_KEY = 'rocknot_ai_insights_last';
 
 const CATEGORIES = [
   { key: 'creatives' as const, label: 'Ad Creative Ideas', icon: '🎨', accentColor: '#818cf8', bg: 'bg-indigo-50', text: 'text-indigo-700', dot: 'bg-indigo-400', description: 'New angles, hooks & formats to test' },
@@ -83,6 +88,22 @@ export default function InsightsContent() {
   const currentTfItem = TIMEFRAMES.find(t => 'value' in t && t.value === tf);
   const currentTfLabel = currentTfItem && 'label' in currentTfItem ? currentTfItem.label : 'Last 30 days';
 
+  // Restore the last generation so insights survive a reload / tab switch.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved?.insights) {
+        setInsights(saved.insights);
+        setSnapshot(saved.snapshot ?? null);
+        if (saved.generatedAt) setGeneratedAt(new Date(saved.generatedAt));
+        if (saved.tf) setTf(saved.tf);
+        if (typeof saved.compareMode === 'boolean') setCompareMode(saved.compareMode);
+      }
+    } catch { /* corrupt cache — ignore */ }
+  }, []);
+
   async function generate() {
     if (tf === 'custom' && (!customFrom || !customTo)) return;
     setLoading(true);
@@ -95,7 +116,13 @@ export default function InsightsContent() {
       if (data.error) throw new Error(data.error);
       setInsights(data.insights);
       setSnapshot(data.snapshot);
-      setGeneratedAt(new Date());
+      const now = new Date();
+      setGeneratedAt(now);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          insights: data.insights, snapshot: data.snapshot, generatedAt: now.toISOString(), tf, compareMode,
+        }));
+      } catch { /* storage full — non-fatal */ }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong');
     } finally {
@@ -261,6 +288,12 @@ export default function InsightsContent() {
           {snapshot.productsCount > 0 && (
             <div className="text-[11px] text-gray-400">· {snapshot.productsCount} products</div>
           )}
+          {snapshot.hasInventoryContext && (
+            <span className="text-[10px] bg-cyan-50 text-cyan-700 px-1.5 py-0.5 rounded-full font-medium">🏭 inventory-aware</span>
+          )}
+          {snapshot.hasCalendarContext && (
+            <span className="text-[10px] bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded-full font-medium">📅 calendar-aware</span>
+          )}
           {generatedAt && (
             <div className="ml-auto text-[11px] text-gray-300">
               Generated {generatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -285,6 +318,19 @@ export default function InsightsContent() {
             </Card>
           ))}
         </div>
+      )}
+
+      {/* Executive summary */}
+      {hasInsights && insights.summary && (
+        <Card accentColor="#a78bfa" className="mb-4">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-xl bg-violet-100 flex items-center justify-center text-base shrink-0">✦</div>
+            <div>
+              <p className="text-xs font-bold text-gray-800 mb-1">Executive Summary</p>
+              <p className="text-sm text-gray-600 leading-relaxed">{insights.summary}</p>
+            </div>
+          </div>
+        </Card>
       )}
 
       {/* Insight cards */}
