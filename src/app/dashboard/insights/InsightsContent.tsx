@@ -30,6 +30,16 @@ interface Snapshot {
 }
 
 const STORAGE_KEY = 'rocknot_ai_insights_last';
+const CHAT_KEY = 'rocknot_ai_analyst_chat';
+
+interface ChatMsg { role: 'user' | 'assistant'; content: string }
+
+const SUGGESTED_QUESTIONS = [
+  'Which products should we put more ad spend behind, and why?',
+  'Why did CAC move over the last month?',
+  'What are our best and worst days of the week for revenue?',
+  'Which slow-moving inventory should we discount first?',
+];
 
 const CATEGORIES = [
   { key: 'creatives' as const, label: 'Ad Creative Ideas', icon: '🎨', accentColor: '#818cf8', bg: 'bg-indigo-50', text: 'text-indigo-700', dot: 'bg-indigo-400', description: 'New angles, hooks & formats to test' },
@@ -87,6 +97,53 @@ export default function InsightsContent() {
 
   const currentTfItem = TIMEFRAMES.find(t => 'value' in t && t.value === tf);
   const currentTfLabel = currentTfItem && 'label' in currentTfItem ? currentTfItem.label : 'Last 30 days';
+
+  // ── Ask the Analyst chat ──
+  const [chat, setChat] = useState<ChatMsg[]>([]);
+  const [question, setQuestion] = useState('');
+  const [asking, setAsking] = useState(false);
+  const [askError, setAskError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CHAT_KEY);
+      if (raw) setChat(JSON.parse(raw));
+    } catch { /* ignore */ }
+  }, []);
+
+  async function ask(q?: string) {
+    const text = (q ?? question).trim();
+    if (!text || asking) return;
+    const next: ChatMsg[] = [...chat, { role: 'user', content: text }];
+    setChat(next);
+    setQuestion('');
+    setAsking(true);
+    setAskError(null);
+    try {
+      const res = await fetch('/api/insights/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: next }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Something went wrong');
+      const withAnswer: ChatMsg[] = [...next, { role: 'assistant', content: data.answer }];
+      setChat(withAnswer);
+      try { localStorage.setItem(CHAT_KEY, JSON.stringify(withAnswer.slice(-24))); } catch { /* ignore */ }
+    } catch (e) {
+      setAskError(e instanceof Error ? e.message : 'Something went wrong');
+      setChat(chat); // roll back the optimistic user message on failure
+      setQuestion(text);
+    } finally {
+      setAsking(false);
+    }
+  }
+
+  function clearChat() {
+    setChat([]);
+    setAskError(null);
+    try { localStorage.removeItem(CHAT_KEY); } catch { /* ignore */ }
+  }
 
   // Restore the last generation so insights survive a reload / tab switch.
   useEffect(() => {
@@ -242,6 +299,88 @@ export default function InsightsContent() {
           <span>{error}</span>
         </div>
       )}
+
+      {/* ── Ask the Analyst ── */}
+      <Card accentColor="#67e8f9" className="mb-5">
+        <div className="flex items-center gap-2 mb-1">
+          <div className="w-8 h-8 rounded-xl bg-cyan-50 flex items-center justify-center text-base">💬</div>
+          <div className="flex-1">
+            <p className="text-xs font-bold text-gray-800">Ask the Analyst</p>
+            <p className="text-[10px] text-gray-400">Questions answered against your real 90-day sales, ads, inventory & calendar data — with the math shown.</p>
+          </div>
+          {chat.length > 0 && (
+            <button onClick={clearChat} className="text-[11px] text-gray-400 hover:text-gray-600 font-medium">Clear</button>
+          )}
+        </div>
+
+        {/* Conversation */}
+        {chat.length > 0 && (
+          <div className="mt-3 space-y-3 max-h-96 overflow-y-auto pr-1">
+            {chat.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+                  msg.role === 'user' ? 'bg-violet-600 text-white' : 'bg-gray-50 text-gray-700 border border-gray-100'
+                }`}>
+                  {msg.content}
+                </div>
+              </div>
+            ))}
+            {asking && (
+              <div className="flex justify-start">
+                <div className="bg-gray-50 border border-gray-100 rounded-2xl px-3.5 py-2.5 text-sm text-gray-400">
+                  <span className="inline-flex gap-1">
+                    <span className="animate-bounce">·</span>
+                    <span className="animate-bounce" style={{ animationDelay: '0.15s' }}>·</span>
+                    <span className="animate-bounce" style={{ animationDelay: '0.3s' }}>·</span>
+                  </span>
+                  <span className="ml-2">crunching the numbers…</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Suggested questions (before first message) */}
+        {chat.length === 0 && !asking && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {SUGGESTED_QUESTIONS.map(q => (
+              <button
+                key={q}
+                onClick={() => ask(q)}
+                className="text-[11px] px-2.5 py-1.5 rounded-full bg-cyan-50 text-cyan-800 hover:bg-cyan-100 border border-cyan-100 transition-colors text-left"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {askError && (
+          <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{askError}</div>
+        )}
+
+        {/* Input */}
+        <form
+          onSubmit={e => { e.preventDefault(); ask(); }}
+          className="mt-3 flex gap-2"
+        >
+          <input
+            type="text"
+            value={question}
+            onChange={e => setQuestion(e.target.value)}
+            placeholder="e.g. Which colorways are trending up the fastest?"
+            disabled={asking}
+            className="flex-1 px-3.5 py-2.5 text-sm border border-gray-200 rounded-xl bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-cyan-300 disabled:opacity-60"
+          />
+          <button
+            type="submit"
+            disabled={asking || !question.trim()}
+            className="px-4 py-2.5 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
+          >
+            {asking ? '…' : 'Ask'}
+          </button>
+        </form>
+      </Card>
 
       {/* Empty state */}
       {!insights && !loading && !error && (
