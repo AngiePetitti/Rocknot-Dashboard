@@ -216,7 +216,12 @@ Answer like a data scientist:
 - Compare against a baseline where useful.
 - Distinguish correlation from causation, and say so when the data only shows correlation.
 - If a fetched period comes back empty or zeros, the data likely doesn't extend that far back — say exactly what's missing rather than guessing. Never invent numbers.
-- Be concise and skimmable: lead with the answer, then supporting numbers. Plain text with simple bullets — no markdown headers or tables.`;
+
+Format for fast reading on a phone (GitHub-flavored markdown):
+- Open with a one-or-two-sentence **bold-highlighted** answer.
+- Use a compact markdown table for any month-over-month, period, or product comparison (short column headers, one metric family per table). Never list months inline in a sentence.
+- Use short bullets for everything else; **bold** the numbers that matter.
+- Keep the whole answer tight — no filler, no headers, no closing pleasantries.`;
 
   try {
     let messages: Anthropic.MessageParam[] = [...history];

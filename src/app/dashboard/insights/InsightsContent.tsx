@@ -1,8 +1,39 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
+
+// Compact, readable rendering for analyst answers (bold, bullets, tables).
+function AnswerMarkdown({ text }: { text: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+        strong: ({ children }) => <strong className="font-bold text-gray-800">{children}</strong>,
+        ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>,
+        ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>,
+        li: ({ children }) => <li className="leading-snug">{children}</li>,
+        h1: ({ children }) => <p className="font-bold text-gray-800 mb-1">{children}</p>,
+        h2: ({ children }) => <p className="font-bold text-gray-800 mb-1">{children}</p>,
+        h3: ({ children }) => <p className="font-bold text-gray-800 mb-1">{children}</p>,
+        code: ({ children }) => <code className="bg-gray-100 rounded px-1 text-[12px]">{children}</code>,
+        table: ({ children }) => (
+          <div className="overflow-x-auto -mx-1 mb-2">
+            <table className="text-xs border-collapse min-w-full">{children}</table>
+          </div>
+        ),
+        th: ({ children }) => <th className="text-left font-semibold text-gray-500 border-b border-gray-200 px-2 py-1 whitespace-nowrap">{children}</th>,
+        td: ({ children }) => <td className="border-b border-gray-100 px-2 py-1 whitespace-nowrap">{children}</td>,
+      }}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+}
 
 interface Insight {
   title: string;
@@ -103,6 +134,11 @@ export default function InsightsContent() {
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [chat, asking]);
 
   useEffect(() => {
     try {
@@ -303,10 +339,10 @@ export default function InsightsContent() {
       {/* ── Ask the Analyst ── */}
       <Card accentColor="#67e8f9" className="mb-5">
         <div className="flex items-center gap-2 mb-1">
-          <div className="w-8 h-8 rounded-xl bg-cyan-50 flex items-center justify-center text-base">💬</div>
-          <div className="flex-1">
+          <div className="w-8 h-8 rounded-xl bg-cyan-50 flex items-center justify-center text-base shrink-0">💬</div>
+          <div className="flex-1 min-w-0">
             <p className="text-xs font-bold text-gray-800">Ask the Analyst</p>
-            <p className="text-[10px] text-gray-400">Questions answered against your real 90-day sales, ads, inventory & calendar data — with the math shown.</p>
+            <p className="text-[10px] text-gray-400">Ask anything — it queries your live sales, ads, inventory & calendar data for whatever period your question needs, and shows the math.</p>
           </div>
           {chat.length > 0 && (
             <button onClick={clearChat} className="text-[11px] text-gray-400 hover:text-gray-600 font-medium">Clear</button>
@@ -315,13 +351,13 @@ export default function InsightsContent() {
 
         {/* Conversation */}
         {chat.length > 0 && (
-          <div className="mt-3 space-y-3 max-h-96 overflow-y-auto pr-1">
+          <div className="mt-3 space-y-3 max-h-[60vh] overflow-y-auto overflow-x-hidden pr-1">
             {chat.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
-                  msg.role === 'user' ? 'bg-violet-600 text-white' : 'bg-gray-50 text-gray-700 border border-gray-100'
+              <div key={i} className={`flex min-w-0 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[92%] sm:max-w-[85%] min-w-0 rounded-2xl px-3.5 py-2.5 text-sm break-words ${
+                  msg.role === 'user' ? 'bg-violet-600 text-white leading-relaxed' : 'bg-gray-50 text-gray-700 border border-gray-100'
                 }`}>
-                  {msg.content}
+                  {msg.role === 'assistant' ? <AnswerMarkdown text={msg.content} /> : msg.content}
                 </div>
               </div>
             ))}
@@ -337,6 +373,7 @@ export default function InsightsContent() {
                 </div>
               </div>
             )}
+            <div ref={chatEndRef} />
           </div>
         )}
 
@@ -368,9 +405,9 @@ export default function InsightsContent() {
             type="text"
             value={question}
             onChange={e => setQuestion(e.target.value)}
-            placeholder="e.g. Which colorways are trending up the fastest?"
+            placeholder="Ask about any product, period, or metric…"
             disabled={asking}
-            className="flex-1 px-3.5 py-2.5 text-sm border border-gray-200 rounded-xl bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-cyan-300 disabled:opacity-60"
+            className="flex-1 min-w-0 px-3.5 py-2.5 text-base sm:text-sm border border-gray-200 rounded-xl bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-cyan-300 disabled:opacity-60"
           />
           <button
             type="submit"
