@@ -65,6 +65,40 @@ const CHAT_KEY = 'rocknot_ai_analyst_chat';
 
 interface ChatMsg { role: 'user' | 'assistant'; content: string }
 
+function isMobile(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
+}
+
+// Message list shared by the inline (desktop) card and the fullscreen mobile chat.
+function ConversationView({ chat, asking, endRef }: { chat: ChatMsg[]; asking: boolean; endRef: React.RefObject<HTMLDivElement> }) {
+  return (
+    <>
+      {chat.map((msg, i) => (
+        <div key={i} className={`flex min-w-0 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div className={`max-w-[92%] sm:max-w-[85%] min-w-0 rounded-2xl px-3.5 py-2.5 text-sm break-words ${
+            msg.role === 'user' ? 'bg-violet-600 text-white leading-relaxed' : 'bg-gray-50 text-gray-700 border border-gray-100'
+          }`}>
+            {msg.role === 'assistant' ? <AnswerMarkdown text={msg.content} /> : msg.content}
+          </div>
+        </div>
+      ))}
+      {asking && (
+        <div className="flex justify-start">
+          <div className="bg-gray-50 border border-gray-100 rounded-2xl px-3.5 py-2.5 text-sm text-gray-400">
+            <span className="inline-flex gap-1">
+              <span className="animate-bounce">·</span>
+              <span className="animate-bounce" style={{ animationDelay: '0.15s' }}>·</span>
+              <span className="animate-bounce" style={{ animationDelay: '0.3s' }}>·</span>
+            </span>
+            <span className="ml-2">crunching the numbers…</span>
+          </div>
+        </div>
+      )}
+      <div ref={endRef} />
+    </>
+  );
+}
+
 const SUGGESTED_QUESTIONS = [
   'Which products should we put more ad spend behind, and why?',
   'Why did CAC move over the last month?',
@@ -134,11 +168,23 @@ export default function InsightsContent() {
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false); // fullscreen chat (mobile)
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const overlayEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [chat, asking]);
+    overlayEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [chat, asking, chatOpen]);
+
+  // Lock the page behind the fullscreen chat so swipes only move the chat.
+  useEffect(() => {
+    if (chatOpen) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = prev; };
+    }
+  }, [chatOpen]);
 
   useEffect(() => {
     try {
@@ -150,6 +196,7 @@ export default function InsightsContent() {
   async function ask(q?: string) {
     const text = (q ?? question).trim();
     if (!text || asking) return;
+    if (isMobile()) setChatOpen(true); // answer arrives in the fullscreen chat
     const next: ChatMsg[] = [...chat, { role: 'user', content: text }];
     setChat(next);
     setQuestion('');
@@ -349,32 +396,22 @@ export default function InsightsContent() {
           )}
         </div>
 
-        {/* Conversation */}
+        {/* Conversation — inline on desktop; mobile uses the fullscreen chat */}
         {chat.length > 0 && (
-          <div className="mt-3 space-y-3 max-h-[60vh] overflow-y-auto overflow-x-hidden pr-1">
-            {chat.map((msg, i) => (
-              <div key={i} className={`flex min-w-0 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[92%] sm:max-w-[85%] min-w-0 rounded-2xl px-3.5 py-2.5 text-sm break-words ${
-                  msg.role === 'user' ? 'bg-violet-600 text-white leading-relaxed' : 'bg-gray-50 text-gray-700 border border-gray-100'
-                }`}>
-                  {msg.role === 'assistant' ? <AnswerMarkdown text={msg.content} /> : msg.content}
-                </div>
-              </div>
-            ))}
-            {asking && (
-              <div className="flex justify-start">
-                <div className="bg-gray-50 border border-gray-100 rounded-2xl px-3.5 py-2.5 text-sm text-gray-400">
-                  <span className="inline-flex gap-1">
-                    <span className="animate-bounce">·</span>
-                    <span className="animate-bounce" style={{ animationDelay: '0.15s' }}>·</span>
-                    <span className="animate-bounce" style={{ animationDelay: '0.3s' }}>·</span>
-                  </span>
-                  <span className="ml-2">crunching the numbers…</span>
-                </div>
-              </div>
-            )}
-            <div ref={chatEndRef} />
+          <div className="hidden md:block mt-3 space-y-3 max-h-[60vh] overflow-y-auto overflow-x-hidden overscroll-contain pr-1">
+            <ConversationView chat={chat} asking={asking} endRef={chatEndRef} />
           </div>
+        )}
+
+        {/* Mobile: open the conversation fullscreen */}
+        {chat.length > 0 && (
+          <button
+            onClick={() => setChatOpen(true)}
+            className="md:hidden mt-3 w-full flex items-center justify-between px-3.5 py-3 rounded-xl bg-cyan-50 border border-cyan-100 text-left"
+          >
+            <span className="text-sm font-semibold text-cyan-800">💬 Open conversation ({chat.length} message{chat.length > 1 ? 's' : ''})</span>
+            <span className="text-cyan-500 text-lg leading-none">⤢</span>
+          </button>
         )}
 
         {/* Suggested questions (before first message) */}
@@ -405,6 +442,7 @@ export default function InsightsContent() {
             type="text"
             value={question}
             onChange={e => setQuestion(e.target.value)}
+            onFocus={e => { if (isMobile()) { e.target.blur(); setChatOpen(true); } }}
             placeholder="Ask about any product, period, or metric…"
             disabled={asking}
             className="flex-1 min-w-0 px-3.5 py-2.5 text-base sm:text-sm border border-gray-200 rounded-xl bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-cyan-300 disabled:opacity-60"
@@ -418,6 +456,75 @@ export default function InsightsContent() {
           </button>
         </form>
       </Card>
+
+      {/* ── Fullscreen chat (mobile) ── */}
+      {chatOpen && (
+        <div className="md:hidden fixed inset-x-0 top-0 h-[100dvh] z-50 bg-white flex flex-col">
+          {/* Header */}
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 shrink-0">
+            <div className="w-8 h-8 rounded-xl bg-cyan-50 flex items-center justify-center text-base shrink-0">💬</div>
+            <p className="flex-1 text-sm font-bold text-gray-800">Ask the Analyst</p>
+            {chat.length > 0 && (
+              <button onClick={clearChat} className="text-xs text-gray-400 hover:text-gray-600 font-medium px-2">Clear</button>
+            )}
+            <button
+              onClick={() => setChatOpen(false)}
+              aria-label="Close chat"
+              className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 2L14 14M14 2L2 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+            </button>
+          </div>
+
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-3 space-y-3">
+            {chat.length === 0 && !asking && (
+              <div className="pt-6">
+                <p className="text-xs text-gray-400 mb-3 text-center">Ask anything about your sales, ads, inventory, or calendar — any time period.</p>
+                <div className="flex flex-col gap-2">
+                  {SUGGESTED_QUESTIONS.map(q => (
+                    <button
+                      key={q}
+                      onClick={() => ask(q)}
+                      className="text-xs px-3 py-2.5 rounded-xl bg-cyan-50 text-cyan-800 border border-cyan-100 text-left"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <ConversationView chat={chat} asking={asking} endRef={overlayEndRef} />
+            {askError && (
+              <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{askError}</div>
+            )}
+          </div>
+
+          {/* Input pinned at the bottom */}
+          <form
+            onSubmit={e => { e.preventDefault(); ask(); }}
+            className="flex gap-2 px-3 py-3 border-t border-gray-100 shrink-0"
+            style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+          >
+            <input
+              type="text"
+              value={question}
+              onChange={e => setQuestion(e.target.value)}
+              placeholder="Ask a question…"
+              disabled={asking}
+              autoFocus
+              className="flex-1 min-w-0 px-3.5 py-2.5 text-base border border-gray-200 rounded-xl bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-cyan-300 disabled:opacity-60"
+            />
+            <button
+              type="submit"
+              disabled={asking || !question.trim()}
+              className="px-4 py-2.5 bg-cyan-600 disabled:opacity-50 text-white text-sm font-semibold rounded-xl"
+            >
+              {asking ? '…' : 'Ask'}
+            </button>
+          </form>
+        </div>
+      )}
 
       {/* Empty state */}
       {!insights && !loading && !error && (
