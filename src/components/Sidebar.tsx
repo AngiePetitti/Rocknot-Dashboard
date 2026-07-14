@@ -17,6 +17,7 @@ const navItems = [
   { href: '/dashboard/insights', label: 'AI Insights', icon: '✦' },
   // Admin-only — filtered below by role.
   { href: '/dashboard/financials', label: 'Financials', icon: '💰', adminOnly: true },
+  { href: '/dashboard/admin', label: 'Team & Access', icon: '🔐', adminOnly: true },
 ];
 
 interface SidebarProps {
