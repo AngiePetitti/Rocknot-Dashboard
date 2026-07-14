@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
+import { useSession, signOut } from 'next-auth/react';
 
 const navItems = [
   { href: '/dashboard', label: 'Overview', icon: '📊' },
@@ -14,6 +15,8 @@ const navItems = [
   { href: '/dashboard/attribution', label: 'Attribution', icon: '🔗' },
   { href: '/dashboard/calendar', label: 'Marketing Calendar', icon: '📅' },
   { href: '/dashboard/insights', label: 'AI Insights', icon: '✦' },
+  // Admin-only — filtered below by role.
+  { href: '/dashboard/financials', label: 'Financials', icon: '💰', adminOnly: true },
 ];
 
 interface SidebarProps {
@@ -25,6 +28,11 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tf = searchParams.get('tf') || '30d';
+  const { data: session, status } = useSession();
+  const isAdmin = session?.user?.role === 'admin';
+  // Hide admin-only items unless the user is an admin. When auth isn't wired up
+  // (unauthenticated session), show everything so the pre-auth site is intact.
+  const visibleNav = navItems.filter(i => !i.adminOnly || isAdmin || status === 'unauthenticated');
 
   function buildHref(href: string) {
     return `${href}?tf=${tf}`;
@@ -66,7 +74,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5">
-        {navItems.map(item => {
+        {visibleNav.map(item => {
           const isActive = pathname === item.href;
           return (
             <Link
@@ -89,13 +97,29 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         })}
       </nav>
 
-      {/* Footer */}
-      <div className="px-5 py-4 border-t border-gray-100">
-        <p className="text-[10px] text-gray-300 leading-relaxed">
-          Rocknot Analytics v1.0
-          <br />
-          Powered by Windsor.ai
-        </p>
+      {/* Footer — signed-in user + sign out (only when authenticated) */}
+      {session?.user && (
+        <div className="px-4 py-3 border-t border-gray-100">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-full bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center shrink-0">
+              {(session.user.email || '?').charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-gray-700 truncate">{session.user.email}</p>
+              <p className="text-[10px] text-gray-400 capitalize">{session.user.role || 'team'}</p>
+            </div>
+            <button
+              onClick={() => signOut({ callbackUrl: '/login' })}
+              title="Sign out"
+              className="text-[11px] text-gray-400 hover:text-gray-700 font-medium"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="px-5 py-3 border-t border-gray-100">
+        <p className="text-[10px] text-gray-300 leading-relaxed">Rocknot Analytics v1.0 · Windsor.ai</p>
       </div>
     </aside>
   );
