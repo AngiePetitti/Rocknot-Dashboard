@@ -674,7 +674,7 @@ export default function CalendarContent() {
                 <button
                   key={i}
                   onClick={() => setSelectedDate(isSelected ? null : dateStr)}
-                  className={`h-11 flex flex-col items-center justify-start pt-1 rounded-xl transition-all ${
+                  className={`min-h-[44px] flex flex-col items-center justify-start pt-1 pb-0.5 rounded-xl transition-all ${
                     isSelected ? 'bg-violet-100' : isToday ? 'bg-violet-50' : 'hover:bg-gray-50 active:bg-gray-100'
                   }`}
                 >
@@ -690,6 +690,9 @@ export default function CalendarContent() {
                         <div key={di} className="w-1 h-1 rounded-full" style={{ backgroundColor: ev.color }} />
                       ))}
                     </div>
+                  )}
+                  {showPerf && dateStr <= todayDateStr && perf[dateStr] && perf[dateStr].revenue > 0 && (
+                    <span className="text-[8px] font-semibold text-emerald-600 leading-none mt-0.5">{money(perf[dateStr].revenue)}</span>
                   )}
                 </button>
               );
