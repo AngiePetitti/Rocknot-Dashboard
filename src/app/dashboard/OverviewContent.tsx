@@ -691,7 +691,8 @@ export default function OverviewContent() {
             <h2 className="text-sm font-bold text-gray-700">Customer Acquisition Cost Trend</h2>
           </div>
           <p className="text-xs text-gray-400 mb-4">
-            Indigo = New CAC (spend ÷ new customers) · Green = Blended CAC (spend ÷ all buyers) · Red dashes = ${TARGET_CAC} target. Watch New CAC climb as spend scales.
+            Indigo = New CAC (spend ÷ new customers) · Green = Blended CAC (spend ÷ all buyers) · Red dashes = ${TARGET_CAC} target.
+            {revenueData.length > 45 ? ' Long ranges roll up to monthly CAC so month-over-month movement is readable.' : ' Watch New CAC move as spend scales.'}
           </p>
           <CACChart data={revenueData} target={TARGET_CAC} />
         </Card>

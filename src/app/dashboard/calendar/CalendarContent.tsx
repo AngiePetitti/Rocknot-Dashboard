@@ -35,6 +35,18 @@ const TYPE_BG: Record<MarketingEvent['type'], string> = {
   other: 'bg-gray-100 text-gray-600',
 };
 
+// Launches dominate the calendar, and coloring them all violet made the whole
+// page purple. Each launch gets a stable pastel from this palette (hashed from
+// its title, so a product keeps the same color everywhere). Other types keep
+// their semantic color (Sale amber, Deadline red, …).
+const LAUNCH_PASTELS = ['#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#06b6d4', '#f43f5e', '#84cc16', '#a855f7', '#f97316', '#14b8a6', '#6366f1'];
+function eventDisplayColor(e: MarketingEvent): string {
+  if (e.type !== 'launch') return e.color || TYPE_COLORS[e.type];
+  let h = 0;
+  for (let i = 0; i < e.title.length; i++) h = (h * 31 + e.title.charCodeAt(i)) >>> 0;
+  return LAUNCH_PASTELS[h % LAUNCH_PASTELS.length];
+}
+
 const CHANNEL_OPTIONS = ['Email', 'SMS', 'Paid', 'Organic', 'Other'];
 type Status = 'planned' | 'live' | 'done';
 const STATUS_OPTIONS: { value: Status; label: string; color: string; bg: string }[] = [
@@ -99,7 +111,7 @@ export default function CalendarContent() {
       const r = await fetch('/api/calendar', { cache: 'no-store' });
       const d = await r.json();
       if (!r.ok) { setLoadError(d.error || 'Could not load calendar events.'); setStatus('error'); return; }
-      setEvents(d.events || []);
+      setEvents(((d.events || []) as MarketingEvent[]).map(e => ({ ...e, color: eventDisplayColor(e) })));
       setLoadError(null);
       setStatus('ok');
       setLastSynced(new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
@@ -261,8 +273,9 @@ export default function CalendarContent() {
       const r = await fetch(url, { method: editEvent ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const d = await r.json();
       if (!r.ok || !d.event) { setSaveError(d.error ? `Couldn't save — ${d.error}` : "Couldn't save this event."); return; }
-      if (editEvent) setEvents(prev => prev.map(e => e.id === editEvent.id ? d.event : e));
-      else setEvents(prev => [...prev, d.event]);
+      const colored = { ...d.event, color: eventDisplayColor(d.event) };
+      if (editEvent) setEvents(prev => prev.map(e => e.id === editEvent.id ? colored : e));
+      else setEvents(prev => [...prev, colored]);
       setShowModal(false);
     } catch (err) {
       setSaveError(`Couldn't save — ${String(err)}`);
