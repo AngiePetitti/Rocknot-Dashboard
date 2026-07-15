@@ -228,45 +228,13 @@ export default function InsightsContent() {
     }
   }
 
-  const [reporting, setReporting] = useState(false);
-
-  // Turn the current conversation into a shareable visual report (opens in a new tab).
-  async function createReport() {
-    if (reporting || !chat.some(m => m.role === 'assistant')) return;
-    setReporting(true);
-    setAskError(null);
-    // Open the tab synchronously (before await) so popup blockers allow it.
-    const win = window.open('', '_blank');
-    if (win) {
-      win.document.write('<title>Building report…</title><body style="font-family:system-ui;background:#f9fafb;color:#6b7280;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>✦ Building your report — this takes 30–60 seconds…</p></body>');
-    }
-    try {
-      const res = await fetch('/api/insights/report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: chat }),
-      });
-      const data = await res.json();
-      if (!res.ok || data.error || !data.html) throw new Error(data.error || 'Report generation failed');
-      if (win && !win.closed) {
-        win.document.open();
-        win.document.write(data.html);
-        win.document.close();
-      } else {
-        // Tab was blocked or closed — fall back to downloading the report file.
-        const url = URL.createObjectURL(new Blob([data.html], { type: 'text/html' }));
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `rocknot-report-${new Date().toISOString().slice(0, 10)}.html`;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 30000);
-      }
-    } catch (e) {
-      if (win && !win.closed) win.close();
-      setAskError(e instanceof Error ? e.message : 'Report generation failed');
-    } finally {
-      setReporting(false);
-    }
+  // Turn the current conversation into a shareable visual report. Opens a
+  // dedicated tab that builds the report itself, so backgrounding this tab
+  // (common on iOS) can't strand the request.
+  function createReport() {
+    if (!chat.some(m => m.role === 'assistant')) return;
+    try { localStorage.setItem(chatKey, JSON.stringify(chat.slice(-24))); } catch { /* ignore */ }
+    window.open(`/dashboard/insights/report?k=${encodeURIComponent(chatKey)}`, '_blank');
   }
 
   function clearChat() {
@@ -441,10 +409,9 @@ export default function InsightsContent() {
           {chat.some(m => m.role === 'assistant') && (
             <button
               onClick={createReport}
-              disabled={reporting}
-              className="hidden md:flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-100 font-semibold transition-colors disabled:opacity-60"
+              className="hidden md:flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-100 font-semibold transition-colors"
             >
-              {reporting ? 'Building…' : '📊 Create report'}
+              📊 Create report
             </button>
           )}
           {chat.length > 0 && (
@@ -523,10 +490,9 @@ export default function InsightsContent() {
             {chat.some(m => m.role === 'assistant') && (
               <button
                 onClick={createReport}
-                disabled={reporting}
-                className="text-xs px-2.5 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-100 font-semibold disabled:opacity-60"
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-100 font-semibold"
               >
-                {reporting ? 'Building…' : '📊 Report'}
+                📊 Report
               </button>
             )}
             {chat.length > 0 && (
