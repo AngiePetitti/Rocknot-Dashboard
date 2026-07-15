@@ -228,6 +228,47 @@ export default function InsightsContent() {
     }
   }
 
+  const [reporting, setReporting] = useState(false);
+
+  // Turn the current conversation into a shareable visual report (opens in a new tab).
+  async function createReport() {
+    if (reporting || !chat.some(m => m.role === 'assistant')) return;
+    setReporting(true);
+    setAskError(null);
+    // Open the tab synchronously (before await) so popup blockers allow it.
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write('<title>Building report…</title><body style="font-family:system-ui;background:#f9fafb;color:#6b7280;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>✦ Building your report — this takes 30–60 seconds…</p></body>');
+    }
+    try {
+      const res = await fetch('/api/insights/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: chat }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error || !data.html) throw new Error(data.error || 'Report generation failed');
+      if (win && !win.closed) {
+        win.document.open();
+        win.document.write(data.html);
+        win.document.close();
+      } else {
+        // Tab was blocked or closed — fall back to downloading the report file.
+        const url = URL.createObjectURL(new Blob([data.html], { type: 'text/html' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `rocknot-report-${new Date().toISOString().slice(0, 10)}.html`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+      }
+    } catch (e) {
+      if (win && !win.closed) win.close();
+      setAskError(e instanceof Error ? e.message : 'Report generation failed');
+    } finally {
+      setReporting(false);
+    }
+  }
+
   function clearChat() {
     setChat([]);
     setAskError(null);
@@ -397,6 +438,15 @@ export default function InsightsContent() {
             <p className="text-xs font-bold text-gray-800">Ask the Analyst</p>
             <p className="text-[10px] text-gray-400">Ask anything — it queries your live sales, ads, inventory & calendar data for whatever period your question needs, and shows the math.</p>
           </div>
+          {chat.some(m => m.role === 'assistant') && (
+            <button
+              onClick={createReport}
+              disabled={reporting}
+              className="hidden md:flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-100 font-semibold transition-colors disabled:opacity-60"
+            >
+              {reporting ? 'Building…' : '📊 Create report'}
+            </button>
+          )}
           {chat.length > 0 && (
             <button onClick={clearChat} className="text-[11px] text-gray-400 hover:text-gray-600 font-medium">Clear</button>
           )}
@@ -470,6 +520,15 @@ export default function InsightsContent() {
           <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 shrink-0">
             <div className="w-8 h-8 rounded-xl bg-cyan-50 flex items-center justify-center text-base shrink-0">💬</div>
             <p className="flex-1 text-sm font-bold text-gray-800">Ask the Analyst</p>
+            {chat.some(m => m.role === 'assistant') && (
+              <button
+                onClick={createReport}
+                disabled={reporting}
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-100 font-semibold disabled:opacity-60"
+              >
+                {reporting ? 'Building…' : '📊 Report'}
+              </button>
+            )}
             {chat.length > 0 && (
               <button onClick={clearChat} className="text-xs text-gray-400 hover:text-gray-600 font-medium px-2">Clear</button>
             )}
