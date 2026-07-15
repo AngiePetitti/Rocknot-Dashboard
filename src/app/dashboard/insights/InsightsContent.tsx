@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import Header from '@/src/components/Header';
@@ -169,6 +170,9 @@ export default function InsightsContent() {
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false); // fullscreen chat (mobile)
+  const { data: session, status: sessionStatus } = useSession();
+  // Scope saved chat to the signed-in user so it never leaks across logins on a shared device.
+  const chatKey = session?.user?.email ? `${CHAT_KEY}:${session.user.email.toLowerCase()}` : CHAT_KEY;
   const chatEndRef = useRef<HTMLDivElement>(null);
   const overlayEndRef = useRef<HTMLDivElement>(null);
 
@@ -187,11 +191,13 @@ export default function InsightsContent() {
   }, [chatOpen]);
 
   useEffect(() => {
+    if (sessionStatus === 'loading') return;
     try {
-      const raw = localStorage.getItem(CHAT_KEY);
-      if (raw) setChat(JSON.parse(raw));
+      if (chatKey !== CHAT_KEY) localStorage.removeItem(CHAT_KEY); // drop any old shared (non-scoped) history
+      const raw = localStorage.getItem(chatKey);
+      setChat(raw ? JSON.parse(raw) : []);
     } catch { /* ignore */ }
-  }, []);
+  }, [chatKey, sessionStatus]);
 
   async function ask(q?: string) {
     const text = (q ?? question).trim();
@@ -212,7 +218,7 @@ export default function InsightsContent() {
       if (!res.ok || data.error) throw new Error(data.error || 'Something went wrong');
       const withAnswer: ChatMsg[] = [...next, { role: 'assistant', content: data.answer }];
       setChat(withAnswer);
-      try { localStorage.setItem(CHAT_KEY, JSON.stringify(withAnswer.slice(-24))); } catch { /* ignore */ }
+      try { localStorage.setItem(chatKey, JSON.stringify(withAnswer.slice(-24))); } catch { /* ignore */ }
     } catch (e) {
       setAskError(e instanceof Error ? e.message : 'Something went wrong');
       setChat(chat); // roll back the optimistic user message on failure
@@ -225,7 +231,7 @@ export default function InsightsContent() {
   function clearChat() {
     setChat([]);
     setAskError(null);
-    try { localStorage.removeItem(CHAT_KEY); } catch { /* ignore */ }
+    try { localStorage.removeItem(chatKey); } catch { /* ignore */ }
   }
 
   // Restore the last generation so insights survive a reload / tab switch.
