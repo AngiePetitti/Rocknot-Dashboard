@@ -192,6 +192,7 @@ export default function InsightsContent() {
 
   useEffect(() => {
     if (sessionStatus === 'loading') return;
+    let local: ChatMsg[] = [];
     try {
       let raw = localStorage.getItem(chatKey);
       // Migrate any history saved under the old shared (non-scoped) key.
@@ -202,8 +203,31 @@ export default function InsightsContent() {
           localStorage.removeItem(CHAT_KEY);
         }
       }
-      if (raw) setChat(JSON.parse(raw));
+      if (raw) local = JSON.parse(raw);
     } catch { /* ignore */ }
+    if (local.length) setChat(local);
+
+    // Server copy (keyed to the login) wins when it's ahead of this device;
+    // otherwise push the local copy up so it's backed up and synced.
+    let cancelled = false;
+    fetch('/api/insights/chat', { cache: 'no-store' })
+      .then(r => r.json())
+      .then((d: { configured?: boolean; messages?: ChatMsg[] }) => {
+        if (cancelled || !d?.configured) return;
+        const server = Array.isArray(d.messages) ? d.messages : [];
+        if (server.length > local.length) {
+          setChat(server);
+          try { localStorage.setItem(chatKey, JSON.stringify(server)); } catch { /* ignore */ }
+        } else if (local.length > server.length) {
+          fetch('/api/insights/chat', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: local }),
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [chatKey, sessionStatus]);
 
   async function ask(q?: string) {
@@ -226,6 +250,12 @@ export default function InsightsContent() {
       const withAnswer: ChatMsg[] = [...next, { role: 'assistant', content: data.answer }];
       setChat(withAnswer);
       try { localStorage.setItem(chatKey, JSON.stringify(withAnswer.slice(-24))); } catch { /* ignore */ }
+      // Back up to the server (keyed to the login) — best-effort.
+      fetch('/api/insights/chat', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: withAnswer.slice(-24) }),
+      }).catch(() => {});
     } catch (e) {
       setAskError(e instanceof Error ? e.message : 'Something went wrong');
       setChat(chat); // roll back the optimistic user message on failure
@@ -248,6 +278,11 @@ export default function InsightsContent() {
     setChat([]);
     setAskError(null);
     try { localStorage.removeItem(chatKey); } catch { /* ignore */ }
+    fetch('/api/insights/chat', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [] }),
+    }).catch(() => {});
   }
 
   // Restore the last generation so insights survive a reload / tab switch.

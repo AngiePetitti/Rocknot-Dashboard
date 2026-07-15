@@ -33,6 +33,14 @@ function ReportBuilder() {
       let chat: unknown[] = [];
       try { chat = JSON.parse(localStorage.getItem(key) || '[]'); } catch { /* fall through */ }
       if (!Array.isArray(chat) || !chat.length) {
+        // No local copy on this device — try the server-synced conversation.
+        try {
+          const r = await fetch('/api/insights/chat', { cache: 'no-store' });
+          const d = await r.json();
+          if (Array.isArray(d?.messages)) chat = d.messages;
+        } catch { /* fall through */ }
+      }
+      if (!Array.isArray(chat) || !chat.length) {
         setStatus('error'); setError('No conversation found — ask the analyst a question first, then create the report from the same device.'); return;
       }
       try {
