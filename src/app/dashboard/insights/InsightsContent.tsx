@@ -193,9 +193,16 @@ export default function InsightsContent() {
   useEffect(() => {
     if (sessionStatus === 'loading') return;
     try {
-      if (chatKey !== CHAT_KEY) localStorage.removeItem(CHAT_KEY); // drop any old shared (non-scoped) history
-      const raw = localStorage.getItem(chatKey);
-      setChat(raw ? JSON.parse(raw) : []);
+      let raw = localStorage.getItem(chatKey);
+      // Migrate any history saved under the old shared (non-scoped) key.
+      if (chatKey !== CHAT_KEY) {
+        const legacy = localStorage.getItem(CHAT_KEY);
+        if (legacy) {
+          if (!raw) { localStorage.setItem(chatKey, legacy); raw = legacy; }
+          localStorage.removeItem(CHAT_KEY);
+        }
+      }
+      if (raw) setChat(JSON.parse(raw));
     } catch { /* ignore */ }
   }, [chatKey, sessionStatus]);
 
