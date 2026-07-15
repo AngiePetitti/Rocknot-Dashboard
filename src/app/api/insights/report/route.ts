@@ -82,14 +82,16 @@ HONESTY
     let finalText = '';
 
     for (let iter = 0; iter < 8; iter++) {
-      const response = await client.messages.create({
+      // Streamed because a full HTML report can exceed the SDK's 10-minute
+      // non-streaming limit at this max_tokens.
+      const response = await client.messages.stream({
         model: 'claude-opus-4-8',
         max_tokens: 32000,
         thinking: { type: 'adaptive' },
         system,
         tools: ANALYST_TOOLS,
         messages,
-      });
+      }).finalMessage();
 
       if (response.stop_reason === 'refusal') {
         return NextResponse.json({ error: 'The model declined to build this report. Try again.' }, { status: 502 });
