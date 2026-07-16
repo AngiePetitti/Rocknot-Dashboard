@@ -18,7 +18,14 @@ const TOOLBAR = `
   #rk-pdf { background: #8b5cf6; color: #fff; }
   #rk-share { background: #fff; color: #4b5563; border: 1px solid #e5e7eb !important; }
   #rk-save { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0 !important; }
-  @media print { #rk-toolbar { display: none !important; } }
+  @media print {
+    #rk-toolbar { display: none !important; }
+    /* Keep the report's colors and charts intact in the PDF: browsers strip
+       backgrounds by default and clip scrollable chart containers. */
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    div { overflow: visible !important; }
+    svg { max-width: 100% !important; }
+  }
 </style>
 <div id="rk-toolbar">
   <button id="rk-save" type="button" style="display:none">💾 Save</button>
@@ -45,8 +52,13 @@ const TOOLBAR = `
         body: JSON.stringify({ title: document.title || 'Rocknot report', html: html })
       }).then(function (r) { return r.json(); }).then(function (d) {
         if (d && d.ok) { save.textContent = '✓ Saved'; }
-        else { save.textContent = 'Save failed — retry'; save.disabled = false; }
-      }).catch(function () { save.textContent = 'Save failed — retry'; save.disabled = false; });
+        else {
+          save.textContent = 'Save failed — retry';
+          save.title = (d && d.error) || 'Unknown error';
+          save.disabled = false;
+          console.error('Report save failed:', d && d.error);
+        }
+      }).catch(function (e) { save.textContent = 'Save failed — retry'; save.title = String(e); save.disabled = false; });
     });
     // Print dialog = "Save as PDF" on iPhone (pinch out on the preview) and desktop.
     pdf.addEventListener('click', function () { window.print(); });

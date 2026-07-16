@@ -21,7 +21,10 @@ const CHAT_TAB = 'Chats';
 const MAX_MESSAGES = 40;
 
 export function isChatStoreConfigured(): boolean {
-  return Boolean((process.env.GCP_SERVICE_ACCOUNT_KEY || '').trim() && CALENDAR_SHEET_ID);
+  return Boolean(
+    (process.env.GCP_SERVICE_ACCOUNT_KEY || '').trim() &&
+    ((process.env.PRIVATE_SHEET_ID || '').trim() || CALENDAR_SHEET_ID)
+  );
 }
 
 let jwt: JWT | null = null;
@@ -56,8 +59,29 @@ async function api(path: string, init?: RequestInit): Promise<Record<string, unk
   return json as Record<string, unknown>;
 }
 
-// ── Chat-sheet id bookkeeping (persisted in the calendar sheet's _meta tab) ──
+// ── Chat-sheet id bookkeeping ────────────────────────────────────────────
+// Preferred: PRIVATE_SHEET_ID — a sheet the owner created and shared ONLY
+// with the service account (service accounts can no longer reliably create
+// their own files due to Google storage-quota rules). Fallback: an SA-owned
+// sheet whose id is persisted in the calendar sheet's hidden _meta tab.
+const PRIVATE_SHEET_ID = (process.env.PRIVATE_SHEET_ID || '').trim();
 let cachedChatSheetId: string | null = null;
+let privateTabsEnsured = false;
+
+async function ensurePrivateTabs(sheetId: string): Promise<void> {
+  if (privateTabsEnsured) return;
+  try {
+    await api(`/${sheetId}:batchUpdate`, {
+      method: 'POST',
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: CHAT_TAB } } }] }),
+    });
+    await api(`/${sheetId}/values/${CHAT_TAB}!A1?valueInputOption=RAW`, {
+      method: 'PUT',
+      body: JSON.stringify({ range: `${CHAT_TAB}!A1`, majorDimension: 'ROWS', values: [['Email', 'Index', 'Role', 'Content', 'Updated At']] }),
+    });
+  } catch { /* tab already exists */ }
+  privateTabsEnsured = true;
+}
 
 async function readMetaChatSheetId(): Promise<string | null> {
   try {
@@ -98,6 +122,10 @@ async function createChatSheet(): Promise<string> {
 }
 
 async function getChatSheetId(createIfMissing: boolean): Promise<string | null> {
+  if (PRIVATE_SHEET_ID) {
+    await ensurePrivateTabs(PRIVATE_SHEET_ID);
+    return PRIVATE_SHEET_ID;
+  }
   if (cachedChatSheetId) return cachedChatSheetId;
   let id = await readMetaChatSheetId();
   if (!id && createIfMissing) {
