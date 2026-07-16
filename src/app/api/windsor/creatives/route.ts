@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
+import { mtdRange } from '@/src/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,10 @@ function buildDateParams(tfRaw: string): Record<string, string> {
   if (tfRaw === 'ytd') {
     const year = todayStr.split('-')[0];
     return { date_from: `${year}-01-01`, date_to: todayStr };
+  }
+  if (tfRaw === 'mtd') {
+    const r = mtdRange(todayStr, yesterdayStr);
+    return { date_from: r.from, date_to: r.to };
   }
   if (tfRaw === 'last_month') {
     const [y, m] = todayStr.split('-').map(Number);

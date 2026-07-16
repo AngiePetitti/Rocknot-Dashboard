@@ -3,6 +3,7 @@ import { Timeframe } from '@/src/lib/mockData';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getOverview, fetchShopifyDaily, fetchShopifyCustomerSplit } from '@/src/lib/bqOverview';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
+import { mtdRange } from '@/src/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,10 @@ function buildCurrentParams(tf: Timeframe, todayStr: string, yesterdayStr: strin
   if (tf === '7d') return { date_from: addDays(todayStr, -7), date_to: todayStr };
   if (tf === '14d') return { date_from: addDays(todayStr, -14), date_to: todayStr };
   if (tf === '30d') return { date_from: addDays(todayStr, -30), date_to: todayStr };
+  if (tf === 'mtd') {
+    const r = mtdRange(todayStr, yesterdayStr);
+    return { date_from: r.from, date_to: r.to };
+  }
   if (tf === '6m') return { date_from: addDays(todayStr, -180), date_to: todayStr };
   if (tf === 'ytd') {
     const year = todayStr.split('-')[0];
@@ -59,6 +64,17 @@ function buildPriorParams(tf: Timeframe, todayStr: string, yesterdayStr: string)
     const [y, m, d] = todayStr.split('-');
     const from = `${Number(y) - 1}-01-01`;
     const to = `${Number(y) - 1}-${m}-${m === '02' && d === '29' ? '28' : d}`;
+    return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
+  }
+  if (tf === 'mtd') {
+    // Same days of LAST month (1st through yesterday's day-of-month).
+    const r = mtdRange(todayStr, yesterdayStr);
+    const [y, m] = r.from.split('-').map(Number);
+    const prevFirst = new Date(y, m - 2, 1);
+    const prevLast = new Date(y, m - 1, 0); // last day of prev month
+    const dayOfMonth = Math.min(Number(r.to.split('-')[2]), prevLast.getDate());
+    const from = prevFirst.toLocaleDateString('en-CA');
+    const to = new Date(prevFirst.getFullYear(), prevFirst.getMonth(), dayOfMonth).toLocaleDateString('en-CA');
     return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
   }
   if (tf === 'last_month') {

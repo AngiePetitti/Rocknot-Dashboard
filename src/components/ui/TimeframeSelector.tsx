@@ -69,6 +69,7 @@ export default function TimeframeSelector() {
       '7d': 'Prior 7 days',
       '14d': 'Prior 14 days',
       '30d': 'Prior 30 days',
+      mtd: 'Same days last month',
       last_month: 'Month before',
       '6m': 'Prior 6 months',
       ytd: 'Prior year',

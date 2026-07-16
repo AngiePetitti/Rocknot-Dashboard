@@ -3,6 +3,7 @@ import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getCustomerMetrics, getCohortData } from '@/src/lib/bqCustomers';
 import { CustomerMetrics } from '@/src/lib/mockData';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
+import { mtdRange } from '@/src/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,10 @@ function rangeForTf(tfRaw: string, dateFrom: string, dateTo: string): { from: st
   if (tfRaw === '30d') return { from: addDays(todayStr, -30), to: todayStr };
   if (tfRaw === '6m') return { from: addDays(todayStr, -180), to: todayStr };
   if (tfRaw === 'ytd') return { from: `${todayStr.split('-')[0]}-01-01`, to: todayStr };
+  if (tfRaw === 'mtd') {
+    const r = mtdRange(todayStr, yesterdayStr);
+    return { from: r.from, to: r.to };
+  }
   if (tfRaw === 'last_month') {
     const [y, m] = todayStr.split('-').map(Number);
     return {

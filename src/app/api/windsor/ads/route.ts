@@ -3,6 +3,7 @@ import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getAdsOverview } from '@/src/lib/bqAds';
 import { fetchMetaToday } from '@/src/lib/metaLive';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
+import { mtdRange } from '@/src/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -192,6 +193,9 @@ export async function GET(request: NextRequest) {
     params = rangeParams(14);
   } else if (tfRaw === '30d') {
     params = rangeParams(30);
+  } else if (tfRaw === 'mtd') {
+    const r = mtdRange(todayStr, yesterdayStr);
+    params = { date_from: r.from, date_to: r.to };
   } else if (tfRaw === 'last_month') {
     params = { date_from: firstOfMonth(1), date_to: lastOfPrevMonth() };
   } else if (tfRaw === '6m') {

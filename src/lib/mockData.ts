@@ -2,7 +2,7 @@
 // Shopify revenue/product/inventory data pulled live via Shopify Admin API
 // Ad spend data (Meta/Google/TikTok/CTV) uses estimated figures until ad platform APIs are connected
 
-export type Timeframe = 'today' | 'yesterday' | '7d' | '14d' | '30d' | 'last_month' | '6m' | 'ytd';
+export type Timeframe = 'today' | 'yesterday' | '7d' | '14d' | '30d' | 'mtd' | 'last_month' | '6m' | 'ytd';
 
 export interface DailyRevenue {
   date: string;
@@ -180,6 +180,7 @@ export const shopifyMetricsByTimeframe: Record<Timeframe, { revenue: number; ord
   '7d':        { revenue: 106244,   orders: 672,   aov: 158.10, returns: 3842 },
   '14d':       { revenue: 183960,   orders: 1098,  aov: 167.54, returns: 8100 },
   '30d':       { revenue: 480265,   orders: 2454,  aov: 195.71, returns: 23752 }, // May 6 – Jun 5, real ad spend
+  mtd:         { revenue: 106244,   orders: 672,   aov: 158.10, returns: 3842 },
   last_month:  { revenue: 487884,   orders: 2439,  aov: 199.87, returns: 0 },     // May 1-31 full month from sheet
   '6m':        { revenue: 1220000,  orders: 6980,  aov: 174.78, returns: 62000 },
   ytd:         { revenue: 2510000,  orders: 14100, aov: 178.01, returns: 125299 },
