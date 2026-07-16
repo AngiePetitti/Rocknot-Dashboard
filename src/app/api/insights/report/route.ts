@@ -21,6 +21,7 @@ const TOOLBAR = `
   #rk-pdf { background: #8b5cf6; color: #fff; }
   #rk-share { background: #fff; color: #4b5563; border: 1px solid #e5e7eb !important; }
   #rk-save { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0 !important; }
+  @page { margin: 12mm; }
   @media print {
     #rk-toolbar { display: none !important; }
     /* Keep the report's colors and charts intact in the PDF: browsers strip
@@ -28,6 +29,13 @@ const TOOLBAR = `
     * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     div { overflow: visible !important; }
     svg { max-width: 100% !important; }
+    /* Sensible page breaks: never slice a chart, table, or stat tile in half,
+       and keep headings attached to the content below them. (Containers
+       taller than a page still break — the browser ignores avoid there.) */
+    body { background: #fff !important; }
+    div, section, table, svg, figure, ul, ol { break-inside: avoid; page-break-inside: avoid; }
+    h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
+    tr, li { break-inside: avoid; }
   }
 </style>
 <div id="rk-toolbar">
@@ -150,7 +158,11 @@ BRAND STYLE — Rocknot dashboard pastels (use these exact colors)
 - Accent palette: violet #8b5cf6 (primary — h1 accent, first chart series), indigo #818cf8, pink #f9a8d4, amber #fde68a, green #86efac. Pastel section header chips using the -50 tints: #eef2ff indigo, #fdf2f8 pink, #fffbeb amber, #f0fdf4 green.
 - Stat tiles: label in 11px uppercase #9ca3af, value 24px bold #1f2937, optional delta in green #16a34a / red #dc2626.
 - Positive deltas green, negative red; keep everything else pastel and calm — no harsh saturated colors, no purple walls.
-- Print-friendly: add @media print { body { background: white } } and avoid elements that break across pages badly.
+- Print-friendly — the report will be saved as a PDF via the print dialog, so design for clean page breaks:
+  · Structure the report as a series of self-contained cards/sections, each comfortably shorter than one printed page (~900px max). Never one giant container.
+  · Add @media print { body { background: white } .card { break-inside: avoid } } (using whatever class you give cards) and break-after: avoid on headings.
+  · Keep each chart + its title + caption inside one card so they print together.
+  · Prefer several smaller charts/tables over one tall one.
 
 HONESTY
 - Only report numbers you fetched. If a period had no data, either omit it or mark it "no data" — never fabricate.`;
