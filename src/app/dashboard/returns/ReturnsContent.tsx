@@ -1,5 +1,6 @@
 'use client';
 
+import { cachedJson } from '@/src/lib/clientCache';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { formatCurrency, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
@@ -49,9 +50,9 @@ export default function ReturnsContent() {
     if (dateFrom) params.set('date_from', dateFrom);
     if (dateTo) params.set('date_to', dateTo);
 
-    fetch(`/api/windsor/returns?${params}`)
-      .then(r => r.json())
-      .then(data => {
+    cachedJson<Record<string, unknown> & { source?: string }>(
+      `/api/windsor/returns?${params}`,
+      (data: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
         if (data.source === 'shopify_live') {
           setTotalReturns(data.totalReturns ?? 0);
           setGrossSales(data.grossSales ?? 0);
@@ -65,8 +66,9 @@ export default function ReturnsContent() {
         } else {
           setStatus('error');
         }
-      })
-      .catch(() => setStatus('error'));
+      },
+      () => setStatus('error')
+    );
   }, [tfRaw, dateFrom, dateTo]);
 
   // Unique categories from product list for filter

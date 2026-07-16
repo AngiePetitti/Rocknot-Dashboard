@@ -1,5 +1,6 @@
 'use client';
 
+import { cachedJson } from '@/src/lib/clientCache';
 import { useEffect, useState, useMemo } from 'react';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
@@ -78,9 +79,9 @@ export default function InventoryContent() {
 
   useEffect(() => {
     setStatus('loading');
-    fetch('/api/windsor/inventory')
-      .then(r => r.json())
-      .then(data => {
+    cachedJson<Record<string, unknown> & { source?: string }>(
+      '/api/windsor/inventory',
+      (data: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
         if (data.source === 'shopify_live') {
           setItems(data.items || []);
           setBags(data.bags || []);
@@ -97,8 +98,9 @@ export default function InventoryContent() {
         } else {
           setStatus('error');
         }
-      })
-      .catch(() => setStatus('error'));
+      },
+      () => setStatus('error')
+    );
   }, []);
 
   const handleBagSort = (key: BagSortKey) => {

@@ -86,7 +86,8 @@ function ReportBuilder() {
           <>
             <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center text-2xl mx-auto mb-4 animate-pulse">✦</div>
             <p className="text-sm font-semibold text-gray-800 mb-1">Cleo is building your report…</p>
-            <p className="text-xs text-gray-400">Re-checking the numbers and drawing the charts. Usually 30–90 seconds. ({elapsed}s)</p>
+            <p className="text-xs text-gray-400 mb-2">Re-checking the numbers and drawing the charts. This can take a few minutes for bigger questions. ({elapsed}s)</p>
+            <p className="text-[11px] text-gray-400">You don&apos;t have to wait here — the finished report is saved automatically and will appear under <strong>Saved reports</strong> on the AI Insights tab.</p>
           </>
         ) : (
           <>

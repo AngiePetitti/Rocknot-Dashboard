@@ -1,5 +1,6 @@
 'use client';
 
+import { cachedJson } from '@/src/lib/clientCache';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { formatCurrency, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
@@ -50,9 +51,9 @@ export default function ProductsContent() {
     if (dateFrom) params.set('date_from', dateFrom);
     if (dateTo) params.set('date_to', dateTo);
 
-    fetch(`/api/windsor/products?${params}`)
-      .then(r => r.json())
-      .then(data => {
+    cachedJson<Record<string, unknown> & { source?: string }>(
+      `/api/windsor/products?${params}`,
+      (data: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
         if (data.source === 'shopify_live') {
           setProducts(data.products || []);
           setTotalRevenue(data.totalRevenue ?? 0);
@@ -66,13 +67,14 @@ export default function ProductsContent() {
           setTotalGrossProfit(0);
           setStatus('error');
         }
-      })
-      .catch(() => {
+      },
+      () => {
         setProducts([]);
         setTotalRevenue(0);
         setTotalUnits(0);
         setStatus('error');
-      });
+      }
+    );
   }, [tfRaw, dateFrom, dateTo]);
 
   const topProduct = products[0];

@@ -3,6 +3,7 @@
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { buildCallouts } from '@/src/lib/callouts';
+import { cachedJson } from '@/src/lib/clientCache';
 import type { MarketingEvent } from '@/src/app/api/calendar/route';
 import { Timeframe, PlatformSpend, DailyRevenue } from '@/src/lib/mockData';
 import { formatCurrency, formatROAS, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
@@ -159,9 +160,11 @@ export default function OverviewContent() {
     if (dateTo) params.set('date_to', dateTo);
     if (compareOn) params.set('compare', 'true');
 
-    fetch(`/api/windsor?${params}`)
-      .then(r => r.json())
-      .then(data => {
+    // Cached copies (from earlier visits this session) render instantly and
+    // are refreshed in the background — switching tabs doesn't restart loads.
+    cachedJson<Record<string, unknown> & { source?: string }>(
+      `/api/windsor?${params}`,
+      data => {
         const source = data.source || 'unknown';
         if (source !== 'windsor_live' && source !== 'bigquery_live') {
           setMetrics(EMPTY_METRICS);
@@ -171,28 +174,29 @@ export default function OverviewContent() {
           setLastUpdated(new Date().toLocaleTimeString());
           return;
         }
-        const m: LiveMetrics = { returns: 0, ...data.metrics };
+        const m: LiveMetrics = { ...{ returns: 0 }, ...(data.metrics as LiveMetrics) };
         setMetrics(m);
-        setRevenueData(data.revenueData || []);
-        if (data.priorPeriod) { setPriorPeriod(data.priorPeriod); setPriorLabel(data.priorLabel || ''); }
+        setRevenueData((data.revenueData as typeof revenueData) || []);
+        if (data.priorPeriod) { setPriorPeriod(data.priorPeriod as typeof priorPeriod); setPriorLabel((data.priorLabel as string) || ''); }
         setLivePlatformSpend(buildLivePlatformSpend(m));
-        setAdsError(data.adsError || null);
+        setAdsError((data.adsError as string) || null);
         setDataLag(!!data.dataLag);
-        setLatestAvailableDate(data.latestAvailableDate || null);
+        setLatestAvailableDate((data.latestAvailableDate as string) || null);
         setShopifyDataLag(!!data.shopifyDataLag);
-        setShopifyLatestDate(data.shopifyLatestDate || null);
-        setRevenueSource(data.revenueSource || null);
-        setLiveSource(source);
+        setShopifyLatestDate((data.shopifyLatestDate as string) || null);
+        setRevenueSource((data.revenueSource as 'shopify' | 'none') || null);
+        setLiveSource(source as typeof liveSource);
         setLastUpdated(new Date().toLocaleTimeString());
-      })
-      .catch(() => {
+      },
+      () => {
         setMetrics(EMPTY_METRICS);
         setRevenueData([]);
         setLivePlatformSpend(null);
         setDataLag(false);
         setLiveSource('error');
         setLastUpdated(new Date().toLocaleTimeString());
-      });
+      }
+    );
   }, [tfRaw, dateFrom, dateTo, compareOn]);
 
   // Inventory (current stock — same regardless of timeframe) and returns (for

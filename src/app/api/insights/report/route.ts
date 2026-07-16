@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { getServerSession } from 'next-auth';
+import { authOptions, authConfigured } from '@/src/lib/auth';
 import { ANALYST_TOOLS, execTool, makeFetcher } from '@/src/lib/analystTools';
+import { saveReport, isChatStoreConfigured } from '@/src/lib/chatStore';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -42,6 +45,7 @@ const TOOLBAR = `
     if (location.pathname.indexOf('/dashboard/insights/report') !== -1 && location.search.indexOf('k=') !== -1) {
       save.style.display = '';
     }
+    if (window.__rkSaved) { save.textContent = '✓ Saved'; save.disabled = true; }
     save.addEventListener('click', function () {
       save.disabled = true;
       save.textContent = 'Saving…';
@@ -77,9 +81,15 @@ const TOOLBAR = `
   })();
 </script>`;
 
-function injectToolbar(html: string): string {
+function injectToolbar(html: string, alreadySaved: boolean): string {
+  const prefix = alreadySaved ? '<script>window.__rkSaved = true;</script>' : '';
   const i = html.toLowerCase().lastIndexOf('</body>');
-  return i === -1 ? html + TOOLBAR : html.slice(0, i) + TOOLBAR + html.slice(i);
+  return i === -1 ? html + prefix + TOOLBAR : html.slice(0, i) + prefix + TOOLBAR + html.slice(i);
+}
+
+function titleOf(html: string): string {
+  const m = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+  return (m?.[1] || 'Rocknot report').trim().slice(0, 200);
 }
 
 // Pull the HTML document out of the model's final text (it may wrap it in a code fence).
@@ -192,7 +202,20 @@ HONESTY
     if (!html) {
       return NextResponse.json({ error: 'Report generation didn\'t complete — try again, or ask a more specific question first.' }, { status: 502 });
     }
-    return NextResponse.json({ ok: true, html: injectToolbar(html) });
+    // Auto-save the finished report to the user's saved list so it survives
+    // even if they closed the tab while it was generating.
+    let saved = false;
+    if (isChatStoreConfigured() && authConfigured()) {
+      try {
+        const session = await getServerSession(authOptions);
+        const email = session?.user?.email?.toLowerCase();
+        if (email) {
+          await saveReport(email, titleOf(html), injectToolbar(html, true));
+          saved = true;
+        }
+      } catch { /* auto-save is best-effort — manual Save still available */ }
+    }
+    return NextResponse.json({ ok: true, html: injectToolbar(html, saved) });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });
   }

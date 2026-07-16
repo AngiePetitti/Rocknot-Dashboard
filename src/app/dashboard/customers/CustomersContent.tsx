@@ -1,5 +1,6 @@
 'use client';
 
+import { cachedJson } from '@/src/lib/clientCache';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { CustomerMetrics, CohortData } from '@/src/lib/mockData';
@@ -53,9 +54,9 @@ export default function CustomersContent() {
     if (dateFrom) params.set('date_from', dateFrom);
     if (dateTo) params.set('date_to', dateTo);
 
-    fetch(`/api/windsor/customers?${params}`)
-      .then(r => r.json())
-      .then(data => {
+    cachedJson<Record<string, unknown> & { source?: string }>(
+      `/api/windsor/customers?${params}`,
+      (data: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
         if (data.source === 'bigquery_live' && data.customerMetrics) {
           setCustomerMetrics(data.customerMetrics);
           setCohortData(data.cohortData || []);
@@ -65,12 +66,13 @@ export default function CustomersContent() {
           setCohortData([]);
           setStatus('error');
         }
-      })
-      .catch(() => {
+      },
+      () => {
         setCustomerMetrics(EMPTY_METRICS);
         setCohortData([]);
         setStatus('error');
-      });
+      }
+    );
   }, [tfRaw, dateFrom, dateTo]);
 
   const buybackData = [

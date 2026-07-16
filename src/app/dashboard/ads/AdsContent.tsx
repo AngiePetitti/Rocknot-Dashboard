@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Timeframe } from '@/src/lib/mockData';
+import { cachedJson } from '@/src/lib/clientCache';
 import { formatCurrency, formatROAS, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
@@ -98,32 +99,40 @@ export default function AdsContent() {
 
     // Each section loads independently so the page appears as soon as the
     // platform numbers are in — the slower creative analysis fills in after.
-    fetch(`/api/windsor/ads?${adsParams}`)
-      .then(r => r.json())
-      .then(adsData => {
+    // Previously-loaded views render instantly from the session cache and
+    // refresh in the background.
+    cachedJson<{ platforms?: PlatformData[]; dailySpend?: DaySpend[] }>(
+      `/api/windsor/ads?${adsParams}`,
+      adsData => {
         setPlatforms(adsData.platforms || []);
         setDailySpend(adsData.dailySpend || []);
         setStatus('live');
-      })
-      .catch(() => setStatus('error'));
+      },
+      () => setStatus('error')
+    );
 
     setCreativesLoading(true);
-    fetch(`/api/windsor/creatives?tf=${tfRaw}`)
-      .then(r => r.json())
-      .then(creativesData => setCreatives((creativesData.creatives || []).slice(0, 20)))
-      .catch(() => {})
-      .finally(() => setCreativesLoading(false));
+    const hadCreativesCache = cachedJson<{ creatives?: CreativeRow[] }>(
+      `/api/windsor/creatives?tf=${tfRaw}`,
+      creativesData => {
+        setCreatives((creativesData.creatives || []).slice(0, 20));
+        setCreativesLoading(false);
+      },
+      () => setCreativesLoading(false)
+    );
+    if (hadCreativesCache) setCreativesLoading(false);
 
     // Customer counts (for CAC) come from the overview endpoint, same timeframe.
-    fetch(`/api/windsor?${adsParams}`)
-      .then(r => r.json())
-      .then(overviewData => {
+    cachedJson<{ metrics?: { newCustomers?: number; returningCustomers?: number; totalAdSpend?: number } }>(
+      `/api/windsor?${adsParams}`,
+      overviewData => {
         const m = overviewData?.metrics;
         setCac(m && m.newCustomers !== undefined
           ? { newCustomers: m.newCustomers ?? 0, returningCustomers: m.returningCustomers ?? 0, totalAdSpend: m.totalAdSpend ?? 0 }
           : null);
-      })
-      .catch(() => setCac(null));
+      },
+      () => setCac(null)
+    );
   }, [tfRaw, dateFrom, dateTo]);
 
   // Reconciliation self-check runs over its own trailing window of complete
