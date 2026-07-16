@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Sidebar from './Sidebar';
+import CleoChat from './CleoChat';
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -46,6 +47,9 @@ export default function DashboardShell({ children }: { children: React.ReactNode
           {children}
         </div>
       </main>
+
+      {/* Cleo — AI analyst chat, available on every tab */}
+      <CleoChat />
     </div>
   );
 }
