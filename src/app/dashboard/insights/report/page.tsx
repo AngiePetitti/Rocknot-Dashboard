@@ -41,7 +41,7 @@ function ReportBuilder() {
         } catch { /* fall through */ }
       }
       if (!Array.isArray(chat) || !chat.length) {
-        setStatus('error'); setError('No conversation found — ask the analyst a question first, then create the report from the same device.'); return;
+        setStatus('error'); setError('No conversation found — ask Cleo a question first, then create the report from the same device.'); return;
       }
       try {
         const res = await fetch('/api/insights/report', {
@@ -68,7 +68,7 @@ function ReportBuilder() {
         {status === 'working' ? (
           <>
             <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center text-2xl mx-auto mb-4 animate-pulse">✦</div>
-            <p className="text-sm font-semibold text-gray-800 mb-1">Building your report…</p>
+            <p className="text-sm font-semibold text-gray-800 mb-1">Cleo is building your report…</p>
             <p className="text-xs text-gray-400">Re-checking the numbers and drawing the charts. Usually 30–90 seconds. ({elapsed}s)</p>
           </>
         ) : (

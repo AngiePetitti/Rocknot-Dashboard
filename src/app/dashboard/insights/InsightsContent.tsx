@@ -445,8 +445,8 @@ export default function InsightsContent() {
         <div className="flex items-center gap-2 mb-1">
           <div className="w-8 h-8 rounded-xl bg-cyan-50 flex items-center justify-center text-base shrink-0">💬</div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-gray-800">Ask the Analyst</p>
-            <p className="text-[10px] text-gray-400">Ask anything — it queries your live sales, ads, inventory & calendar data for whatever period your question needs, and shows the math.</p>
+            <p className="text-xs font-bold text-gray-800">Ask Cleo</p>
+            <p className="text-[10px] text-gray-400">Cleo is your AI analyst — she queries your live sales, ads, inventory & calendar data for whatever period your question needs, and shows the math.</p>
           </div>
           {chat.some(m => m.role === 'assistant') && (
             <button
@@ -508,7 +508,7 @@ export default function InsightsContent() {
             value={question}
             onChange={e => setQuestion(e.target.value)}
             onFocus={e => { if (isMobile()) { e.target.blur(); setChatOpen(true); } }}
-            placeholder="Ask about any product, period, or metric…"
+            placeholder="Ask Cleo about any product, period, or metric…"
             disabled={asking}
             className="flex-1 min-w-0 px-3.5 py-2.5 text-base sm:text-sm border border-gray-200 rounded-xl bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-cyan-300 disabled:opacity-60"
           />
@@ -528,7 +528,7 @@ export default function InsightsContent() {
           {/* Header */}
           <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 shrink-0">
             <div className="w-8 h-8 rounded-xl bg-cyan-50 flex items-center justify-center text-base shrink-0">💬</div>
-            <p className="flex-1 text-sm font-bold text-gray-800">Ask the Analyst</p>
+            <p className="flex-1 text-sm font-bold text-gray-800">Cleo</p>
             {chat.some(m => m.role === 'assistant') && (
               <button
                 onClick={createReport}
@@ -553,7 +553,7 @@ export default function InsightsContent() {
           <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-3 space-y-3">
             {chat.length === 0 && !asking && (
               <div className="pt-6">
-                <p className="text-xs text-gray-400 mb-3 text-center">Ask anything about your sales, ads, inventory, or calendar — any time period.</p>
+                <p className="text-xs text-gray-400 mb-3 text-center">Ask Cleo anything about your sales, ads, inventory, or calendar — any time period.</p>
                 <div className="flex flex-col gap-2">
                   {SUGGESTED_QUESTIONS.map(q => (
                     <button
@@ -583,7 +583,7 @@ export default function InsightsContent() {
               type="text"
               value={question}
               onChange={e => setQuestion(e.target.value)}
-              placeholder="Ask a question…"
+              placeholder="Ask Cleo…"
               disabled={asking}
               autoFocus
               className="flex-1 min-w-0 px-3.5 py-2.5 text-base border border-gray-200 rounded-xl bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-cyan-300 disabled:opacity-60"
