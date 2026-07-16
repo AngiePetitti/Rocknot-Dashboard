@@ -88,6 +88,21 @@ export default function InsightsContent() {
   const currentTfItem = TIMEFRAMES.find(t => 'value' in t && t.value === tf);
   const currentTfLabel = currentTfItem && 'label' in currentTfItem ? currentTfItem.label : 'Last 30 days';
 
+  // ── Saved reports (per login) ──
+  const [savedReports, setSavedReports] = useState<{ id: string; title: string; createdAt: string }[]>([]);
+
+  useEffect(() => {
+    fetch('/api/insights/reports', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d?.reports)) setSavedReports(d.reports); })
+      .catch(() => {});
+  }, []);
+
+  async function removeReport(id: string) {
+    setSavedReports(prev => prev.filter(r => r.id !== id));
+    try { await fetch(`/api/insights/reports/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch { /* ignore */ }
+  }
+
   // Restore the last generation so insights survive a reload / tab switch.
   useEffect(() => {
     try {
@@ -257,6 +272,43 @@ export default function InsightsContent() {
           <span className="text-xs font-semibold text-violet-600 whitespace-nowrap">Open chat →</span>
         </button>
       </Card>
+
+      {/* ── Saved reports (private to this login) ── */}
+      {savedReports.length > 0 && (
+        <Card accentColor="#86efac" className="mb-5">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-base">📊</span>
+            <div>
+              <h2 className="text-sm font-bold text-gray-700">Saved reports</h2>
+              <p className="text-xs text-gray-400">Reports you saved from Cleo — only visible to your login.</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {savedReports.map(r => (
+              <div key={r.id} className="flex items-center gap-2 border border-gray-100 rounded-xl px-3 py-2 bg-white">
+                <a
+                  href={`/dashboard/insights/report?saved=${encodeURIComponent(r.id)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex-1 min-w-0 text-xs font-semibold text-gray-800 hover:text-violet-700 truncate"
+                >
+                  {r.title}
+                </a>
+                <span className="text-[10px] text-gray-400 whitespace-nowrap">
+                  {r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
+                </span>
+                <button
+                  onClick={() => removeReport(r.id)}
+                  aria-label={`Delete ${r.title}`}
+                  className="text-gray-300 hover:text-red-500 p-1"
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1.5 1.5l9 9M10.5 1.5l-9 9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* Empty state */}
       {!insights && !loading && !error && (

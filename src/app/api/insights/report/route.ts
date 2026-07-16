@@ -17,9 +17,11 @@ const TOOLBAR = `
   #rk-toolbar button { font: 600 13px system-ui, sans-serif; border: none; border-radius: 12px; padding: 10px 16px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
   #rk-pdf { background: #8b5cf6; color: #fff; }
   #rk-share { background: #fff; color: #4b5563; border: 1px solid #e5e7eb !important; }
+  #rk-save { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0 !important; }
   @media print { #rk-toolbar { display: none !important; } }
 </style>
 <div id="rk-toolbar">
+  <button id="rk-save" type="button" style="display:none">💾 Save</button>
   <button id="rk-share" type="button">📤 Share</button>
   <button id="rk-pdf" type="button">Save as PDF</button>
 </div>
@@ -27,6 +29,25 @@ const TOOLBAR = `
   (function () {
     var pdf = document.getElementById('rk-pdf');
     var share = document.getElementById('rk-share');
+    var save = document.getElementById('rk-save');
+    // Save is only offered on a freshly generated report inside the dashboard
+    // (?k=...) — not on saved copies (?saved=...) or shared/downloaded files.
+    if (location.pathname.indexOf('/dashboard/insights/report') !== -1 && location.search.indexOf('k=') !== -1) {
+      save.style.display = '';
+    }
+    save.addEventListener('click', function () {
+      save.disabled = true;
+      save.textContent = 'Saving…';
+      var html = '<!doctype html>' + document.documentElement.outerHTML;
+      fetch('/api/insights/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: document.title || 'Rocknot report', html: html })
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        if (d && d.ok) { save.textContent = '✓ Saved'; }
+        else { save.textContent = 'Save failed — retry'; save.disabled = false; }
+      }).catch(function () { save.textContent = 'Save failed — retry'; save.disabled = false; });
+    });
     // Print dialog = "Save as PDF" on iPhone (pinch out on the preview) and desktop.
     pdf.addEventListener('click', function () { window.print(); });
     share.addEventListener('click', function () {

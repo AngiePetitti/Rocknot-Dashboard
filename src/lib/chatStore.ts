@@ -108,6 +108,99 @@ async function getChatSheetId(createIfMissing: boolean): Promise<string | null> 
   return id;
 }
 
+// ── Saved reports (same private sheet, "Reports" tab) ────────────────────
+// Report HTML exceeds the 50k-char cell limit, so each report is stored as
+// ordered chunks: Email | ReportId | Title | Created At | Chunk # | Chunk
+const REPORTS_TAB = 'Reports';
+const CHUNK_SIZE = 45000;
+const MAX_REPORTS_PER_USER = 30;
+
+export interface SavedReportMeta { id: string; title: string; createdAt: string }
+
+async function ensureReportsTab(sheetId: string): Promise<void> {
+  try {
+    await api(`/${sheetId}:batchUpdate`, {
+      method: 'POST',
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: REPORTS_TAB } } }] }),
+    });
+    await api(`/${sheetId}/values/${REPORTS_TAB}!A1?valueInputOption=RAW`, {
+      method: 'PUT',
+      body: JSON.stringify({ range: `${REPORTS_TAB}!A1`, majorDimension: 'ROWS', values: [['Email', 'Report Id', 'Title', 'Created At', 'Chunk', 'Content']] }),
+    });
+  } catch { /* tab already exists */ }
+}
+
+async function readReportRows(sheetId: string): Promise<string[][]> {
+  try {
+    const data = await api(`/${sheetId}/values/${REPORTS_TAB}!A2:F`) as { values?: string[][] };
+    return data.values || [];
+  } catch {
+    return []; // tab doesn't exist yet
+  }
+}
+
+export async function listReports(email: string): Promise<SavedReportMeta[]> {
+  const id = await getChatSheetId(false);
+  if (!id) return [];
+  const rows = await readReportRows(id);
+  const seen = new Map<string, SavedReportMeta>();
+  for (const r of rows) {
+    if ((r[0] || '').toLowerCase() !== email.toLowerCase()) continue;
+    if (r[4] !== '0') continue; // meta lives on the first chunk row
+    seen.set(r[1], { id: r[1], title: r[2] || 'Untitled report', createdAt: r[3] || '' });
+  }
+  return Array.from(seen.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function saveReport(email: string, title: string, html: string): Promise<SavedReportMeta> {
+  const sheetId = await getChatSheetId(true);
+  if (!sheetId) throw new Error('Report storage unavailable');
+  await ensureReportsTab(sheetId);
+
+  // Cap per-user history so the sheet doesn't grow without bound.
+  const existing = await listReports(email);
+  for (const old of existing.slice(MAX_REPORTS_PER_USER - 1)) {
+    await deleteReport(email, old.id);
+  }
+
+  const id = `rep_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const createdAt = new Date().toISOString();
+  const chunks: string[] = [];
+  for (let i = 0; i < html.length; i += CHUNK_SIZE) chunks.push(html.slice(i, i + CHUNK_SIZE));
+  const rows = chunks.map((c, i) => [email.toLowerCase(), id, title.slice(0, 200), createdAt, String(i), c]);
+  await api(`/${sheetId}/values/${REPORTS_TAB}!A1:append?valueInputOption=RAW`, {
+    method: 'POST',
+    body: JSON.stringify({ range: `${REPORTS_TAB}!A1`, majorDimension: 'ROWS', values: rows }),
+  });
+  return { id, title, createdAt };
+}
+
+export async function getReport(email: string, reportId: string): Promise<string | null> {
+  const sheetId = await getChatSheetId(false);
+  if (!sheetId) return null;
+  const rows = await readReportRows(sheetId);
+  const mine = rows
+    .filter(r => (r[0] || '').toLowerCase() === email.toLowerCase() && r[1] === reportId)
+    .sort((a, b) => Number(a[4]) - Number(b[4]));
+  if (!mine.length) return null;
+  return mine.map(r => r[5] || '').join('');
+}
+
+export async function deleteReport(email: string, reportId: string): Promise<void> {
+  const sheetId = await getChatSheetId(false);
+  if (!sheetId) return;
+  const rows = await readReportRows(sheetId);
+  const keep = rows.filter(r => !((r[0] || '').toLowerCase() === email.toLowerCase() && r[1] === reportId));
+  if (keep.length === rows.length) return;
+  await api(`/${sheetId}/values/${REPORTS_TAB}!A2:F:clear`, { method: 'POST', body: '{}' });
+  if (keep.length) {
+    await api(`/${sheetId}/values/${REPORTS_TAB}!A2?valueInputOption=RAW`, {
+      method: 'PUT',
+      body: JSON.stringify({ range: `${REPORTS_TAB}!A2`, majorDimension: 'ROWS', values: keep }),
+    });
+  }
+}
+
 // ── Public API ───────────────────────────────────────────────────────────
 export async function getChat(email: string): Promise<StoredChatMsg[]> {
   const id = await getChatSheetId(false);

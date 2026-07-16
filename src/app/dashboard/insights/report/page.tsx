@@ -26,6 +26,23 @@ function ReportBuilder() {
     started.current = true;
 
     async function build() {
+      // Opening a previously saved report — fetch it and render, no generation.
+      const savedId = params.get('saved');
+      if (savedId) {
+        try {
+          const res = await fetch(`/api/insights/reports/${encodeURIComponent(savedId)}`, { cache: 'no-store' });
+          const data = await res.json().catch(() => null);
+          if (!res.ok || !data?.html) throw new Error(data?.error || `Couldn't load the saved report (${res.status})`);
+          document.open();
+          document.write(data.html);
+          document.close();
+        } catch (e) {
+          setStatus('error');
+          setError(e instanceof Error ? e.message : 'Couldn\'t load the saved report');
+        }
+        return;
+      }
+
       const key = params.get('k') || CHAT_KEY_PREFIX;
       if (!key.startsWith(CHAT_KEY_PREFIX)) {
         setStatus('error'); setError('Invalid report link.'); return;
