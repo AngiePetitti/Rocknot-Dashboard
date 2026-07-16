@@ -9,6 +9,46 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 interface ChatMessage { role: 'user' | 'assistant'; content: string }
 
+// Floating Share / Save-as-PDF toolbar injected into every report. Hidden when
+// printing so it never shows up in the PDF itself.
+const TOOLBAR = `
+<style>
+  #rk-toolbar { position: fixed; bottom: 16px; right: 16px; display: flex; gap: 8px; z-index: 9999; }
+  #rk-toolbar button { font: 600 13px system-ui, sans-serif; border: none; border-radius: 12px; padding: 10px 16px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+  #rk-pdf { background: #8b5cf6; color: #fff; }
+  #rk-share { background: #fff; color: #4b5563; border: 1px solid #e5e7eb !important; }
+  @media print { #rk-toolbar { display: none !important; } }
+</style>
+<div id="rk-toolbar">
+  <button id="rk-share" type="button">📤 Share</button>
+  <button id="rk-pdf" type="button">Save as PDF</button>
+</div>
+<script>
+  (function () {
+    var pdf = document.getElementById('rk-pdf');
+    var share = document.getElementById('rk-share');
+    // Print dialog = "Save as PDF" on iPhone (pinch out on the preview) and desktop.
+    pdf.addEventListener('click', function () { window.print(); });
+    share.addEventListener('click', function () {
+      var html = '<!doctype html>' + document.documentElement.outerHTML;
+      var file = new File([html], (document.title || 'rocknot-report') + '.html', { type: 'text/html' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: document.title }).catch(function () {});
+      } else {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+        a.download = file.name;
+        a.click();
+      }
+    });
+  })();
+</script>`;
+
+function injectToolbar(html: string): string {
+  const i = html.toLowerCase().lastIndexOf('</body>');
+  return i === -1 ? html + TOOLBAR : html.slice(0, i) + TOOLBAR + html.slice(i);
+}
+
 // Pull the HTML document out of the model's final text (it may wrap it in a code fence).
 function extractHtml(text: string): string | null {
   const fenced = text.match(/```(?:html)?\s*([\s\S]*?)```/);
@@ -119,7 +159,7 @@ HONESTY
     if (!html) {
       return NextResponse.json({ error: 'Report generation didn\'t complete — try again, or ask a more specific question first.' }, { status: 502 });
     }
-    return NextResponse.json({ ok: true, html });
+    return NextResponse.json({ ok: true, html: injectToolbar(html) });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });
   }
