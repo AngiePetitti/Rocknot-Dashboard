@@ -57,6 +57,13 @@ export default function InventoryContent() {
   const [finance, setFinance] = useState<InventoryFinance | null>(null);
   const [moveOrDiscount, setMoveOrDiscount] = useState<InventoryItem[]>([]);
   const [moveExpanded, setMoveExpanded] = useState(false);
+  // Tap a truncated product name (mobile) to reveal the full title.
+  const [expandedNames, setExpandedNames] = useState<Set<string>>(new Set());
+  const toggleName = (id: string) => setExpandedNames(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [filterCategory, setFilterCategory] = useState<string>('all');
@@ -253,9 +260,10 @@ export default function InventoryContent() {
             {(restockExpanded ? restockNow : restockNow.slice(0, 8)).map(item => (
               <div
                 key={item.id}
-                className="flex items-center gap-2 bg-white border border-orange-200 rounded-lg px-3 py-1.5"
+                onClick={() => toggleName(item.id)}
+                className="flex items-center gap-2 bg-white border border-orange-200 rounded-lg px-3 py-1.5 cursor-pointer"
               >
-                <span className="text-xs font-semibold text-gray-800 flex-1 min-w-0 truncate">
+                <span className={`text-xs font-semibold text-gray-800 flex-1 min-w-0 ${expandedNames.has(item.id) ? 'break-words' : 'truncate'}`}>
                   {item.product}{item.variant ? ` · ${item.variant}` : ''}
                 </span>
                 <span className="text-[11px] text-gray-500 whitespace-nowrap">
@@ -293,9 +301,10 @@ export default function InventoryContent() {
             {(moveExpanded ? moveOrDiscount : moveOrDiscount.slice(0, 6)).map(item => (
               <div
                 key={item.id}
-                className="flex items-center gap-2 bg-white border border-red-200 rounded-lg px-3 py-1.5"
+                onClick={() => toggleName(item.id)}
+                className="flex items-center gap-2 bg-white border border-red-200 rounded-lg px-3 py-1.5 cursor-pointer"
               >
-                <span className="text-xs font-semibold text-gray-800 flex-1 min-w-0 truncate">
+                <span className={`text-xs font-semibold text-gray-800 flex-1 min-w-0 ${expandedNames.has(item.id) ? 'break-words' : 'truncate'}`}>
                   {item.product}{item.variant ? ` · ${item.variant}` : ''}
                 </span>
                 <span className="text-[11px] text-gray-500 whitespace-nowrap">
@@ -338,9 +347,13 @@ export default function InventoryContent() {
             {visibleBags.map(bag => {
               const cfg = STATUS_CONFIG[bag.status];
               return (
-                <div key={bag.id} className="border border-gray-100 rounded-xl p-3 bg-white flex items-center justify-between gap-3">
+                <div
+                  key={bag.id}
+                  onClick={() => toggleName(bag.id)}
+                  className="border border-gray-100 rounded-xl p-3 bg-white flex items-center justify-between gap-3 cursor-pointer active:bg-gray-50"
+                >
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-800 leading-tight truncate">{bag.product}</p>
+                    <p className={`text-sm font-semibold text-gray-800 leading-tight ${expandedNames.has(bag.id) ? 'break-words' : 'truncate'}`}>{bag.product}</p>
                     {bag.variant && <p className="text-xs text-gray-500 mt-0.5">{bag.variant}</p>}
                     {bag.unitPrice > 0 && <p className="text-xs font-semibold text-gray-600 mt-0.5">${bag.unitPrice.toLocaleString()}</p>}
                   </div>

@@ -84,6 +84,7 @@ export default function AdsContent() {
   const [platforms, setPlatforms] = useState<PlatformData[]>([]);
   const [dailySpend, setDailySpend] = useState<DaySpend[]>([]);
   const [creatives, setCreatives] = useState<CreativeRow[]>([]);
+  const [creativesLoading, setCreativesLoading] = useState(true);
   const [status, setStatus] = useState<'loading' | 'live' | 'error'>('loading');
   const [adSort, setAdSort] = useState<{ key: AdSortKey; dir: 'asc' | 'desc' }>({ key: 'spend', dir: 'desc' });
   const [reconcile, setReconcile] = useState<ReconcileResult | null>(null);
@@ -95,23 +96,34 @@ export default function AdsContent() {
     if (dateFrom) adsParams.set('date_from', dateFrom);
     if (dateTo) adsParams.set('date_to', dateTo);
 
-    Promise.all([
-      fetch(`/api/windsor/ads?${adsParams}`).then(r => r.json()),
-      fetch(`/api/windsor/creatives?tf=${tfRaw}`).then(r => r.json()),
-      // Customer counts (for CAC) come from the overview endpoint, same timeframe.
-      fetch(`/api/windsor?${adsParams}`).then(r => r.json()).catch(() => null),
-    ])
-      .then(([adsData, creativesData, overviewData]) => {
+    // Each section loads independently so the page appears as soon as the
+    // platform numbers are in — the slower creative analysis fills in after.
+    fetch(`/api/windsor/ads?${adsParams}`)
+      .then(r => r.json())
+      .then(adsData => {
         setPlatforms(adsData.platforms || []);
         setDailySpend(adsData.dailySpend || []);
-        setCreatives((creativesData.creatives || []).slice(0, 20));
+        setStatus('live');
+      })
+      .catch(() => setStatus('error'));
+
+    setCreativesLoading(true);
+    fetch(`/api/windsor/creatives?tf=${tfRaw}`)
+      .then(r => r.json())
+      .then(creativesData => setCreatives((creativesData.creatives || []).slice(0, 20)))
+      .catch(() => {})
+      .finally(() => setCreativesLoading(false));
+
+    // Customer counts (for CAC) come from the overview endpoint, same timeframe.
+    fetch(`/api/windsor?${adsParams}`)
+      .then(r => r.json())
+      .then(overviewData => {
         const m = overviewData?.metrics;
         setCac(m && m.newCustomers !== undefined
           ? { newCustomers: m.newCustomers ?? 0, returningCustomers: m.returningCustomers ?? 0, totalAdSpend: m.totalAdSpend ?? 0 }
           : null);
-        setStatus('live');
       })
-      .catch(() => setStatus('error'));
+      .catch(() => setCac(null));
   }, [tfRaw, dateFrom, dateTo]);
 
   // Reconciliation self-check runs over its own trailing window of complete
@@ -375,6 +387,21 @@ export default function AdsContent() {
           )}
 
           {/* Top Ads Table */}
+          {creativesLoading && creatives.length === 0 && (
+            <Card accentColor="#86efac">
+              <h2 className="text-sm font-bold text-gray-700 mb-4">Top Performing Ads</h2>
+              <div className="animate-pulse space-y-2.5">
+                {[1, 2, 3, 4, 5].map(i => (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="h-3 bg-gray-100 rounded flex-1" />
+                    <div className="h-3 bg-gray-100 rounded w-16" />
+                    <div className="h-3 bg-gray-100 rounded w-12" />
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-3">Loading per-ad creative data — this is the slowest feed…</p>
+            </Card>
+          )}
           {creatives.length > 0 && (
             <Card accentColor="#86efac">
               <h2 className="text-sm font-bold text-gray-700 mb-4">Top Performing Ads</h2>
