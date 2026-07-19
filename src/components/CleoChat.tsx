@@ -180,12 +180,10 @@ export default function CleoChat() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: withAnswer.slice(-24) }),
       }).catch(() => {});
-      // Cleo decided to build a report — open the report tab. Popup blockers
-      // can stop a post-await window.open; offer a tap-through link if so.
+      // Cleo decided to build a report — start it in the background right away
+      // and open a viewer tab (tap-through link if the popup is blocked).
       if (typeof data.reportFocus === 'string' && data.reportFocus) {
-        const url = `/dashboard/insights/report?k=${encodeURIComponent(chatKey)}&focus=${encodeURIComponent(data.reportFocus)}`;
-        const w = window.open(url, '_blank');
-        setReportLink(w ? null : url);
+        kickoffReport({ messages: withAnswer.slice(-8), focus: data.reportFocus });
       }
     } catch (e) {
       setAskError(e instanceof Error ? e.message : 'Something went wrong');
@@ -210,11 +208,38 @@ export default function CleoChat() {
   // Turn the current conversation into a shareable visual report. Opens a
   // dedicated tab that builds the report itself, so backgrounding this tab
   // (common on iOS) can't strand the request.
+  // Kick off report generation IMMEDIATELY in the background (the server
+  // auto-saves the result), then open a viewer tab that just waits for it.
+  // The viewer can be closed or backgrounded freely — generation continues.
+  function kickoffReport(payload: { messages: ChatMsg[]; focus?: string }): void {
+    const since = Date.now();
+    const body = JSON.stringify(payload);
+    try {
+      // keepalive lets the request survive tab switches (64KB body limit).
+      fetch('/api/insights/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        keepalive: body.length < 60000,
+      }).catch(() => {});
+    } catch { /* ignore */ }
+    const url = `/dashboard/insights/report?since=${since}`;
+    const w = window.open(url, '_blank');
+    setReportLink(w ? null : url);
+  }
+
   function createReport(scope: 'last' | 'all') {
     if (!chat.some(m => m.role === 'assistant')) return;
     setReportMenu(false);
-    try { localStorage.setItem(chatKey, JSON.stringify(chat.slice(-24))); } catch { /* ignore */ }
-    window.open(`/dashboard/insights/report?k=${encodeURIComponent(chatKey)}&scope=${scope}`, '_blank');
+    let msgs = chat;
+    if (scope === 'last') {
+      let lastAssistant = -1;
+      for (let i = chat.length - 1; i >= 0; i--) if (chat[i].role === 'assistant') { lastAssistant = i; break; }
+      let lastUser = -1;
+      for (let i = lastAssistant - 1; i >= 0; i--) if (chat[i].role === 'user') { lastUser = i; break; }
+      if (lastUser !== -1 && lastAssistant !== -1) msgs = chat.slice(lastUser, lastAssistant + 1);
+    }
+    kickoffReport({ messages: msgs });
   }
 
   return (
@@ -309,7 +334,7 @@ export default function CleoChat() {
                   onClick={() => setReportLink(null)}
                   className="text-sm font-semibold text-violet-700 bg-violet-50 border border-violet-100 rounded-2xl px-3.5 py-2.5"
                 >
-                  📊 Tap to open your report
+                  📊 Report is building in the background — tap to watch, or find it in Saved reports when done
                 </a>
               </div>
             )}

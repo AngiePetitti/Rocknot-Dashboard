@@ -55,6 +55,32 @@ function ReportBuilder() {
     started.current = true;
 
     async function build() {
+      // Viewer mode: generation was already started in the background by the
+      // chat; this tab just waits for the auto-saved result and shows it.
+      // Backgrounding or closing this tab never affects the report.
+      const since = Number(params.get('since') || 0);
+      if (since) {
+        setStatus('working');
+        for (let i = 0; i < 150; i++) {
+          try {
+            const res = await fetch('/api/insights/reports', { cache: 'no-store' });
+            const data = await res.json().catch(() => null);
+            const reports = (data?.reports as { id: string; createdAt: string }[] | undefined) ?? [];
+            // 2-minute clock-skew allowance between this device and the server.
+            const fresh = reports.find(r => Date.parse(r.createdAt) >= since - 120000);
+            if (fresh) {
+              const rep = await fetch(`/api/insights/reports/${encodeURIComponent(fresh.id)}`, { cache: 'no-store' });
+              const repData = await rep.json().catch(() => null);
+              if (repData?.html) { render(repData.html); return; }
+            }
+          } catch { /* keep polling */ }
+          await new Promise(r => setTimeout(r, 4000));
+        }
+        setStatus('error');
+        setError('The report is taking unusually long. Check Saved reports on the AI Insights tab in a few minutes.');
+        return;
+      }
+
       // Opening a previously saved report — fetch it and render, no generation.
       const savedId = params.get('saved');
       if (savedId) {
@@ -154,7 +180,7 @@ function ReportBuilder() {
             <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center text-2xl mx-auto mb-4 animate-pulse">✦</div>
             <p className="text-sm font-semibold text-gray-800 mb-1">Cleo is building your report…</p>
             <p className="text-xs text-gray-400 mb-2">Re-checking the numbers and drawing the charts. This can take a few minutes for bigger questions. ({elapsed}s)</p>
-            <p className="text-[11px] text-gray-400">You don&apos;t have to wait here — the finished report is saved automatically and will appear under <strong>Saved reports</strong> on the AI Insights tab.</p>
+            <p className="text-[11px] text-gray-400">You don&apos;t have to wait here — it builds in the background even if you close this tab, and lands under <strong>Saved reports</strong> on the AI Insights tab.</p>
           </>
         ) : (
           <>
