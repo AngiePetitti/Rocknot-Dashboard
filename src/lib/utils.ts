@@ -1,4 +1,7 @@
 export function formatCurrency(value: number, compact = false): string {
+  if (compact && value >= 1_000_000) {
+    return '$' + (value / 1_000_000).toFixed(2).replace(/\.?0+$/, '') + 'M';
+  }
   if (compact && value >= 1000) {
     return '$' + (value / 1000).toFixed(1) + 'k';
   }
