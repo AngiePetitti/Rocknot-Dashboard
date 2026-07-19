@@ -19,12 +19,19 @@ export async function GET(req: NextRequest) {
   // Storage self-test: writes and deletes a tiny test report, surfacing the
   // exact Sheets error if saving is broken. Visit /api/insights/reports?debug=1
   if (req.nextUrl.searchParams.get('debug')) {
+    const sheetIdInUse = (process.env.PRIVATE_SHEET_ID || '').replace(/\s+/g, '');
     try {
       const meta = await saveReport(email, '__storage test__', '<p>test</p>');
       await deleteReport(email, meta.id);
-      return NextResponse.json({ ok: true, storage: 'working', email });
+      return NextResponse.json({ ok: true, storage: 'working', email, sheetIdInUse });
     } catch (err) {
-      return NextResponse.json({ ok: false, storageError: String(err instanceof Error ? err.message : err), email });
+      return NextResponse.json({
+        ok: false,
+        storageError: String(err instanceof Error ? err.message : err),
+        email,
+        sheetIdInUse,
+        sheetIdLength: sheetIdInUse.length,
+      });
     }
   }
 
