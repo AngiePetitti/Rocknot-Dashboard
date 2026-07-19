@@ -10,13 +10,42 @@ const CHAT_KEY_PREFIX = 'rocknot_ai_analyst_chat';
 // then replaces the whole document with the finished report HTML.
 function ReportBuilder() {
   const params = useSearchParams();
-  const [status, setStatus] = useState<'working' | 'error'>('working');
+  const [status, setStatus] = useState<'working' | 'waiting' | 'error'>('working');
   const [error, setError] = useState('');
   const [elapsed, setElapsed] = useState(0);
   const started = useRef(false);
+  const baselineIds = useRef<Set<string>>(new Set());
+
+  function render(html: string) {
+    document.open();
+    document.write(html);
+    document.close();
+  }
+
+  // The generation request died (iOS suspends fetches when the tab is
+  // backgrounded) — but the server keeps working and auto-saves the finished
+  // report. Watch the saved list and open the new report when it appears.
+  async function waitForAutoSaved() {
+    setStatus('waiting');
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 10000));
+      try {
+        const res = await fetch('/api/insights/reports', { cache: 'no-store' });
+        const data = await res.json().catch(() => null);
+        const fresh = (data?.reports as { id: string }[] | undefined)?.find(r => !baselineIds.current.has(r.id));
+        if (fresh) {
+          const rep = await fetch(`/api/insights/reports/${encodeURIComponent(fresh.id)}`, { cache: 'no-store' });
+          const repData = await rep.json().catch(() => null);
+          if (repData?.html) { render(repData.html); return; }
+        }
+      } catch { /* keep polling */ }
+    }
+    setStatus('error');
+    setError('The report is taking unusually long. Check Saved reports on the AI Insights tab in a few minutes, or try again.');
+  }
 
   useEffect(() => {
-    if (status !== 'working') return;
+    if (status === 'error') return;
     const t = setInterval(() => setElapsed(s => s + 1), 1000);
     return () => clearInterval(t);
   }, [status]);
@@ -76,6 +105,14 @@ function ReportBuilder() {
           if (lastUser !== -1) chat = chat.slice(lastUser, lastAssistant + 1);
         }
       }
+      // Snapshot existing report ids so we can spot the auto-saved new one if
+      // the request dies while this tab is backgrounded.
+      try {
+        const res = await fetch('/api/insights/reports', { cache: 'no-store' });
+        const data = await res.json().catch(() => null);
+        for (const r of (data?.reports as { id: string }[] | undefined) ?? []) baselineIds.current.add(r.id);
+      } catch { /* non-fatal */ }
+
       try {
         const res = await fetch('/api/insights/report', {
           method: 'POST',
@@ -83,13 +120,17 @@ function ReportBuilder() {
           body: JSON.stringify({ messages: chat }),
         });
         const data = await res.json().catch(() => null);
-        if (!res.ok || !data?.html) throw new Error(data?.error || `Report generation failed (${res.status})`);
-        document.open();
-        document.write(data.html);
-        document.close();
-      } catch (e) {
-        setStatus('error');
-        setError(e instanceof Error ? e.message : 'Report generation failed');
+        if (!res.ok || !data?.html) {
+          // The server answered but with an error — a real failure.
+          setStatus('error');
+          setError((data?.error as string) || `Report generation failed (${res.status})`);
+          return;
+        }
+        render(data.html);
+      } catch {
+        // Network died mid-flight (usually iOS backgrounding) — the server is
+        // still working. Switch to watching for the auto-saved result.
+        waitForAutoSaved();
       }
     }
     build();
@@ -98,7 +139,14 @@ function ReportBuilder() {
   return (
     <div className="min-h-[100dvh] bg-gray-50 flex items-center justify-center px-6">
       <div className="text-center max-w-sm">
-        {status === 'working' ? (
+        {status === 'waiting' ? (
+          <>
+            <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center text-2xl mx-auto mb-4 animate-pulse">✦</div>
+            <p className="text-sm font-semibold text-gray-800 mb-1">Still building — reconnecting…</p>
+            <p className="text-xs text-gray-400 mb-2">This tab lost its connection (that happens when you switch apps), but Cleo is still working. The report will appear here the moment it&apos;s ready. ({elapsed}s)</p>
+            <p className="text-[11px] text-gray-400">It&apos;s also saved automatically under <strong>Saved reports</strong> on the AI Insights tab.</p>
+          </>
+        ) : status === 'working' ? (
           <>
             <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center text-2xl mx-auto mb-4 animate-pulse">✦</div>
             <p className="text-sm font-semibold text-gray-800 mb-1">Cleo is building your report…</p>
