@@ -64,7 +64,9 @@ async function api(path: string, init?: RequestInit): Promise<Record<string, unk
 // with the service account (service accounts can no longer reliably create
 // their own files due to Google storage-quota rules). Fallback: an SA-owned
 // sheet whose id is persisted in the calendar sheet's hidden _meta tab.
-const PRIVATE_SHEET_ID = (process.env.PRIVATE_SHEET_ID || '').trim();
+// Strip ALL whitespace (not just ends) — pasted values on mobile often pick up
+// stray line breaks mid-string, which Google reports as "entity not found".
+const PRIVATE_SHEET_ID = (process.env.PRIVATE_SHEET_ID || '').replace(/\s+/g, '');
 let cachedChatSheetId: string | null = null;
 let privateTabsEnsured = false;
 
