@@ -60,6 +60,22 @@ function ReportBuilder() {
       if (!Array.isArray(chat) || !chat.length) {
         setStatus('error'); setError('No conversation found — ask Cleo a question first, then create the report from the same device.'); return;
       }
+      // scope=last (the default): report only the most recent question & its
+      // answer, not the whole conversation history.
+      if (params.get('scope') !== 'all') {
+        const msgs = chat as { role?: string }[];
+        let lastAssistant = -1;
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i]?.role === 'assistant') { lastAssistant = i; break; }
+        }
+        if (lastAssistant > 0) {
+          let lastUser = -1;
+          for (let i = lastAssistant - 1; i >= 0; i--) {
+            if (msgs[i]?.role === 'user') { lastUser = i; break; }
+          }
+          if (lastUser !== -1) chat = chat.slice(lastUser, lastAssistant + 1);
+        }
+      }
       try {
         const res = await fetch('/api/insights/report', {
           method: 'POST',

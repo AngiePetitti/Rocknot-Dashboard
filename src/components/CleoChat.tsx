@@ -88,6 +88,7 @@ export default function CleoChat() {
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
+  const [reportMenu, setReportMenu] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const { data: session, status: sessionStatus } = useSession();
   // Scope saved chat to the signed-in user so it never leaks across logins on a shared device.
@@ -201,10 +202,11 @@ export default function CleoChat() {
   // Turn the current conversation into a shareable visual report. Opens a
   // dedicated tab that builds the report itself, so backgrounding this tab
   // (common on iOS) can't strand the request.
-  function createReport() {
+  function createReport(scope: 'last' | 'all') {
     if (!chat.some(m => m.role === 'assistant')) return;
+    setReportMenu(false);
     try { localStorage.setItem(chatKey, JSON.stringify(chat.slice(-24))); } catch { /* ignore */ }
-    window.open(`/dashboard/insights/report?k=${encodeURIComponent(chatKey)}`, '_blank');
+    window.open(`/dashboard/insights/report?k=${encodeURIComponent(chatKey)}&scope=${scope}`, '_blank');
   }
 
   return (
@@ -232,12 +234,32 @@ export default function CleoChat() {
               <p className="text-[10px] text-gray-400 leading-tight">Your AI analyst — live data, any period</p>
             </div>
             {chat.some(m => m.role === 'assistant') && (
-              <button
-                onClick={createReport}
-                className="text-xs px-2.5 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-100 font-semibold"
-              >
-                📊 Report
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setReportMenu(v => !v)}
+                  className="text-xs px-2.5 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-100 font-semibold"
+                >
+                  📊 Report
+                </button>
+                {reportMenu && (
+                  <div className="absolute right-0 top-full mt-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 overflow-hidden">
+                    <button
+                      onClick={() => createReport('last')}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-violet-50"
+                    >
+                      <span className="font-semibold text-gray-800 block">This question only</span>
+                      <span className="text-gray-400">Report on the last question &amp; answer</span>
+                    </button>
+                    <button
+                      onClick={() => createReport('all')}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-violet-50"
+                    >
+                      <span className="font-semibold text-gray-800 block">Whole conversation</span>
+                      <span className="text-gray-400">Everything discussed in this chat</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
             {chat.length > 0 && (
               <button onClick={clearChat} className="text-xs text-gray-400 hover:text-gray-600 font-medium px-1">Clear</button>
