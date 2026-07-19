@@ -231,6 +231,60 @@ export async function deleteReport(email: string, reportId: string): Promise<voi
   }
 }
 
+// ── Goals (same private sheet, "Goals" tab — shared, not per-login) ──────
+// One row per month: Month (YYYY-MM) | Revenue Goal | Ad Spend Budget
+const GOALS_TAB = 'Goals';
+
+export interface MonthGoal { month: string; revenueGoal: number; adBudget: number }
+
+async function ensureGoalsTab(sheetId: string): Promise<void> {
+  try {
+    await api(`/${sheetId}:batchUpdate`, {
+      method: 'POST',
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: GOALS_TAB } } }] }),
+    });
+    await api(`/${sheetId}/values/${GOALS_TAB}!A1?valueInputOption=RAW`, {
+      method: 'PUT',
+      body: JSON.stringify({ range: `${GOALS_TAB}!A1`, majorDimension: 'ROWS', values: [['Month', 'Revenue Goal', 'Ad Spend Budget']] }),
+    });
+  } catch { /* tab already exists */ }
+}
+
+export async function getGoals(): Promise<MonthGoal[]> {
+  const sheetId = await getChatSheetId(false);
+  if (!sheetId) return [];
+  try {
+    const data = await api(`/${sheetId}/values/${GOALS_TAB}!A2:C`) as { values?: string[][] };
+    return (data.values || [])
+      .filter(r => /^\d{4}-\d{2}$/.test((r[0] || '').trim()))
+      .map(r => ({
+        month: r[0].trim(),
+        revenueGoal: Number(String(r[1] || '0').replace(/[^0-9.-]/g, '')) || 0,
+        adBudget: Number(String(r[2] || '0').replace(/[^0-9.-]/g, '')) || 0,
+      }))
+      .sort((a, b) => a.month.localeCompare(b.month));
+  } catch {
+    return []; // tab doesn't exist yet
+  }
+}
+
+export async function saveGoals(goals: MonthGoal[]): Promise<void> {
+  const sheetId = await getChatSheetId(true);
+  if (!sheetId) throw new Error('Goal storage unavailable');
+  await ensureGoalsTab(sheetId);
+  await api(`/${sheetId}/values/${GOALS_TAB}!A2:C:clear`, { method: 'POST', body: '{}' });
+  const rows = goals
+    .filter(g => /^\d{4}-\d{2}$/.test(g.month))
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .map(g => [g.month, String(Math.round(g.revenueGoal)), String(Math.round(g.adBudget))]);
+  if (rows.length) {
+    await api(`/${sheetId}/values/${GOALS_TAB}!A2?valueInputOption=RAW`, {
+      method: 'PUT',
+      body: JSON.stringify({ range: `${GOALS_TAB}!A2`, majorDimension: 'ROWS', values: rows }),
+    });
+  }
+}
+
 // ── Public API ───────────────────────────────────────────────────────────
 export async function getChat(email: string): Promise<StoredChatMsg[]> {
   const id = await getChatSheetId(false);
