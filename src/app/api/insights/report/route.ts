@@ -183,39 +183,17 @@ HONESTY
     ];
     let finalText = '';
 
-    // Fast mode (beta) runs the same Opus model at up to ~2.5x output speed —
-    // the report is output-heavy, so this is the main latency lever. It has
-    // its own rate limit, so fall back to standard speed if it's unavailable.
-    let useFastMode = true;
-    const generate = async (msgs: Anthropic.MessageParam[]): Promise<Anthropic.Message> => {
-      const params = {
-        model: 'claude-opus-4-8',
-        max_tokens: 32000,
-        thinking: { type: 'adaptive' as const },
-        system,
-        tools: ANALYST_TOOLS,
-        messages: msgs,
-      };
-      if (useFastMode) {
-        try {
-          const msg = await client.beta.messages.stream({
-            ...params,
-            betas: ['fast-mode-2026-02-01'],
-            speed: 'fast',
-          } as Parameters<typeof client.beta.messages.stream>[0]).finalMessage();
-          // Beta and non-beta messages share the same wire shape for our usage.
-          return msg as unknown as Anthropic.Message;
-        } catch {
-          useFastMode = false; // fast-mode rate limit or unsupported — run standard
-        }
-      }
+    for (let iter = 0; iter < 8; iter++) {
       // Streamed because a full HTML report can exceed the SDK's 10-minute
       // non-streaming limit at this max_tokens.
-      return await client.messages.stream(params).finalMessage();
-    };
-
-    for (let iter = 0; iter < 8; iter++) {
-      const response = await generate(messages);
+      const response = await client.messages.stream({
+        model: 'claude-opus-4-8',
+        max_tokens: 32000,
+        thinking: { type: 'adaptive' },
+        system,
+        tools: ANALYST_TOOLS,
+        messages,
+      }).finalMessage();
 
       if (response.stop_reason === 'refusal') {
         return NextResponse.json({ error: 'The model declined to build this report. Try again.' }, { status: 502 });
