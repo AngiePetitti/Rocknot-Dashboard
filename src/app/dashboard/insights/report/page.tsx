@@ -62,6 +62,11 @@ function ReportBuilder() {
       if (since) {
         setStatus('working');
         for (let i = 0; i < 150; i++) {
+          // The chat records generation/save failures here — surface them.
+          try {
+            const err = localStorage.getItem(`rk_report_err_${since}`);
+            if (err) { setStatus('error'); setError(err); return; }
+          } catch { /* ignore */ }
           try {
             const res = await fetch('/api/insights/reports', { cache: 'no-store' });
             const data = await res.json().catch(() => null);

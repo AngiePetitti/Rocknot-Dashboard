@@ -188,8 +188,11 @@ HONESTY
       // non-streaming limit at this max_tokens.
       const response = await client.messages.stream({
         model: 'claude-opus-4-8',
-        max_tokens: 32000,
+        max_tokens: 20000,
         thinking: { type: 'adaptive' },
+        // Report writing is mostly formatting; medium effort cuts thinking
+        // time substantially without hurting the numbers (they come from tools).
+        output_config: { effort: 'medium' },
         system,
         tools: ANALYST_TOOLS,
         messages,
@@ -222,8 +225,10 @@ HONESTY
       return NextResponse.json({ error: 'Report generation didn\'t complete — try again, or ask a more specific question first.' }, { status: 502 });
     }
     // Auto-save the finished report to the user's saved list so it survives
-    // even if they closed the tab while it was generating.
+    // even if they closed the tab while it was generating. Save failures are
+    // reported so the client can surface them instead of waiting forever.
     let saved = false;
+    let saveError: string | null = null;
     if (isChatStoreConfigured() && authConfigured()) {
       try {
         const session = await getServerSession(authOptions);
@@ -231,10 +236,16 @@ HONESTY
         if (email) {
           await saveReport(email, titleOf(html), injectToolbar(html, true));
           saved = true;
+        } else {
+          saveError = 'No signed-in session on the save step';
         }
-      } catch { /* auto-save is best-effort — manual Save still available */ }
+      } catch (err) {
+        saveError = String(err instanceof Error ? err.message : err);
+      }
+    } else {
+      saveError = 'Report storage not configured (PRIVATE_SHEET_ID / GCP_SERVICE_ACCOUNT_KEY)';
     }
-    return NextResponse.json({ ok: true, html: injectToolbar(html, saved) });
+    return NextResponse.json({ ok: true, html: injectToolbar(html, saved), ...(saveError ? { saveError } : {}) });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });
   }

@@ -216,12 +216,20 @@ export default function CleoChat() {
     const body = JSON.stringify(payload);
     try {
       // keepalive lets the request survive tab switches (64KB body limit).
+      // Record failures so the viewer tab can surface them instead of
+      // polling forever for a report that will never arrive.
       fetch('/api/insights/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body,
         keepalive: body.length < 60000,
-      }).catch(() => {});
+      })
+        .then(async r => {
+          const d = await r.json().catch(() => null);
+          const problem = !r.ok ? (d?.error || `Report generation failed (HTTP ${r.status})`) : d?.saveError ? `Report built but saving failed: ${d.saveError}` : null;
+          if (problem) { try { localStorage.setItem(`rk_report_err_${since}`, problem); } catch { /* ignore */ } }
+        })
+        .catch(e => { try { localStorage.setItem(`rk_report_err_${since}`, `Report request died: ${String(e)}`); } catch { /* ignore */ } });
     } catch { /* ignore */ }
     const url = `/dashboard/insights/report?since=${since}`;
     const w = window.open(url, '_blank');

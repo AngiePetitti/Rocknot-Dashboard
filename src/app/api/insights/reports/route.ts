@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
-import { listReports, saveReport, isChatStoreConfigured } from '@/src/lib/chatStore';
+import { listReports, saveReport, deleteReport, isChatStoreConfigured } from '@/src/lib/chatStore';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,10 +11,23 @@ async function sessionEmail(): Promise<string | null> {
   return session?.user?.email?.toLowerCase() || null;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   if (!isChatStoreConfigured()) return NextResponse.json({ configured: false, reports: [] });
   const email = await sessionEmail();
   if (!email) return NextResponse.json({ configured: false, reports: [] });
+
+  // Storage self-test: writes and deletes a tiny test report, surfacing the
+  // exact Sheets error if saving is broken. Visit /api/insights/reports?debug=1
+  if (req.nextUrl.searchParams.get('debug')) {
+    try {
+      const meta = await saveReport(email, '__storage test__', '<p>test</p>');
+      await deleteReport(email, meta.id);
+      return NextResponse.json({ ok: true, storage: 'working', email });
+    } catch (err) {
+      return NextResponse.json({ ok: false, storageError: String(err instanceof Error ? err.message : err), email });
+    }
+  }
+
   try {
     return NextResponse.json({ configured: true, reports: await listReports(email) });
   } catch (err) {
