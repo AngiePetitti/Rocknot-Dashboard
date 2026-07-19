@@ -165,6 +165,10 @@ BRAND STYLE — Rocknot dashboard pastels (use these exact colors)
   · Keep each chart + its title + caption inside one card so they print together.
   · Prefer several smaller charts/tables over one tall one.
 
+SPEED — the operator is waiting on this report:
+- Fetch only 1–3 tool calls' worth of data (batch calls in parallel where possible), then write.
+- Keep the HTML lean: one shared <style> block with short class names — no inline style repetition, no CSS resets, no comments. 2–4 sections, each chart's SVG as simple as accuracy allows. Aim for a tight one-pager over an exhaustive dossier.
+
 HONESTY
 - Only report numbers you fetched. If a period had no data, either omit it or mark it "no data" — never fabricate.`;
 
@@ -179,17 +183,39 @@ HONESTY
     ];
     let finalText = '';
 
-    for (let iter = 0; iter < 8; iter++) {
-      // Streamed because a full HTML report can exceed the SDK's 10-minute
-      // non-streaming limit at this max_tokens.
-      const response = await client.messages.stream({
+    // Fast mode (beta) runs the same Opus model at up to ~2.5x output speed —
+    // the report is output-heavy, so this is the main latency lever. It has
+    // its own rate limit, so fall back to standard speed if it's unavailable.
+    let useFastMode = true;
+    const generate = async (msgs: Anthropic.MessageParam[]): Promise<Anthropic.Message> => {
+      const params = {
         model: 'claude-opus-4-8',
         max_tokens: 32000,
-        thinking: { type: 'adaptive' },
+        thinking: { type: 'adaptive' as const },
         system,
         tools: ANALYST_TOOLS,
-        messages,
-      }).finalMessage();
+        messages: msgs,
+      };
+      if (useFastMode) {
+        try {
+          const msg = await client.beta.messages.stream({
+            ...params,
+            betas: ['fast-mode-2026-02-01'],
+            speed: 'fast',
+          } as Parameters<typeof client.beta.messages.stream>[0]).finalMessage();
+          // Beta and non-beta messages share the same wire shape for our usage.
+          return msg as unknown as Anthropic.Message;
+        } catch {
+          useFastMode = false; // fast-mode rate limit or unsupported — run standard
+        }
+      }
+      // Streamed because a full HTML report can exceed the SDK's 10-minute
+      // non-streaming limit at this max_tokens.
+      return await client.messages.stream(params).finalMessage();
+    };
+
+    for (let iter = 0; iter < 8; iter++) {
+      const response = await generate(messages);
 
       if (response.stop_reason === 'refusal') {
         return NextResponse.json({ error: 'The model declined to build this report. Try again.' }, { status: 502 });
