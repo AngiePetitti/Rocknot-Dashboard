@@ -210,6 +210,52 @@ export default function OverviewContent() {
     fetch(`/api/windsor/returns?${p}`).then(r => r.json()).then(setReturnsSnapshot).catch(() => setReturnsSnapshot(null));
   }, [tfRaw, dateFrom, dateTo]);
 
+  // ── Month-end forecast (MTD pace, independent of the selected timeframe) ──
+  const [mtdSnap, setMtdSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
+  const [lastMonthSnap, setLastMonthSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
+
+  useEffect(() => {
+    cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
+      '/api/windsor?tf=mtd',
+      d => {
+        if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
+          setMtdSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
+        }
+      }
+    );
+    cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
+      '/api/windsor?tf=last_month',
+      d => {
+        if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
+          setLastMonthSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
+        }
+      }
+    );
+  }, []);
+
+  const forecast = useMemo(() => {
+    if (!mtdSnap) return null;
+    // Store-time (PST) date math: MTD covers the 1st through yesterday.
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const [y, m, d] = todayStr.split('-').map(Number);
+    const daysElapsed = d - 1; // complete days so far
+    if (daysElapsed < 3) return null; // too little signal to project
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const revPace = mtdSnap.revenue / daysElapsed;
+    const spendPace = mtdSnap.adSpend / daysElapsed;
+    const revF = revPace * daysInMonth;
+    const spendF = spendPace * daysInMonth;
+    return {
+      daysElapsed,
+      daysInMonth,
+      revPace,
+      revF,
+      spendF,
+      merF: spendF > 0 ? revF / spendF : 0,
+      monthName: new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long' }),
+    };
+  }, [mtdSnap]);
+
   const callouts = useMemo(() => buildCallouts({
     metrics,
     prior: priorPeriod,
@@ -505,6 +551,62 @@ export default function OverviewContent() {
             accentColor="#a7f3d0"
           />
         </div>
+      )}
+
+      {/* ── Month-end forecast (MTD pace) ── */}
+      {isLive && forecast && (
+        <Card accentColor="#93c5fd" className="mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-base">📈</span>
+            <div>
+              <h2 className="text-sm font-bold text-gray-700">{forecast.monthName} Forecast</h2>
+              <p className="text-xs text-gray-400">
+                Projected month-end at your current pace — {formatCurrency(forecast.revPace)}/day through {forecast.daysElapsed} of {forecast.daysInMonth} days (today excluded)
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {([
+              {
+                label: 'Projected Revenue',
+                value: formatCurrency(forecast.revF),
+                prior: lastMonthSnap?.revenue,
+                higherIsGood: true,
+              },
+              {
+                label: 'Projected Ad Spend',
+                value: formatCurrency(forecast.spendF),
+                prior: lastMonthSnap?.adSpend,
+                higherIsGood: false,
+              },
+              {
+                label: 'Projected MER',
+                value: forecast.merF ? `${forecast.merF.toFixed(2)}x` : '—',
+                prior: lastMonthSnap && lastMonthSnap.adSpend > 0 ? lastMonthSnap.revenue / lastMonthSnap.adSpend : undefined,
+                higherIsGood: true,
+                isRatio: true,
+              },
+            ] as { label: string; value: string; prior?: number; higherIsGood: boolean; isRatio?: boolean }[]).map(s => {
+              const current = s.isRatio ? forecast.merF : s.label === 'Projected Revenue' ? forecast.revF : forecast.spendF;
+              const delta = s.prior && s.prior > 0 ? ((current - s.prior) / s.prior) * 100 : null;
+              const good = delta !== null && (s.higherIsGood ? delta >= 0 : delta <= 0);
+              return (
+                <div key={s.label} className="bg-blue-50/50 border border-blue-100 rounded-xl px-4 py-3">
+                  <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">{s.label}</p>
+                  <p className="text-2xl font-bold text-gray-800 mt-0.5">{s.value}</p>
+                  {delta !== null && (
+                    <p className={`text-xs font-semibold mt-0.5 ${good ? 'text-green-600' : 'text-red-500'}`}>
+                      {delta >= 0 ? '+' : ''}{delta.toFixed(0)}% vs last month{s.isRatio ? `'s ${s.prior!.toFixed(2)}x` : ''}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-gray-400 mt-3">
+            Simple pace projection: month-to-date ÷ days elapsed × days in month. Doesn&apos;t account for planned launches or seasonal swings — check the calendar for what&apos;s ahead.
+          </p>
+        </Card>
       )}
 
       {/* ── This week's marketing (from the Marketing Calendar) ── */}
