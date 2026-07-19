@@ -114,16 +114,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 500 });
   }
 
-  let body: { messages?: ChatMessage[] };
+  let body: { messages?: ChatMessage[]; focus?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
+  const focus = (body.focus || '').trim().slice(0, 1000);
   const history = (body.messages ?? [])
     .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
     .slice(-16);
-  if (!history.some(m => m.role === 'assistant')) {
+  if (!focus && !history.some(m => m.role === 'assistant')) {
     return NextResponse.json({ error: 'Ask Cleo at least one question first — the report is built from the conversation.' }, { status: 400 });
   }
 
@@ -171,7 +172,9 @@ HONESTY
     let messages: Anthropic.MessageParam[] = [
       {
         role: 'user',
-        content: `Here is the analyst conversation to turn into a shareable report:\n\n${conversation}\n\nBuild the report now.`,
+        content: focus
+          ? `REPORT FOCUS (what the operator asked for): ${focus}\n\nBuild the report about that focus specifically — fetch whatever data it needs. The conversation below is context only; ignore parts unrelated to the focus.\n\n${conversation || '(no prior conversation)'}\n\nBuild the report now.`
+          : `Here is the analyst conversation to turn into a shareable report:\n\n${conversation}\n\nBuild the report now.`,
       },
     ];
     let finalText = '';

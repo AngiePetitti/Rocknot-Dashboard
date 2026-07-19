@@ -86,12 +86,15 @@ function ReportBuilder() {
           if (Array.isArray(d?.messages)) chat = d.messages;
         } catch { /* fall through */ }
       }
-      if (!Array.isArray(chat) || !chat.length) {
+      const focus = params.get('focus') || '';
+      if (!Array.isArray(chat)) chat = [];
+      if (!chat.length && !focus) {
         setStatus('error'); setError('No conversation found — ask Cleo a question first, then create the report from the same device.'); return;
       }
       // scope=last (the default): report only the most recent question & its
-      // answer, not the whole conversation history.
-      if (params.get('scope') !== 'all') {
+      // answer, not the whole conversation history. With an explicit focus
+      // (Cleo-initiated), send the recent conversation as context instead.
+      if (!focus && params.get('scope') !== 'all') {
         const msgs = chat as { role?: string }[];
         let lastAssistant = -1;
         for (let i = msgs.length - 1; i >= 0; i--) {
@@ -117,7 +120,7 @@ function ReportBuilder() {
         const res = await fetch('/api/insights/report', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: chat }),
+          body: JSON.stringify(focus ? { messages: chat.slice(-8), focus } : { messages: chat }),
         });
         const data = await res.json().catch(() => null);
         if (!res.ok || !data?.html) {

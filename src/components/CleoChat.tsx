@@ -89,6 +89,7 @@ export default function CleoChat() {
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
   const [reportMenu, setReportMenu] = useState(false);
+  const [reportLink, setReportLink] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const { data: session, status: sessionStatus } = useSession();
   // Scope saved chat to the signed-in user so it never leaks across logins on a shared device.
@@ -179,6 +180,13 @@ export default function CleoChat() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: withAnswer.slice(-24) }),
       }).catch(() => {});
+      // Cleo decided to build a report — open the report tab. Popup blockers
+      // can stop a post-await window.open; offer a tap-through link if so.
+      if (typeof data.reportFocus === 'string' && data.reportFocus) {
+        const url = `/dashboard/insights/report?k=${encodeURIComponent(chatKey)}&focus=${encodeURIComponent(data.reportFocus)}`;
+        const w = window.open(url, '_blank');
+        setReportLink(w ? null : url);
+      }
     } catch (e) {
       setAskError(e instanceof Error ? e.message : 'Something went wrong');
       setChat(chat); // roll back the optimistic user message on failure
@@ -292,6 +300,19 @@ export default function CleoChat() {
               </div>
             )}
             <ConversationView chat={chat} asking={asking} endRef={endRef} />
+            {reportLink && (
+              <div className="flex justify-start">
+                <a
+                  href={reportLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => setReportLink(null)}
+                  className="text-sm font-semibold text-violet-700 bg-violet-50 border border-violet-100 rounded-2xl px-3.5 py-2.5"
+                >
+                  📊 Tap to open your report
+                </a>
+              </div>
+            )}
             {askError && (
               <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{askError}</div>
             )}
