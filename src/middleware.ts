@@ -15,7 +15,10 @@ export async function middleware(req: NextRequest) {
   if (pathname.startsWith('/api/auth') || pathname.startsWith('/login')) return NextResponse.next();
 
   const token = await getToken({ req, secret });
-  if (token) {
+  // token.role === null means the periodic re-check found the user removed
+  // from the allowlist — stop honoring the session even though the JWT is
+  // otherwise still valid.
+  if (token && token.role !== null) {
     // Debug endpoints expose raw data — admins only.
     if (pathname.startsWith('/api/debug') && token.role !== 'admin') {
       return new NextResponse(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } });

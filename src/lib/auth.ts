@@ -24,9 +24,11 @@ export const authOptions: NextAuthOptions = {
       authorization: { params: { prompt: 'select_account' } },
     }),
   ],
-  // 8-hour sessions so role changes / removals take effect within a workday
-  // (or immediately on sign-out) without a per-request lookup.
-  session: { strategy: 'jwt', maxAge: 60 * 60 * 8 },
+  // 30-day sessions so devices stay signed in. Safe because the jwt callback
+  // re-validates the role every 15 minutes (below) and the middleware rejects
+  // tokens whose role has been revoked — a removed user loses access within
+  // minutes of active use, not after 30 days.
+  session: { strategy: 'jwt', maxAge: 60 * 60 * 24 * 30 },
   pages: { signIn: '/login', error: '/login' },
   callbacks: {
     // Only allow-listed emails may sign in.
@@ -34,11 +36,20 @@ export const authOptions: NextAuthOptions = {
       return (await roleFor(user.email)) !== null;
     },
     async jwt({ token }) {
-      token.role = (await roleFor(token.email as string | undefined)) ?? undefined;
+      // Re-validate the role at most every 15 minutes. If the lookup fails
+      // (Sheets hiccup), keep the last known role rather than locking out.
+      const now = Math.floor(Date.now() / 1000);
+      const checkedAt = (token.roleCheckedAt as number | undefined) ?? 0;
+      if (token.role === undefined || now - checkedAt > 900) {
+        try {
+          token.role = (await roleFor(token.email as string | undefined)) ?? null;
+          token.roleCheckedAt = now;
+        } catch { /* transient lookup failure — keep existing role */ }
+      }
       return token;
     },
     async session({ session, token }) {
-      if (session.user) session.user.role = (token.role as Role | undefined);
+      if (session.user) session.user.role = (token.role as Role | null | undefined) ?? undefined;
       return session;
     },
   },
