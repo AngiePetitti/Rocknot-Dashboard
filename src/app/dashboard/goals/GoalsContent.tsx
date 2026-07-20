@@ -163,11 +163,36 @@ export default function GoalsContent() {
   // ── Rollups ──
   const ytdActual = months.filter((_, i) => i + 1 < curMonth).reduce((s, k) => s + (actuals[k]?.revenue || 0), 0)
     + (actuals[monthKey(year, curMonth)]?.revenue || 0);
+
+  // Trend estimate for future months with no goal yet: last year's same month,
+  // scaled by this year's YoY growth over the completed months.
+  const yoyRatio = useMemo(() => {
+    let thisY = 0, lastY = 0;
+    for (let n = 1; n < curMonth; n++) {
+      thisY += actuals[monthKey(year, n)]?.revenue || 0;
+      lastY += lastYear[monthKey(year - 1, n)]?.revenue || 0;
+    }
+    return lastY > 0 ? thisY / lastY : 1;
+  }, [actuals, lastYear, year, curMonth]);
+
+  const avgMonthActual = (() => {
+    const done = months.filter((_, i) => i + 1 < curMonth).map(k => actuals[k]?.revenue || 0).filter(v => v > 0);
+    return done.length ? done.reduce((s, v) => s + v, 0) / done.length : 0;
+  })();
+
+  function trendEstimate(k: string): number {
+    const ly = lastYear[`${year - 1}${k.slice(4)}`]?.revenue || 0;
+    return ly > 0 ? ly * yoyRatio : avgMonthActual;
+  }
+
+  let usedTrend = false;
   const plannedTotal = months.reduce((s, k, i) => {
     const n = i + 1;
     if (n < curMonth) return s + (actuals[k]?.revenue || 0);          // done — use actual
     if (n === curMonth) return s + Math.max(currentForecast?.revenue || 0, 0); // in flight — use forecast
-    return s + (goals[k]?.revenueGoal || 0);                          // future — use goal
+    if (goals[k]?.revenueGoal) return s + goals[k].revenueGoal;       // planned — use goal
+    usedTrend = true;
+    return s + trendEstimate(k);                                      // unplanned — seasonality trend
   }, 0);
   const goalTotal = months.reduce((s, k) => s + (goals[k]?.revenueGoal || 0), 0);
   const budgetTotal = months.reduce((s, k) => s + (goals[k]?.adBudget || 0), 0);
@@ -246,7 +271,7 @@ export default function GoalsContent() {
         <div className="bg-white border border-gray-100 rounded-2xl px-4 py-3">
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Projected Year-End</p>
           <p className="text-xl font-bold mt-0.5" style={{ color: plannedTotal >= target ? '#16a34a' : '#dc2626' }}>{formatCurrency(plannedTotal, true)}</p>
-          <p className="text-xs text-gray-400">actuals + pace + plan</p>
+          <p className="text-xs text-gray-400">{usedTrend ? 'actuals + pace + trend for unplanned months' : 'actuals + pace + plan'}</p>
         </div>
         <div className="bg-white border border-gray-100 rounded-2xl px-4 py-3">
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Planned Goals Total</p>
