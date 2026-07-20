@@ -235,7 +235,7 @@ export async function deleteReport(email: string, reportId: string): Promise<voi
 // One row per month: Month (YYYY-MM) | Revenue Goal | Ad Spend Budget
 const GOALS_TAB = 'Goals';
 
-export interface MonthGoal { month: string; revenueGoal: number; adBudget: number }
+export interface MonthGoal { month: string; revenueGoal: number; adBudget: number; pinned?: boolean }
 
 async function ensureGoalsTab(sheetId: string): Promise<void> {
   try {
@@ -245,7 +245,7 @@ async function ensureGoalsTab(sheetId: string): Promise<void> {
     });
     await api(`/${sheetId}/values/${GOALS_TAB}!A1?valueInputOption=RAW`, {
       method: 'PUT',
-      body: JSON.stringify({ range: `${GOALS_TAB}!A1`, majorDimension: 'ROWS', values: [['Month', 'Revenue Goal', 'Ad Spend Budget']] }),
+      body: JSON.stringify({ range: `${GOALS_TAB}!A1`, majorDimension: 'ROWS', values: [['Month', 'Revenue Goal', 'Ad Spend Budget', 'Pinned']] }),
     });
   } catch { /* tab already exists */ }
 }
@@ -254,13 +254,14 @@ export async function getGoals(): Promise<MonthGoal[]> {
   const sheetId = await getChatSheetId(false);
   if (!sheetId) return [];
   try {
-    const data = await api(`/${sheetId}/values/${GOALS_TAB}!A2:C`) as { values?: string[][] };
+    const data = await api(`/${sheetId}/values/${GOALS_TAB}!A2:D`) as { values?: string[][] };
     return (data.values || [])
       .filter(r => /^\d{4}-\d{2}$/.test((r[0] || '').trim()))
       .map(r => ({
         month: r[0].trim(),
         revenueGoal: Number(String(r[1] || '0').replace(/[^0-9.-]/g, '')) || 0,
         adBudget: Number(String(r[2] || '0').replace(/[^0-9.-]/g, '')) || 0,
+        pinned: (r[3] || '').trim().toLowerCase() === 'yes',
       }))
       .sort((a, b) => a.month.localeCompare(b.month));
   } catch {
@@ -272,11 +273,11 @@ export async function saveGoals(goals: MonthGoal[]): Promise<void> {
   const sheetId = await getChatSheetId(true);
   if (!sheetId) throw new Error('Goal storage unavailable');
   await ensureGoalsTab(sheetId);
-  await api(`/${sheetId}/values/${GOALS_TAB}!A2:C:clear`, { method: 'POST', body: '{}' });
+  await api(`/${sheetId}/values/${GOALS_TAB}!A2:D:clear`, { method: 'POST', body: '{}' });
   const rows = goals
     .filter(g => /^\d{4}-\d{2}$/.test(g.month))
     .sort((a, b) => a.month.localeCompare(b.month))
-    .map(g => [g.month, String(Math.round(g.revenueGoal)), String(Math.round(g.adBudget))]);
+    .map(g => [g.month, String(Math.round(g.revenueGoal)), String(Math.round(g.adBudget)), g.pinned ? 'yes' : '']);
   if (rows.length) {
     await api(`/${sheetId}/values/${GOALS_TAB}!A2?valueInputOption=RAW`, {
       method: 'PUT',

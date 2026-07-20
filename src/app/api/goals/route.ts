@@ -34,6 +34,7 @@ export async function PUT(req: NextRequest) {
     month: g.month,
     revenueGoal: Math.max(0, Number(g.revenueGoal) || 0),
     adBudget: Math.max(0, Number(g.adBudget) || 0),
+    pinned: Boolean(g.pinned),
   }));
   try {
     await saveGoals(goals);

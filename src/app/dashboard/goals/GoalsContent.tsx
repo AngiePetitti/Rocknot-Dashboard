@@ -7,7 +7,7 @@ import { formatCurrency } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 
-interface MonthGoal { month: string; revenueGoal: number; adBudget: number }
+interface MonthGoal { month: string; revenueGoal: number; adBudget: number; pinned?: boolean }
 interface MonthActual { revenue: number; adSpend: number }
 
 const TARGET_MER = 3.5; // ad budgets are derived from this when auto-planning
@@ -113,29 +113,45 @@ export default function GoalsContent() {
     const completed = months.filter((_, i) => i + 1 < curMonth);
     const done = completed.reduce((s, k) => s + (actuals[k]?.revenue || 0), 0);
     const remainingMonths = months.filter((_, i) => i + 1 >= curMonth);
-    const remaining = Math.max(0, target - done);
+
+    // Months you edited by hand are pinned — auto-plan works AROUND them:
+    // their goals are subtracted from the target and only the unpinned
+    // months get redistributed.
+    const pinnedMonths = remainingMonths.filter(k => goals[k]?.pinned);
+    const openMonths = remainingMonths.filter(k => !goals[k]?.pinned);
+    const pinnedSum = pinnedMonths.reduce((s, k) => s + (goals[k]?.revenueGoal || 0), 0);
+    const remaining = Math.max(0, target - done - pinnedSum);
 
     // Seasonality weights from last year's same months (fallback: even split).
-    const weights = remainingMonths.map(k => {
+    const weights = openMonths.map(k => {
       const lyKey = `${year - 1}${k.slice(4)}`;
       return lastYear[lyKey]?.revenue || 0;
     });
     const weightSum = weights.reduce((s, w) => s + w, 0);
 
     const next = { ...goals };
-    remainingMonths.forEach((k, i) => {
-      const share = weightSum > 0 ? weights[i] / weightSum : 1 / remainingMonths.length;
+    openMonths.forEach((k, i) => {
+      const share = weightSum > 0 ? weights[i] / weightSum : 1 / (openMonths.length || 1);
       const goal = Math.round((remaining * share) / 1000) * 1000;
-      next[k] = { month: k, revenueGoal: goal, adBudget: Math.round(goal / TARGET_MER / 100) * 100 };
+      next[k] = { month: k, revenueGoal: goal, adBudget: Math.round(goal / TARGET_MER / 100) * 100, pinned: false };
     });
     setGoals(next);
+    setDirty(true);
+  }
+
+  function togglePin(k: string) {
+    setGoals(prev => {
+      const base = prev[k] ?? { month: k, revenueGoal: 0, adBudget: 0 };
+      return { ...prev, [k]: { ...base, pinned: !base.pinned } };
+    });
     setDirty(true);
   }
 
   function updateGoal(k: string, field: 'revenueGoal' | 'adBudget', value: number) {
     setGoals(prev => {
       const base = prev[k] ?? { month: k, revenueGoal: 0, adBudget: 0 };
-      return { ...prev, [k]: { ...base, [field]: value } };
+      // Hand-edited months pin themselves so auto-plan won't overwrite them.
+      return { ...prev, [k]: { ...base, [field]: value, pinned: true } };
     });
     setDirty(true);
   }
@@ -256,7 +272,8 @@ export default function GoalsContent() {
           )}
           <p className="text-[11px] text-gray-400 sm:ml-auto sm:max-w-[260px]">
             Splits what&apos;s left of the target across {MONTH_NAMES[curMonth - 1]}–December, weighted by last year&apos;s
-            seasonality. Ad budgets assume your {TARGET_MER}x MER goal. Edit any month after.
+            seasonality. Months you edit by hand get 📌 pinned — run auto-plan again and the other months
+            re-balance around them so the total still hits the target. Ad budgets assume {TARGET_MER}x MER.
           </p>
         </div>
       </Card>
@@ -346,13 +363,22 @@ export default function GoalsContent() {
                     </td>
                     <td className="py-2.5 pr-4 whitespace-nowrap">
                       {isAdmin && !isPast ? (
-                        <input
-                          type="number"
-                          value={g?.revenueGoal || ''}
-                          placeholder="0"
-                          onChange={e => updateGoal(k, 'revenueGoal', Number(e.target.value) || 0)}
-                          className="w-28 px-2 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-                        />
+                        <span className="inline-flex items-center gap-1">
+                          <input
+                            type="number"
+                            value={g?.revenueGoal || ''}
+                            placeholder="0"
+                            onChange={e => updateGoal(k, 'revenueGoal', Number(e.target.value) || 0)}
+                            className={`w-28 px-2 py-1 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 ${g?.pinned ? 'border-violet-300 bg-violet-50/50' : 'border-gray-200'}`}
+                          />
+                          <button
+                            onClick={() => togglePin(k)}
+                            title={g?.pinned ? 'Pinned — auto-plan keeps this number. Tap to unpin.' : 'Not pinned — auto-plan may change this. Tap to pin.'}
+                            className={`text-sm ${g?.pinned ? '' : 'opacity-25'}`}
+                          >
+                            📌
+                          </button>
+                        </span>
                       ) : (
                         g?.revenueGoal ? formatCurrency(g.revenueGoal) : <span className="text-gray-300">—</span>
                       )}
