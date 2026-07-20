@@ -299,7 +299,14 @@ export async function GET(request: NextRequest) {
       thumbnailError: metaThumbs.error || tiktokThumbs.error,
       videoError: tiktokVideos.error,
       creatives,
-    }, { headers: cacheHeaders(tfRaw === 'today') });
+    }, {
+      // Per-ad creative data changes hourly at best (Windsor sync cadence) —
+      // cache it at the CDN much longer than the 5-min default so repeat
+      // loads across the team are instant. "Today" stays uncached.
+      headers: tfRaw === 'today'
+        ? cacheHeaders(true)
+        : { 'Cache-Control': 'public, s-maxage=1800, stale-while-revalidate=3600' },
+    });
   } catch (err) {
     return NextResponse.json({
       source: 'error',

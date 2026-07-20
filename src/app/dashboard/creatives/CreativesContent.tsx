@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Timeframe } from '@/src/lib/mockData';
+import { cachedJson } from '@/src/lib/clientCache';
 import { formatCurrency, formatROAS, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
@@ -43,14 +44,17 @@ export default function CreativesContent() {
 
   useEffect(() => {
     setStatus('loading');
-    fetch(`/api/windsor/creatives?tf=${tf}`)
-      .then(r => r.json())
-      .then(data => {
+    // Session-cached: a previously loaded timeframe renders instantly and
+    // refreshes quietly in the background (same pattern as the other tabs).
+    cachedJson<{ creatives?: CreativePerformance[] }>(
+      `/api/windsor/creatives?tf=${tf}`,
+      data => {
         const list: CreativePerformance[] = data.creatives || [];
         setCreatives(list);
         setStatus(list.length > 0 ? 'live' : 'empty');
-      })
-      .catch(() => setStatus('error'));
+      },
+      () => setStatus('error')
+    );
   }, [tf]);
 
   const filtered = creatives
