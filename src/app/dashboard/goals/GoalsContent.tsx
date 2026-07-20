@@ -201,14 +201,22 @@ export default function GoalsContent() {
     return ly > 0 ? ly * yoyRatio : avgMonthActual;
   }
 
-  let usedTrend = false;
+  // Two distinct year-end numbers:
+  // ON-TREND — what actually happens if the current trajectory holds
+  // (actuals + this month's pace + YoY-scaled seasonality; goals ignored).
+  const trendTotal = months.reduce((s, k, i) => {
+    const n = i + 1;
+    if (n < curMonth) return s + (actuals[k]?.revenue || 0);
+    if (n === curMonth) return s + Math.max(currentForecast?.revenue || 0, 0);
+    return s + trendEstimate(k);
+  }, 0);
+  // THE PLAN — where the year lands if every remaining goal is hit
+  // (months without a goal fall back to trend).
   const plannedTotal = months.reduce((s, k, i) => {
     const n = i + 1;
-    if (n < curMonth) return s + (actuals[k]?.revenue || 0);          // done — use actual
-    if (n === curMonth) return s + Math.max(currentForecast?.revenue || 0, 0); // in flight — use forecast
-    if (goals[k]?.revenueGoal) return s + goals[k].revenueGoal;       // planned — use goal
-    usedTrend = true;
-    return s + trendEstimate(k);                                      // unplanned — seasonality trend
+    if (n < curMonth) return s + (actuals[k]?.revenue || 0);
+    if (n === curMonth) return s + Math.max(currentForecast?.revenue || 0, 0);
+    return s + (goals[k]?.revenueGoal || trendEstimate(k));
   }, 0);
   const goalTotal = months.reduce((s, k) => s + (goals[k]?.revenueGoal || 0), 0);
   const budgetTotal = months.reduce((s, k) => s + (goals[k]?.adBudget || 0), 0);
@@ -286,14 +294,18 @@ export default function GoalsContent() {
           <p className="text-xs text-gray-400">{target > 0 ? `${((ytdActual / target) * 100).toFixed(0)}% of target` : ''}</p>
         </div>
         <div className="bg-white border border-gray-100 rounded-2xl px-4 py-3">
-          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Projected Year-End</p>
-          <p className="text-xl font-bold mt-0.5" style={{ color: plannedTotal >= target ? '#16a34a' : '#dc2626' }}>{formatCurrency(plannedTotal, true)}</p>
-          <p className="text-xs text-gray-400">{usedTrend ? 'actuals + pace + trend for unplanned months' : 'actuals + pace + plan'}</p>
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">On-Trend Year-End</p>
+          <p className="text-xl font-bold mt-0.5" style={{ color: trendTotal >= target ? '#16a34a' : '#dc2626' }}>{formatCurrency(trendTotal, true)}</p>
+          <p className="text-xs text-gray-400">if this year&apos;s trajectory just continues</p>
         </div>
         <div className="bg-white border border-gray-100 rounded-2xl px-4 py-3">
-          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Planned Goals Total</p>
-          <p className="text-xl font-bold text-gray-800 mt-0.5">{formatCurrency(goalTotal, true)}</p>
-          <p className="text-xs text-gray-400">sum of monthly goals</p>
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Stretch to Goal</p>
+          <p className="text-xl font-bold mt-0.5" style={{ color: plannedTotal - trendTotal > 0 ? '#d97706' : '#16a34a' }}>
+            {plannedTotal - trendTotal > 0 ? `+${formatCurrency(plannedTotal - trendTotal, true)}` : '—'}
+          </p>
+          <p className="text-xs text-gray-400">
+            {plannedTotal - trendTotal > 0 ? 'extra revenue the plan needs beyond trend' : 'plan is at or below trend'}
+          </p>
         </div>
         <div className="bg-white border border-gray-100 rounded-2xl px-4 py-3">
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Planned Ad Budget</p>
