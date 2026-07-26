@@ -15,6 +15,8 @@ export interface OverviewResult {
     metaRevenue: number;
     googleRevenue: number;
     tiktokRevenue: number;
+    snapchatSpend?: number;
+    snapchatRevenue?: number;
     newCustomers: number;
     returningCustomers: number;
     newCustomerRevenue: number;
@@ -294,8 +296,19 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     ORDER BY days.d
   `;
 
+  // Snapchat runs as its own guarded query so a missing snapchat_ads table
+  // can never break the main ads query.
+  const snapSql = `
+    SELECT FORMAT_DATE('%Y-%m-%d', DATE(date)) AS date,
+           SUM(CAST(spend AS FLOAT64)) AS spend,
+           SUM(IFNULL(CAST(conversion_purchases_value AS FLOAT64), 0)) AS revenue
+    FROM \`${ds}.snapchat_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    GROUP BY date
+  `;
+
   let adsQueryError: string | undefined;
-  const [shopifyDays, adsRows, custRows, custDaily, conversionRate] = await Promise.all([
+  const [shopifyDays, adsRows, custRows, custDaily, conversionRate, snapRows] = await Promise.all([
     fetchShopifyDaily(dateFrom, dateTo).catch(() => [] as ShopifyDay[]),
     runQuery<AdsRow>(adsSql, params)
       .catch(() => runQuery<AdsRow>(adsSqlLegacyTiktok, params))
@@ -303,7 +316,12 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     runQuery<CustomerRow>(customerSql, params).catch(() => [] as CustomerRow[]),
     runQuery<{ date: string; new_customers: number | null; buyers: number | null }>(customerDailySql, params).catch(() => [] as Array<{ date: string; new_customers: number | null; buyers: number | null }>),
     fetchShopifyConversion(dateFrom, dateTo).catch(() => null),
+    runQuery<{ date: string; spend: number | null; revenue: number | null }>(snapSql, params)
+      .catch(() => [] as Array<{ date: string; spend: number | null; revenue: number | null }>),
   ]);
+
+  const snapByDate: Record<string, { spend: number; revenue: number }> = {};
+  for (const r of snapRows) snapByDate[r.date] = { spend: Number(r.spend || 0), revenue: Number(r.revenue || 0) };
 
   const custDailyByDate: Record<string, { newCustomers: number; totalCustomers: number }> = {};
   for (const r of custDaily) {
@@ -321,8 +339,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   for (const s of shopifyDays) shopifyByDate[s.date] = s;
 
   let totalRevenue = 0, totalNetSales = 0, totalOrders = 0;
-  let metaSpend = 0, googleSpend = 0, tiktokSpend = 0;
-  let metaRevenue = 0, googleRevenue = 0, tiktokRevenue = 0;
+  let metaSpend = 0, googleSpend = 0, tiktokSpend = 0, snapchatSpend = 0;
+  let metaRevenue = 0, googleRevenue = 0, tiktokRevenue = 0, snapchatRevenue = 0;
 
   // The ads query always emits one row per day across the full range, so it
   // drives the daily series; Shopify figures are overlaid by date.
@@ -335,7 +353,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     const s = shopifyByDate[date];
     const revenue = s ? s.totalSales : 0;
     const orders = s ? s.orders : 0;
-    const adSpend = Number(a?.meta_spend || 0) + Number(a?.google_spend || 0) + Number(a?.tiktok_spend || 0);
+    const snap = snapByDate[date];
+    const adSpend = Number(a?.meta_spend || 0) + Number(a?.google_spend || 0) + Number(a?.tiktok_spend || 0) + (snap?.spend || 0);
 
     totalRevenue += revenue;
     totalNetSales += s ? s.netSales : 0;
@@ -346,6 +365,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     metaRevenue += Number(a?.meta_revenue || 0);
     googleRevenue += Number(a?.google_revenue || 0);
     tiktokRevenue += Number(a?.tiktok_revenue || 0);
+    snapchatSpend += snap?.spend || 0;
+    snapchatRevenue += snap?.revenue || 0;
 
     const cd = custDailyByDate[date];
     return {
@@ -355,7 +376,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     };
   });
 
-  const totalAdSpend = metaSpend + googleSpend + tiktokSpend;
+  const totalAdSpend = metaSpend + googleSpend + tiktokSpend + snapchatSpend;
   const newCustomers = Number(cust.new_customers || 0);
   const returningCustomers = Number(cust.returning_customers || 0);
   const newCustomerRevenue = Number(cust.new_customer_revenue || 0);
@@ -376,6 +397,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       metaRevenue: Math.round(metaRevenue),
       googleRevenue: Math.round(googleRevenue),
       tiktokRevenue: Math.round(tiktokRevenue),
+      snapchatSpend: Math.round(snapchatSpend * 100) / 100,
+      snapchatRevenue: Math.round(snapchatRevenue),
       newCustomers,
       returningCustomers,
       newCustomerRevenue: Math.round(newCustomerRevenue),

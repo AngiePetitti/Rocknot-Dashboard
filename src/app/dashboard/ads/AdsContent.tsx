@@ -34,6 +34,7 @@ interface DaySpend {
   meta: number;
   google: number;
   tiktok: number;
+  snapchat?: number;
 }
 
 interface CreativeRow {
@@ -179,9 +180,10 @@ export default function AdsContent() {
     Meta: d.meta,
     Google: d.google,
     TikTok: d.tiktok,
+    Snapchat: d.snapchat ?? 0,
   }));
 
-  const hasSpend = dailySpend.some(d => d.meta > 0 || d.google > 0 || d.tiktok > 0);
+  const hasSpend = dailySpend.some(d => d.meta > 0 || d.google > 0 || d.tiktok > 0 || (d.snapchat ?? 0) > 0);
 
   return (
     <div>
@@ -364,6 +366,7 @@ export default function AdsContent() {
                   {platforms.some(p => p.platform === 'Meta') && <Line type="monotone" dataKey="Meta" stroke="#818cf8" strokeWidth={2} dot={false} />}
                   {platforms.some(p => p.platform === 'Google') && <Line type="monotone" dataKey="Google" stroke="#34d399" strokeWidth={2} dot={false} />}
                   {platforms.some(p => p.platform === 'TikTok') && <Line type="monotone" dataKey="TikTok" stroke="#f472b6" strokeWidth={2} dot={false} />}
+                  {platforms.some(p => p.platform === 'Snapchat') && <Line type="monotone" dataKey="Snapchat" stroke="#eab308" strokeWidth={2} dot={false} />}
                 </LineChart>
               </ResponsiveContainer>
             </Card>

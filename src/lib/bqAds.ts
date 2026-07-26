@@ -21,6 +21,7 @@ export interface DaySpend {
   meta: number;
   google: number;
   tiktok: number;
+  snapchat: number;
 }
 
 interface RawRow {
@@ -145,6 +146,23 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
   `;
 
+  // Snapchat (Windsor → snapchat_ads). Guarded like the others — before the
+  // table exists these queries just fail quietly and Snapchat doesn't appear.
+  const snapSql = `
+    SELECT SUM(CAST(spend AS FLOAT64)) AS spend,
+           SUM(IFNULL(CAST(conversion_purchases_value AS FLOAT64), 0)) AS revenue,
+           SUM(IFNULL(CAST(conversion_purchases AS FLOAT64), 0)) AS conversions,
+           SUM(IFNULL(COALESCE(CAST(clicks AS FLOAT64), CAST(swipes AS FLOAT64)), 0)) AS clicks,
+           SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
+    FROM \`${ds}.snapchat_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
+  `;
+  const snapDailySql = `
+    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
+    FROM \`${ds}.snapchat_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+  `;
+
   // Safe fallbacks using only columns confirmed to exist in BigQuery
   // Minimal fallbacks — spend + revenue only — in case Windsor changes the schema
   const metaSqlMin = `
@@ -163,7 +181,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     WHERE DATE(date) BETWEEN @date_from AND @date_to
   `;
 
-  const [metaRows, googleRows, tiktokRows, metaDaily, googleDaily, tiktokDaily] = await Promise.all([
+  const [metaRows, googleRows, tiktokRows, snapRows, metaDaily, googleDaily, tiktokDaily, snapDaily] = await Promise.all([
     runQuery<RawRow>(metaSql, params)
       .catch(() => runQuery<RawRow>(metaSqlMin, params))
       .catch(() => null),
@@ -174,26 +192,31 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       .catch(() => runQuery<RawRow>(tiktokSqlLegacy, params))
       .catch(() => runQuery<RawRow>(tiktokSqlFallback, params))
       .catch(() => null),
+    runQuery<RawRow>(snapSql, params).catch(() => null),
     runQuery<DailySpendRow>(metaDailySql, params).catch(() => [] as DailySpendRow[]),
     runQuery<DailySpendRow>(googleDailySql, params).catch(() => [] as DailySpendRow[]),
     runQuery<DailySpendRow>(tiktokDailySql, params).catch(() => [] as DailySpendRow[]),
+    runQuery<DailySpendRow>(snapDailySql, params).catch(() => [] as DailySpendRow[]),
   ]);
 
   const platforms: PlatformData[] = [];
   const metaPlatform = buildPlatform('Meta', '#818cf8', metaRows?.[0] ?? null);
   const googlePlatform = buildPlatform('Google', '#34d399', googleRows?.[0] ?? null);
   const tiktokPlatform = buildPlatform('TikTok', '#f472b6', tiktokRows?.[0] ?? null);
+  const snapPlatform = buildPlatform('Snapchat', '#facc15', snapRows?.[0] ?? null);
   if (metaPlatform) platforms.push(metaPlatform);
   if (googlePlatform) platforms.push(googlePlatform);
   if (tiktokPlatform) platforms.push(tiktokPlatform);
+  if (snapPlatform) platforms.push(snapPlatform);
 
-  // Merge the three daily series into one array spanning the full date range
-  const byDate: Record<string, { meta: number; google: number; tiktok: number }> = {};
-  const ensureDate = (d: string) => { if (!byDate[d]) byDate[d] = { meta: 0, google: 0, tiktok: 0 }; };
+  // Merge the daily series into one array spanning the full date range
+  const byDate: Record<string, { meta: number; google: number; tiktok: number; snapchat: number }> = {};
+  const ensureDate = (d: string) => { if (!byDate[d]) byDate[d] = { meta: 0, google: 0, tiktok: 0, snapchat: 0 }; };
 
   for (const r of metaDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].meta = Math.round(Number(r.spend || 0)); }
   for (const r of googleDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].google = Math.round(Number(r.spend || 0)); }
   for (const r of tiktokDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].tiktok = Math.round(Number(r.spend || 0)); }
+  for (const r of snapDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].snapchat = Math.round(Number(r.spend || 0)); }
 
   const dailySpend: DaySpend[] = Object.entries(byDate)
     .sort(([a], [b]) => a.localeCompare(b))
