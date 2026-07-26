@@ -13,7 +13,7 @@ import PlatformBadge from '@/src/components/ui/PlatformBadge';
 interface CreativePerformance {
   id: string;
   name: string;
-  platform: 'Meta' | 'TikTok';
+  platform: 'Meta' | 'TikTok' | 'Snapchat';
   thumbnailUrl: string | null;
   videoUrl: string | null;
   adUrl: string | null;
@@ -30,7 +30,7 @@ interface CreativePerformance {
 }
 
 type SortKey = 'spend' | 'roas' | 'ctr' | 'conversions';
-type PlatformFilter = 'all' | 'Meta' | 'TikTok';
+type PlatformFilter = 'all' | 'Meta' | 'TikTok' | 'Snapchat';
 
 export default function CreativesContent() {
   const searchParams = useSearchParams();
@@ -72,7 +72,7 @@ export default function CreativesContent() {
 
   return (
     <div>
-      <Header title="Creative Analysis" subtitle={`Meta & TikTok creatives · ${TIMEFRAME_LABELS[tf] || tf}`}>
+      <Header title="Creative Analysis" subtitle={`Meta, TikTok & Snapchat creatives · ${TIMEFRAME_LABELS[tf] || tf}`}>
         <TimeframeSelector />
       </Header>
 
@@ -103,7 +103,7 @@ export default function CreativesContent() {
       {/* Filters */}
       {status === 'live' && (
         <div className="flex flex-wrap items-center gap-2 mb-5">
-          {(['all', 'Meta', 'TikTok'] as PlatformFilter[]).map(p => (
+          {(['all', 'Meta', 'TikTok', 'Snapchat'] as PlatformFilter[]).map(p => (
             <button
               key={p}
               onClick={() => setPlatformFilter(p)}
@@ -373,7 +373,7 @@ export default function CreativesContent() {
                     rel="noopener noreferrer"
                     className="text-xs font-semibold text-purple-600 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 rounded-lg px-3 py-2 transition-colors"
                   >
-                    Open in {selected.platform === 'Meta' ? 'Ads Manager' : 'TikTok Ads'} ↗
+                    Open in {selected.platform === 'Meta' ? 'Ads Manager' : selected.platform === 'Snapchat' ? 'Snapchat Ads' : 'TikTok Ads'} ↗
                   </a>
                 )}
               </div>

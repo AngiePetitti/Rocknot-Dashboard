@@ -40,6 +40,8 @@ interface LiveMetrics {
   metaRevenue?: number;
   googleRevenue?: number;
   tiktokRevenue?: number;
+  snapchatSpend?: number;
+  snapchatRevenue?: number;
   newCustomers?: number;
   returningCustomers?: number;
   newCustomerRevenue?: number;
@@ -139,6 +141,7 @@ export default function OverviewContent() {
     push('Meta', m.metaSpend ?? 0, m.metaRevenue ?? 0, '#818cf8');
     push('Google', m.googleSpend ?? 0, m.googleRevenue ?? 0, '#34d399');
     push('TikTok', m.tiktokSpend ?? 0, m.tiktokRevenue ?? 0, '#f472b6');
+    push('Snapchat', m.snapchatSpend ?? 0, m.snapchatRevenue ?? 0, '#facc15');
     return platforms.length > 0 ? platforms : null;
   }
 

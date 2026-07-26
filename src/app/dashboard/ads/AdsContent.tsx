@@ -40,7 +40,7 @@ interface DaySpend {
 interface CreativeRow {
   id: string;
   name: string;
-  platform: 'Meta' | 'TikTok';
+  platform: 'Meta' | 'TikTok' | 'Snapchat';
   adUrl: string | null;
   campaign: string;
   adset: string;

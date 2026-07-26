@@ -63,7 +63,7 @@ interface CreativeRow {
 export interface CreativePerformance {
   id: string;
   name: string;
-  platform: 'Meta' | 'TikTok';
+  platform: 'Meta' | 'TikTok' | 'Snapchat';
   thumbnailUrl: string | null;
   videoUrl: string | null;
   adUrl: string | null;
@@ -84,7 +84,7 @@ export interface CreativePerformance {
 // return it un-aggregated (one row per ad per day) — which made larger
 // ranges (30d, ytd) return far more rows and run far slower. ctr is
 // re-derived from clicks/impressions in aggregateCreatives anyway.
-const FIELDS_BY_SOURCE: Record<'facebook' | 'tiktok', string> = {
+const FIELDS_BY_SOURCE: Record<'facebook' | 'tiktok' | 'snapchat', string> = {
   facebook: [
     'source', 'ad_name', 'ad_id', 'account_id', 'adset_name', 'campaign',
     'spend', 'impressions', 'clicks',
@@ -96,9 +96,14 @@ const FIELDS_BY_SOURCE: Record<'facebook' | 'tiktok', string> = {
     'total_complete_payment_rate', 'complete_payment',
     'onsite_total_purchase_value', 'conversion_value', 'revenue', 'conversions',
   ].join(','),
+  snapchat: [
+    'source', 'ad_name', 'ad_id', 'account_id', 'ad_squad_name', 'campaign',
+    'spend', 'impressions', 'swipes', 'clicks',
+    'conversion_purchases', 'conversion_purchases_value',
+  ].join(','),
 };
 
-async function fetchCreatives(source: 'facebook' | 'tiktok', params: Record<string, string>, isToday: boolean): Promise<{ rows: CreativeRow[]; raw?: unknown }> {
+async function fetchCreatives(source: 'facebook' | 'tiktok' | 'snapchat', params: Record<string, string>, isToday: boolean): Promise<{ rows: CreativeRow[]; raw?: unknown }> {
   const fields = FIELDS_BY_SOURCE[source];
   const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
   const url = `https://connectors.windsor.ai/${source}?${qs}`;
@@ -115,7 +120,7 @@ async function fetchCreatives(source: 'facebook' | 'tiktok', params: Record<stri
   return { rows, raw: json };
 }
 
-function buildAdUrl(platform: 'Meta' | 'TikTok', adId: string, accountId: string): string | null {
+function buildAdUrl(platform: 'Meta' | 'TikTok' | 'Snapchat', adId: string, accountId: string): string | null {
   if (platform === 'Meta' && adId) {
     // Use the known correct account ID from env — Windsor's account_id field can be unreliable
     const act = `act_${META_AD_ACCOUNT_ID.replace('act_', '')}`;
@@ -131,7 +136,7 @@ function buildAdUrl(platform: 'Meta' | 'TikTok', adId: string, accountId: string
   return null;
 }
 
-function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): CreativePerformance[] {
+function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok' | 'Snapchat'): CreativePerformance[] {
   const byAd: Record<string, CreativePerformance> = {};
 
   for (const row of rows) {
@@ -150,7 +155,7 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
         videoUrl: null,
         adUrl: buildAdUrl(platform, id, accountId),
         campaign: String(row.campaign || ''),
-        adset: String(row.adset_name || ''),
+        adset: String(row.adset_name || (row as Record<string, unknown>).ad_squad_name || ''),
         accountId,
         spend: 0,
         revenue: 0,
@@ -171,6 +176,7 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
       rawRow.action_values_omni_purchase ||
       rawRow.total_complete_payment_rate ||
       rawRow.onsite_total_purchase_value ||
+      rawRow.conversion_purchases_value ||
       row.conversion_values ||
       row.conversion_value ||
       row.revenue ||
@@ -178,8 +184,8 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok'): C
     );
 
     entry.impressions += Number(row.impressions || 0);
-    entry.clicks += Number(row.clicks || 0);
-    entry.conversions += Number(rawRow.actions_omni_purchase || rawRow.complete_payment || rawRow.conversions || 0);
+    entry.clicks += Number(row.clicks || rawRow.swipes || 0);
+    entry.conversions += Number(rawRow.actions_omni_purchase || rawRow.complete_payment || rawRow.conversion_purchases || rawRow.conversions || 0);
   }
 
   return Object.values(byAd).map(c => ({
@@ -256,9 +262,10 @@ export async function GET(request: NextRequest) {
   const isToday = tfRaw === 'today';
 
   try {
-    const [metaResult, tiktokResult, metaThumbs, tiktokThumbs, tiktokVideos] = await Promise.all([
+    const [metaResult, tiktokResult, snapResult, metaThumbs, tiktokThumbs, tiktokVideos] = await Promise.all([
       fetchCreatives('facebook', params, isToday),
       fetchCreatives('tiktok', params, isToday),
+      fetchCreatives('snapchat', params, isToday).catch(() => ({ rows: [] as CreativeRow[] })),
       fetchWindsorAdUrls('facebook', urlParams, ['thumbnail_url', 'image_url']),
       fetchWindsorAdUrls('tiktok', urlParams, ['video_thumbnail_url']),
       // Playable video sources. Only TikTok: Windsor's facebook connector is
@@ -281,6 +288,7 @@ export async function GET(request: NextRequest) {
 
     const metaCreatives = aggregateCreatives(metaResult.rows, 'Meta');
     const tiktokCreatives = aggregateCreatives(tiktokResult.rows, 'TikTok');
+    const snapCreatives = aggregateCreatives(snapResult.rows, 'Snapchat');
     for (const c of metaCreatives) {
       c.thumbnailUrl = metaThumbs.urls[c.id] || null;
     }
@@ -289,7 +297,7 @@ export async function GET(request: NextRequest) {
       c.videoUrl = tiktokVideos.urls[c.id] || null;
     }
 
-    const creatives = [...metaCreatives, ...tiktokCreatives].sort((a, b) => b.spend - a.spend);
+    const creatives = [...metaCreatives, ...tiktokCreatives, ...snapCreatives].sort((a, b) => b.spend - a.spend);
 
     return NextResponse.json({
       source: 'windsor_live',
