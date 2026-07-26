@@ -210,7 +210,7 @@ function aggregateCreatives(rows: CreativeRow[], platform: 'Meta' | 'TikTok' | '
 // URL — and Next's fetch cache — is identical across timeframes) and let
 // Next cache the response for an hour.
 async function fetchWindsorAdUrls(
-  source: 'facebook' | 'tiktok',
+  source: 'facebook' | 'tiktok' | 'snapchat',
   params: Record<string, string>,
   fields: string[]
 ): Promise<{ urls: Record<string, string>; error: string | null }> {
@@ -244,6 +244,25 @@ async function fetchWindsorAdUrls(
   }
 }
 
+// Snapchat's creative-media field name varies in Windsor — try the known
+// candidates in order until one returns URLs. Each attempt is cached an hour,
+// and a working candidate short-circuits the rest.
+async function fetchSnapMedia(urlParams: Record<string, string>): Promise<{ urls: Record<string, string>; error: string | null }> {
+  const candidates: string[][] = [
+    ['creative_top_snap_media_url'],
+    ['creative_thumbnail_url', 'thumbnail_url'],
+    ['creative_url', 'media_url'],
+    ['video_url'],
+  ];
+  let lastError: string | null = null;
+  for (const fields of candidates) {
+    const r = await fetchWindsorAdUrls('snapchat', urlParams, fields);
+    if (Object.keys(r.urls).length > 0) return r;
+    if (r.error) lastError = r.error;
+  }
+  return { urls: {}, error: lastError || 'no snapchat media field returned URLs' };
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const tfRaw = searchParams.get('tf') || '30d';
@@ -262,7 +281,7 @@ export async function GET(request: NextRequest) {
   const isToday = tfRaw === 'today';
 
   try {
-    const [metaResult, tiktokResult, snapResult, metaThumbs, tiktokThumbs, tiktokVideos] = await Promise.all([
+    const [metaResult, tiktokResult, snapResult, metaThumbs, tiktokThumbs, tiktokVideos, snapMedia] = await Promise.all([
       fetchCreatives('facebook', params, isToday),
       fetchCreatives('tiktok', params, isToday),
       fetchCreatives('snapchat', params, isToday).catch(() => ({ rows: [] as CreativeRow[] })),
@@ -272,6 +291,7 @@ export async function GET(request: NextRequest) {
       // Insights-based and has no video source field (verified Jun 2026) —
       // Meta playback would need the Graph API ad-preview embed + valid token.
       fetchWindsorAdUrls('tiktok', urlParams, ['video_url']),
+      fetchSnapMedia(urlParams),
     ]);
 
     const metaActId = `act_${META_AD_ACCOUNT_ID.replace('act_', '')}`;
@@ -296,14 +316,22 @@ export async function GET(request: NextRequest) {
       c.thumbnailUrl = tiktokThumbs.urls[c.id] || null;
       c.videoUrl = tiktokVideos.urls[c.id] || null;
     }
+    for (const c of snapCreatives) {
+      const url = snapMedia.urls[c.id] || null;
+      c.thumbnailUrl = url;
+      // Snapchat creatives are video-first — if the URL is a video, offer playback.
+      if (url && /\.(mp4|mov|webm)(\?|$)/i.test(url)) c.videoUrl = url;
+    }
 
     const creatives = [...metaCreatives, ...tiktokCreatives, ...snapCreatives].sort((a, b) => b.spend - a.spend);
 
     return NextResponse.json({
       source: 'windsor_live',
       metaActId,
-      thumbnailsFound: Object.keys(metaThumbs.urls).length + Object.keys(tiktokThumbs.urls).length,
+      thumbnailsFound: Object.keys(metaThumbs.urls).length + Object.keys(tiktokThumbs.urls).length + Object.keys(snapMedia.urls).length,
       videosFound: Object.keys(tiktokVideos.urls).length,
+      snapMediaFound: Object.keys(snapMedia.urls).length,
+      snapMediaError: snapMedia.error,
       thumbnailError: metaThumbs.error || tiktokThumbs.error,
       videoError: tiktokVideos.error,
       creatives,
