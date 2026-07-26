@@ -247,20 +247,13 @@ async function fetchWindsorAdUrls(
 // Snapchat's creative-media field name varies in Windsor — try the known
 // candidates in order until one returns URLs. Each attempt is cached an hour,
 // and a working candidate short-circuits the rest.
-async function fetchSnapMedia(urlParams: Record<string, string>): Promise<{ urls: Record<string, string>; error: string | null }> {
-  const candidates: string[][] = [
-    ['creative_top_snap_media_url'],
-    ['creative_thumbnail_url', 'thumbnail_url'],
-    ['creative_url', 'media_url'],
-    ['video_url'],
-  ];
-  let lastError: string | null = null;
-  for (const fields of candidates) {
-    const r = await fetchWindsorAdUrls('snapchat', urlParams, fields);
-    if (Object.keys(r.urls).length > 0) return r;
-    if (r.error) lastError = r.error;
-  }
-  return { urls: {}, error: lastError || 'no snapchat media field returned URLs' };
+async function fetchSnapMedia(_urlParams: Record<string, string>): Promise<{ urls: Record<string, string>; error: string | null }> {
+  // Verified Jul 2026: Windsor's snapchat connector rejects every media-URL
+  // field name ("Unknown Field" for creative_top_snap_media_url, thumbnail_url,
+  // media_url, video_url, …) — it has no creative-media fields at all, so
+  // don't waste round-trips probing. Snapchat previews would need the
+  // Snapchat Marketing API directly (own app + OAuth token).
+  return { urls: {}, error: 'windsor snapchat connector exposes no creative media fields' };
 }
 
 export async function GET(request: NextRequest) {
