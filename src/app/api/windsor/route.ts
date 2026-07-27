@@ -4,6 +4,7 @@ import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getOverview, fetchShopifyDaily, fetchShopifyCustomerSplit } from '@/src/lib/bqOverview';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
+import { fetchMetaToday } from '@/src/lib/metaLive';
 
 export const dynamic = 'force-dynamic';
 
@@ -505,6 +506,24 @@ export async function GET(request: NextRequest) {
           } else {
             current.revenueData = [{ date: currentParams.date_from, revenue: Math.round(liveRevenue), orders: liveOrders, adSpend: current.metrics.totalAdSpend }];
           }
+        }
+      }
+    }
+
+    // For "today", overlay live Meta spend from the Graph API — Windsor's
+    // intraday sync lags by up to an hour, so the Overview otherwise shows a
+    // lower Meta number than Ads Manager. (Same overlay Ad Performance uses.)
+    if (tf === 'today' && !latestAvailableDate) {
+      const metaLive = await fetchMetaToday().catch(() => null);
+      if (metaLive && metaLive.spend >= current.metrics.metaSpend) {
+        const spendDelta = metaLive.spend - current.metrics.metaSpend;
+        current.metrics.metaSpend = Math.round(metaLive.spend * 100) / 100;
+        current.metrics.totalAdSpend = Math.round((current.metrics.totalAdSpend + spendDelta) * 100) / 100;
+        if (metaLive.revenue > 0) current.metrics.metaRevenue = Math.round(metaLive.revenue);
+        current.metrics.mer = current.metrics.totalAdSpend > 0
+          ? Math.round((current.metrics.totalRevenue / current.metrics.totalAdSpend) * 100) / 100 : 0;
+        if (current.revenueData.length > 0) {
+          current.revenueData[0].adSpend = Math.round(current.metrics.totalAdSpend);
         }
       }
     }
