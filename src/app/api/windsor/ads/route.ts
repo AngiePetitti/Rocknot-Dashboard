@@ -30,6 +30,7 @@ interface DaySpend {
   meta: number;
   google: number;
   tiktok: number;
+  snapchat: number;
 }
 
 export interface PlatformData {
@@ -44,11 +45,12 @@ export interface PlatformData {
 }
 
 // Totals request: no date field — Windsor returns per-ad aggregated rows (avoids row-limit truncation)
-async function fetchSourceTotals(source: 'facebook' | 'google_ads' | 'tiktok', params: Record<string, string>): Promise<WindsorRow[]> {
+async function fetchSourceTotals(source: 'facebook' | 'google_ads' | 'tiktok' | 'snapchat', params: Record<string, string>): Promise<WindsorRow[]> {
   const fieldMap = {
     facebook:   'account_id,source,spend,impressions,clicks,action_values_omni_purchase,actions_omni_purchase',
     google_ads: 'source,spend,impressions,clicks,conversion_value',
     tiktok:     'source,spend,impressions,clicks,complete_payment,total_complete_payment_rate,onsite_total_purchase_value,conversion_value',
+    snapchat:   'source,spend,impressions,clicks,conversion_purchases,conversion_purchases_value',
   };
   try {
     const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields: fieldMap[source], _renderer: 'json', ...params });
@@ -68,7 +70,7 @@ function onlyRocknot(source: string, rows: WindsorRow[]): WindsorRow[] {
 }
 
 // Daily request: only date+spend — Windsor returns ~1 row per day (small row count for chart)
-async function fetchSourceDaily(source: 'facebook' | 'google_ads' | 'tiktok', params: Record<string, string>): Promise<WindsorRow[]> {
+async function fetchSourceDaily(source: 'facebook' | 'google_ads' | 'tiktok' | 'snapchat', params: Record<string, string>): Promise<WindsorRow[]> {
   try {
     const fields = source === 'facebook' ? 'date,account_id,source,spend' : 'date,source,spend';
     const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
@@ -81,7 +83,7 @@ async function fetchSourceDaily(source: 'facebook' | 'google_ads' | 'tiktok', pa
   }
 }
 
-function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'TikTok', color: string): PlatformData {
+function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'TikTok' | 'Snapchat', color: string): PlatformData {
   let spend = 0, impressions = 0, clicks = 0, revenue = 0;
 
   for (const row of rows) {
@@ -92,6 +94,8 @@ function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'Ti
 
     if (platform === 'Meta') {
       revenue += Number((row as Record<string, unknown>).action_values_omni_purchase || 0);
+    } else if (platform === 'Snapchat') {
+      revenue += Number((row as Record<string, unknown>).conversion_purchases_value || 0);
     } else if (platform === 'TikTok') {
       const tk = row as Record<string, unknown>;
       // total_complete_payment_rate is TikTok's total purchase value (Windsor's
@@ -114,14 +118,14 @@ function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'Ti
   };
 }
 
-function buildDailySpend(metaRows: WindsorRow[], googleRows: WindsorRow[], tiktokRows: WindsorRow[]): DaySpend[] {
+function buildDailySpend(metaRows: WindsorRow[], googleRows: WindsorRow[], tiktokRows: WindsorRow[], snapRows: WindsorRow[]): DaySpend[] {
   const byDate: Record<string, DaySpend> = {};
 
-  const add = (rows: WindsorRow[], key: 'meta' | 'google' | 'tiktok') => {
+  const add = (rows: WindsorRow[], key: 'meta' | 'google' | 'tiktok' | 'snapchat') => {
     for (const row of rows) {
       const date = String(row.date || '').split('T')[0];
       if (!date) continue;
-      if (!byDate[date]) byDate[date] = { date, meta: 0, google: 0, tiktok: 0 };
+      if (!byDate[date]) byDate[date] = { date, meta: 0, google: 0, tiktok: 0, snapchat: 0 };
       byDate[date][key] += Number(row.spend || 0);
     }
   };
@@ -129,6 +133,7 @@ function buildDailySpend(metaRows: WindsorRow[], googleRows: WindsorRow[], tikto
   add(metaRows, 'meta');
   add(googleRows, 'google');
   add(tiktokRows, 'tiktok');
+  add(snapRows, 'snapchat');
 
   return Object.values(byDate)
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -137,6 +142,7 @@ function buildDailySpend(metaRows: WindsorRow[], googleRows: WindsorRow[], tikto
       meta: Math.round(d.meta),
       google: Math.round(d.google),
       tiktok: Math.round(d.tiktok),
+      snapchat: Math.round(d.snapchat),
     }));
 }
 
@@ -225,13 +231,15 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [metaTotals, googleTotals, tiktokTotals, metaDaily, googleDaily, tiktokDaily] = await Promise.all([
+    const [metaTotals, googleTotals, tiktokTotals, snapTotals, metaDaily, googleDaily, tiktokDaily, snapDaily] = await Promise.all([
       fetchSourceTotals('facebook', params),
       fetchSourceTotals('google_ads', params),
       fetchSourceTotals('tiktok', params),
+      fetchSourceTotals('snapchat', params),
       fetchSourceDaily('facebook', params),
       fetchSourceDaily('google_ads', params),
       fetchSourceDaily('tiktok', params),
+      fetchSourceDaily('snapchat', params),
     ]);
 
     if (debug) {
@@ -270,7 +278,10 @@ export async function GET(request: NextRequest) {
     const tiktok = aggregatePlatform(tiktokTotals, 'TikTok', '#f472b6');
     if (tiktok.spend > 0) platforms.push(tiktok);
 
-    const dailySpend = buildDailySpend(metaDaily, googleDaily, tiktokDaily);
+    const snapchat = aggregatePlatform(snapTotals, 'Snapchat', '#facc15');
+    if (snapchat.spend > 0) platforms.push(snapchat);
+
+    const dailySpend = buildDailySpend(metaDaily, googleDaily, tiktokDaily, snapDaily);
 
     return NextResponse.json({ source: 'windsor_live', platforms, dailySpend }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {

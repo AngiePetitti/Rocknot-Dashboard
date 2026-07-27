@@ -116,9 +116,11 @@ interface AggregatedMetrics {
   metaSpend: number;
   googleSpend: number;
   tiktokSpend: number;
+  snapchatSpend: number;
   metaRevenue: number;
   googleRevenue: number;
   tiktokRevenue: number;
+  snapchatRevenue: number;
   newCustomers: number;
   returningCustomers: number;
   newCustomerRevenue: number;
@@ -133,17 +135,19 @@ interface DayBucket {
   metaRevenue: number;
   googleRevenue: number;
   tiktokRevenue: number;
+  snapchatRevenue: number;
   orders: number;
   adSpend: number;
   metaSpend: number;
   googleSpend: number;
   tiktokSpend: number;
+  snapchatSpend: number;
   newCustomers: number;
   returningCustomers: number;
 }
 
 function emptyBucket(date: string): DayBucket {
-  return { date, shopifyRevenue: 0, metaRevenue: 0, googleRevenue: 0, tiktokRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, newCustomers: 0, returningCustomers: 0 };
+  return { date, shopifyRevenue: 0, metaRevenue: 0, googleRevenue: 0, tiktokRevenue: 0, snapchatRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, snapchatSpend: 0, newCustomers: 0, returningCustomers: 0 };
 }
 
 function aggregateRows(rows: WindsorRow[]) {
@@ -197,6 +201,10 @@ function aggregateRows(rows: WindsorRow[]) {
         byDate[date].tiktokRevenue += tiktokRev;
         byDate[date].tiktokSpend += spend;
         byDate[date].adSpend += spend;
+      } else if (src.includes('snapchat')) {
+        byDate[date].snapchatRevenue += Number((row as Record<string, unknown>).conversion_purchases_value || 0);
+        byDate[date].snapchatSpend += spend;
+        byDate[date].adSpend += spend;
       }
     }
   }
@@ -217,6 +225,8 @@ function aggregateRows(rows: WindsorRow[]) {
   const totalMetaRevenue = dailyData.reduce((s, d) => s + d.metaRevenue, 0);
   const totalGoogleRevenue = dailyData.reduce((s, d) => s + d.googleRevenue, 0);
   const totalTikTokRevenue = dailyData.reduce((s, d) => s + d.tiktokRevenue, 0);
+  const totalSnapSpend  = dailyData.reduce((s, d) => s + d.snapchatSpend, 0);
+  const totalSnapRevenue = dailyData.reduce((s, d) => s + d.snapchatRevenue, 0);
   const totalNewCust    = dailyData.reduce((s, d) => s + d.newCustomers, 0);
   const totalRetCust    = dailyData.reduce((s, d) => s + d.returningCustomers, 0);
 
@@ -233,6 +243,8 @@ function aggregateRows(rows: WindsorRow[]) {
     metaRevenue: Math.round(totalMetaRevenue),
     googleRevenue: Math.round(totalGoogleRevenue),
     tiktokRevenue: Math.round(totalTikTokRevenue),
+    snapchatSpend: Math.round(totalSnapSpend),
+    snapchatRevenue: Math.round(totalSnapRevenue),
     newCustomers: totalNewCust,
     returningCustomers: totalRetCust,
     newCustomerRevenue: 0,
@@ -262,6 +274,7 @@ const GOOGLE_FIELDS = ['date', 'source', 'spend', 'impressions', 'clicks', 'conv
 const SHOPIFY_FIELDS = ['date', 'source', 'order_id', 'order_count', 'order_current_total_price', 'order_subtotal_price', 'order_total_price', 'order_gross_sales', 'order_net_sales'].join(',');
 
 const TIKTOK_FIELDS = ['date', 'source', 'spend', 'clicks', 'impressions', 'complete_payment', 'total_complete_payment_rate'].join(',');
+const SNAP_FIELDS = ['date', 'source', 'spend', 'clicks', 'impressions', 'conversion_purchases', 'conversion_purchases_value'].join(',');
 const TIKTOK_FIELDS_LEGACY = ['date', 'source', 'spend', 'clicks', 'impressions', 'complete_payment', 'complete_payment_value'].join(',');
 
 // Separate queries per Windsor support: orders (with customer id) and the
@@ -334,11 +347,12 @@ async function fetchAllRows(params: Record<string, string>): Promise<WindsorRow[
     .then(r => r.rowCount > 0 ? r : fetchFromWindsor('tiktok', TIKTOK_FIELDS_LEGACY, params))
     .catch(() => ({ rows: [] as WindsorRow[], rowCount: 0 }));
 
-  const [meta, google, shopify] = await Promise.all([
+  const [meta, google, shopify, snap] = await Promise.all([
     fetchFromWindsor('facebook', META_FIELDS, params),
     fetchFromWindsor('google_ads', GOOGLE_FIELDS, params),
     // Windsor /all filtered to shopify source — /shopify endpoint returns null order fields
     fetchFromWindsor('all', SHOPIFY_FIELDS, params),
+    fetchFromWindsor('snapchat', SNAP_FIELDS, params).catch(() => ({ rows: [] as WindsorRow[], rowCount: 0 })),
   ]);
 
   const shopifyRows = shopify.rows.filter(r =>
@@ -349,6 +363,7 @@ async function fetchAllRows(params: Record<string, string>): Promise<WindsorRow[
     ...meta.rows.map(r => ({ ...r, source: 'facebook' })),
     ...google.rows.map(r => ({ ...r, source: 'google' })),
     ...tiktokResult.rows.map(r => ({ ...r, source: 'tiktok' })),
+    ...snap.rows.map(r => ({ ...r, source: 'snapchat' })),
     ...shopifyRows,
   ];
 }
