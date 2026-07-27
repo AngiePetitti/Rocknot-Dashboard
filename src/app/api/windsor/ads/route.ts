@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getAdsOverview } from '@/src/lib/bqAds';
 import { fetchMetaToday } from '@/src/lib/metaLive';
+import { fetchSnapToday } from '@/src/lib/snapLive';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 
@@ -279,6 +280,16 @@ export async function GET(request: NextRequest) {
     if (tiktok.spend > 0) platforms.push(tiktok);
 
     const snapchat = aggregatePlatform(snapTotals, 'Snapchat', '#facc15');
+    // Live Snap Marketing API numbers for today — Windsor's intraday
+    // snapchat sync lags by hours (same treatment as Meta above).
+    if (tfRaw === 'today') {
+      const snapLive = await fetchSnapToday().catch(() => null);
+      if (snapLive && snapLive.spend >= snapchat.spend) {
+        snapchat.spend = snapLive.spend;
+        snapchat.revenue = snapLive.revenue;
+        snapchat.roas = snapchat.spend > 0 ? Math.round((snapchat.revenue / snapchat.spend) * 100) / 100 : 0;
+      }
+    }
     if (snapchat.spend > 0) platforms.push(snapchat);
 
     const dailySpend = buildDailySpend(metaDaily, googleDaily, tiktokDaily, snapDaily);

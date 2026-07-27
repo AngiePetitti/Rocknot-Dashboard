@@ -5,6 +5,7 @@ import { getOverview, fetchShopifyDaily, fetchShopifyCustomerSplit } from '@/src
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { fetchMetaToday } from '@/src/lib/metaLive';
+import { fetchSnapToday } from '@/src/lib/snapLive';
 
 export const dynamic = 'force-dynamic';
 
@@ -535,6 +536,23 @@ export async function GET(request: NextRequest) {
         current.metrics.metaSpend = Math.round(metaLive.spend * 100) / 100;
         current.metrics.totalAdSpend = Math.round((current.metrics.totalAdSpend + spendDelta) * 100) / 100;
         if (metaLive.revenue > 0) current.metrics.metaRevenue = Math.round(metaLive.revenue);
+        current.metrics.mer = current.metrics.totalAdSpend > 0
+          ? Math.round((current.metrics.totalRevenue / current.metrics.totalAdSpend) * 100) / 100 : 0;
+        if (current.revenueData.length > 0) {
+          current.revenueData[0].adSpend = Math.round(current.metrics.totalAdSpend);
+        }
+      }
+    }
+
+    // Same live overlay for Snapchat — Windsor's snapchat connector lags
+    // intraday by hours, which materially understates today's spend/MER.
+    if (tf === 'today' && !latestAvailableDate) {
+      const snapLive = await fetchSnapToday().catch(() => null);
+      if (snapLive && snapLive.spend >= current.metrics.snapchatSpend) {
+        const spendDelta = snapLive.spend - current.metrics.snapchatSpend;
+        current.metrics.snapchatSpend = Math.round(snapLive.spend * 100) / 100;
+        current.metrics.totalAdSpend = Math.round((current.metrics.totalAdSpend + spendDelta) * 100) / 100;
+        if (snapLive.revenue > 0) current.metrics.snapchatRevenue = Math.round(snapLive.revenue);
         current.metrics.mer = current.metrics.totalAdSpend > 0
           ? Math.round((current.metrics.totalRevenue / current.metrics.totalAdSpend) * 100) / 100 : 0;
         if (current.revenueData.length > 0) {
