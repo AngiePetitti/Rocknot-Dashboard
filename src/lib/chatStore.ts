@@ -234,7 +234,7 @@ export async function deleteReport(email: string, reportId: string): Promise<voi
 // ── Reorders (same private sheet, "Reorders" tab — shared) ───────────────
 // One row per purchase order: when an item is marked ordered it leaves the
 // restock alerts until received. Columns:
-// Id | Product | Variant | Qty | Ordered Date | Ordered By | Status | Received Date
+// Id | Product | Variant | Qty | Ordered Date | Ordered By | Status | Received Date | Expected
 const REORDERS_TAB = 'Reorders';
 
 export interface Reorder {
@@ -246,6 +246,7 @@ export interface Reorder {
   orderedBy: string;
   status: 'open' | 'received';
   receivedDate?: string;
+  eta?: string;          // expected arrival, YYYY-MM-DD
 }
 
 async function ensureReordersTab(sheetId: string): Promise<void> {
@@ -256,7 +257,7 @@ async function ensureReordersTab(sheetId: string): Promise<void> {
     });
     await api(`/${sheetId}/values/${REORDERS_TAB}!A1?valueInputOption=RAW`, {
       method: 'PUT',
-      body: JSON.stringify({ range: `${REORDERS_TAB}!A1`, majorDimension: 'ROWS', values: [['Id', 'Product', 'Variant', 'Qty', 'Ordered Date', 'Ordered By', 'Status', 'Received Date']] }),
+      body: JSON.stringify({ range: `${REORDERS_TAB}!A1`, majorDimension: 'ROWS', values: [['Id', 'Product', 'Variant', 'Qty', 'Ordered Date', 'Ordered By', 'Status', 'Received Date', 'Expected']] }),
     });
   } catch { /* tab already exists */ }
 }
@@ -272,6 +273,7 @@ function rowToReorder(r: string[]): Reorder | null {
     orderedBy: (r[5] || '').trim(),
     status: (r[6] || '').trim().toLowerCase() === 'received' ? 'received' : 'open',
     receivedDate: (r[7] || '').trim() || undefined,
+    eta: (r[8] || '').trim() || undefined,
   };
 }
 
@@ -279,7 +281,7 @@ export async function getReorders(): Promise<Reorder[]> {
   const sheetId = await getChatSheetId(false);
   if (!sheetId) return [];
   try {
-    const data = await api(`/${sheetId}/values/${REORDERS_TAB}!A2:H`) as { values?: string[][] };
+    const data = await api(`/${sheetId}/values/${REORDERS_TAB}!A2:I`) as { values?: string[][] };
     return (data.values || []).map(rowToReorder).filter((r): r is Reorder => r !== null);
   } catch {
     return [];
@@ -295,7 +297,7 @@ export async function addReorder(r: Omit<Reorder, 'id' | 'status'>): Promise<Reo
     method: 'POST',
     body: JSON.stringify({
       range: `${REORDERS_TAB}!A1`, majorDimension: 'ROWS',
-      values: [[reorder.id, reorder.product, reorder.variant, String(reorder.qty), reorder.orderedDate, reorder.orderedBy, 'open', '']],
+      values: [[reorder.id, reorder.product, reorder.variant, String(reorder.qty), reorder.orderedDate, reorder.orderedBy, 'open', '', reorder.eta || '']],
     }),
   });
   return reorder;
@@ -304,7 +306,7 @@ export async function addReorder(r: Omit<Reorder, 'id' | 'status'>): Promise<Reo
 export async function updateReorder(id: string, patch: { status?: 'open' | 'received'; receivedDate?: string; qty?: number }): Promise<void> {
   const sheetId = await getChatSheetId(false);
   if (!sheetId) throw new Error('Reorder storage unavailable');
-  const data = await api(`/${sheetId}/values/${REORDERS_TAB}!A2:H`) as { values?: string[][] };
+  const data = await api(`/${sheetId}/values/${REORDERS_TAB}!A2:I`) as { values?: string[][] };
   const rows = data.values || [];
   const idx = rows.findIndex(r => (r[0] || '').trim() === id);
   if (idx === -1) throw new Error('Reorder not found');
@@ -312,19 +314,19 @@ export async function updateReorder(id: string, patch: { status?: 'open' | 'rece
   if (patch.qty !== undefined) row[3] = String(patch.qty);
   if (patch.status) row[6] = patch.status;
   if (patch.receivedDate !== undefined) row[7] = patch.receivedDate;
-  while (row.length < 8) row.push('');
+  while (row.length < 9) row.push('');
   await api(`/${sheetId}/values/${REORDERS_TAB}!A${idx + 2}?valueInputOption=RAW`, {
     method: 'PUT',
-    body: JSON.stringify({ range: `${REORDERS_TAB}!A${idx + 2}`, majorDimension: 'ROWS', values: [row.slice(0, 8)] }),
+    body: JSON.stringify({ range: `${REORDERS_TAB}!A${idx + 2}`, majorDimension: 'ROWS', values: [row.slice(0, 9)] }),
   });
 }
 
 export async function deleteReorder(id: string): Promise<void> {
   const sheetId = await getChatSheetId(false);
   if (!sheetId) return;
-  const data = await api(`/${sheetId}/values/${REORDERS_TAB}!A2:H`) as { values?: string[][] };
+  const data = await api(`/${sheetId}/values/${REORDERS_TAB}!A2:I`) as { values?: string[][] };
   const rows = (data.values || []).filter(r => (r[0] || '').trim() !== id);
-  await api(`/${sheetId}/values/${REORDERS_TAB}!A2:H:clear`, { method: 'POST', body: '{}' });
+  await api(`/${sheetId}/values/${REORDERS_TAB}!A2:I:clear`, { method: 'POST', body: '{}' });
   if (rows.length) {
     await api(`/${sheetId}/values/${REORDERS_TAB}!A2?valueInputOption=RAW`, {
       method: 'PUT',

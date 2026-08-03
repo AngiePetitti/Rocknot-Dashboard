@@ -16,7 +16,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   if (!isChatStoreConfigured()) return NextResponse.json({ error: 'Reorder storage not configured' }, { status: 500 });
-  let body: { product?: string; variant?: string; qty?: number; orderedDate?: string };
+  let body: { product?: string; variant?: string; qty?: number; orderedDate?: string; eta?: string };
   try {
     body = await req.json();
   } catch {
@@ -35,7 +35,8 @@ export async function POST(req: NextRequest) {
   const orderedDate = /^\d{4}-\d{2}-\d{2}$/.test(body.orderedDate || '') ? body.orderedDate! : today;
 
   try {
-    const reorder = await addReorder({ product, variant: (body.variant || '').trim(), qty, orderedDate, orderedBy });
+    const eta = /^\d{4}-\d{2}-\d{2}$/.test(body.eta || '') ? body.eta : undefined;
+    const reorder = await addReorder({ product, variant: (body.variant || '').trim(), qty, orderedDate, orderedBy, eta });
     return NextResponse.json({ ok: true, reorder });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });

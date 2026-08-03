@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
     text = `*📦 Rocknot Monday Restock — ${today}*\n\n*${toOrder.length} item${toOrder.length !== 1 ? 's' : ''} to order this week* (quantities cover ~90 days at current pace):\n\n${lines.join('\n')}\n\n_Once ordered, log the quantity + date on the dashboard's Inventory tab so it drops off next week's list._`;
   }
   if (openOrders.length > 0) {
-    text += `\n\n⏳ *Already on order (${openOrders.length}):* ${openOrders.map(r => `${r.product}${r.variant ? ` – ${r.variant}` : ''} ×${r.qty} (${r.orderedDate})`).join(' · ')}`;
+    text += `\n\n🚚 *Already on order (${openOrders.length}):* ${openOrders.map(r => `${r.product}${r.variant ? ` – ${r.variant}` : ''} ×${r.qty}${r.eta ? ` (expected ${r.eta})` : ` (ordered ${r.orderedDate})`}`).join(' · ')}`;
   }
 
   const slackRes = await fetch(webhook, {
