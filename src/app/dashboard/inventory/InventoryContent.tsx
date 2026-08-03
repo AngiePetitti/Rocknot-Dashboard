@@ -459,6 +459,70 @@ export default function InventoryContent() {
         </div>
       )}
 
+      {/* ── Inventory figures — always visible up top ── */}
+      <div className="flex items-start gap-3 bg-violet-50 border border-violet-100 rounded-xl px-4 py-2.5 mb-4 text-xs text-violet-700">
+        <span className="text-base mt-0.5">📦</span>
+        <span>
+          <strong>90-day supply target</strong> — velocity based on last 90 days of sales.
+          Reorder Qty = units needed to bring stock back to 90 days of supply at current pace.
+          True bag stock is shown in its own section from the hidden &quot;bag only&quot; listings; the public mix-and-match handbag listings (untracked) are excluded.
+        </span>
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        <MetricCard
+          title="Inventory Value (Cost)"
+          value={status === 'loading' || !finance ? '—' : fmtMoney(finance.totalCostValue)}
+          subtitle="Cash tied up in stock on hand"
+          accentColor="#818cf8"
+        />
+        <MetricCard
+          title="Retail Value on Hand"
+          value={status === 'loading' || !finance ? '—' : fmtMoney(finance.totalRetailValue)}
+          subtitle="Revenue sitting on the shelves"
+          accentColor="#34d399"
+        />
+        <MetricCard
+          title="Potential Profit"
+          value={status === 'loading' || !finance ? '—' : fmtMoney(finance.potentialProfit)}
+          subtitle="Retail minus cost, if it all sells"
+          accentColor="#22c55e"
+        />
+        <MetricCard
+          title="Slow / Dead Stock"
+          value={status === 'loading' || !finance ? '—' : fmtMoney(finance.slowStockCostValue)}
+          subtitle={finance
+            ? `${finance.slowStockCount} SKUs · ${finance.slowStockUnits.toLocaleString()} units depreciating`
+            : 'Cash not turning over'}
+          accentColor="#f87171"
+        />
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <MetricCard
+          title="Out of Stock"
+          value={status === 'loading' ? '—' : counts.outOfStock.toString()}
+          subtitle="Tracked SKUs sold to zero"
+          accentColor="#fca5a5"
+        />
+        <MetricCard
+          title="Critical Stock"
+          value={status === 'loading' ? '—' : counts.critical.toString()}
+          subtitle="Under 7 days remaining"
+          accentColor="#fdba74"
+        />
+        <MetricCard
+          title="Low Stock"
+          value={status === 'loading' ? '—' : counts.low.toString()}
+          subtitle="7–14 days remaining"
+          accentColor="#fde68a"
+        />
+        <MetricCard
+          title="Healthy Stock"
+          value={status === 'loading' ? '—' : counts.healthy.toString()}
+          subtitle="14+ days remaining"
+          accentColor="#86efac"
+        />
+      </div>
+
       {/* ── Bags — True Stock Levels ── */}
       {status === 'ok' && bags.length > 0 && (
         <Card accentColor="#a78bfa" className="mb-5">
@@ -568,80 +632,6 @@ export default function InventoryContent() {
       )}
 
       {/* ── Everything else lives in collapsible sections to keep the page scannable ── */}
-      <Collapsible icon="📊" title="Stock Value & Health"
-        summary={finance ? `${fmtMoney(finance.totalCostValue)} at cost · ${counts.outOfStock} out of stock · ${counts.critical} critical` : ''}>
-        <div className="px-3 pt-2">
-      {/* Supply target callout */}
-      <div className="flex items-start gap-3 bg-violet-50 border border-violet-100 rounded-xl px-4 py-2.5 mb-5 text-xs text-violet-700">
-        <span className="text-base mt-0.5">📦</span>
-        <span>
-          <strong>90-day supply target</strong> — velocity based on last 90 days of sales.
-          Reorder Qty = units needed to bring stock back to 90 days of supply at current pace.
-          True bag stock is shown in its own section from the hidden &quot;bag only&quot; listings; the public mix-and-match handbag listings (untracked) are excluded.
-        </span>
-      </div>
-
-      {/* Inventory $ cards — money tied up on the shelves */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        <MetricCard
-          title="Inventory Value (Cost)"
-          value={status === 'loading' || !finance ? '—' : fmtMoney(finance.totalCostValue)}
-          subtitle="Cash tied up in stock on hand"
-          accentColor="#818cf8"
-        />
-        <MetricCard
-          title="Retail Value on Hand"
-          value={status === 'loading' || !finance ? '—' : fmtMoney(finance.totalRetailValue)}
-          subtitle="Revenue sitting on the shelves"
-          accentColor="#34d399"
-        />
-        <MetricCard
-          title="Potential Profit"
-          value={status === 'loading' || !finance ? '—' : fmtMoney(finance.potentialProfit)}
-          subtitle="Retail minus cost, if it all sells"
-          accentColor="#22c55e"
-        />
-        <MetricCard
-          title="Slow / Dead Stock"
-          value={status === 'loading' || !finance ? '—' : fmtMoney(finance.slowStockCostValue)}
-          subtitle={finance
-            ? `${finance.slowStockCount} SKUs · ${finance.slowStockUnits.toLocaleString()} units depreciating`
-            : 'Cash not turning over'}
-          accentColor="#f87171"
-        />
-      </div>
-
-      {/* Metric cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <MetricCard
-          title="Out of Stock"
-          value={status === 'loading' ? '—' : counts.outOfStock.toString()}
-          subtitle="Tracked SKUs sold to zero"
-          accentColor="#fca5a5"
-        />
-        <MetricCard
-          title="Critical Stock"
-          value={status === 'loading' ? '—' : counts.critical.toString()}
-          subtitle="Under 7 days remaining"
-          accentColor="#fdba74"
-        />
-        <MetricCard
-          title="Low Stock"
-          value={status === 'loading' ? '—' : counts.low.toString()}
-          subtitle="7–14 days remaining"
-          accentColor="#fde68a"
-        />
-        <MetricCard
-          title="Healthy Stock"
-          value={status === 'loading' ? '—' : counts.healthy.toString()}
-          subtitle="14+ days remaining"
-          accentColor="#86efac"
-        />
-      </div>
-
-        </div>
-      </Collapsible>
-
       <Collapsible icon="🐌" title="Slow / Dead Stock"
         summary={finance ? `${finance.slowStockCount} SKUs · ${fmtMoney(finance.slowStockCostValue)} tied up` : ''}>
         <div className="px-3 pt-2">
