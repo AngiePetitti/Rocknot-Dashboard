@@ -214,7 +214,7 @@ export async function GET() {
 
     type RawItem = InventoryItem & {
       _isBag: boolean; _isGiftCard: boolean; _isHandbag: boolean;
-      _isPublicBag: boolean; _bagCovered: boolean; _bagBare: boolean;
+      _isPublicBag: boolean; _isCombo: boolean; _bagCovered: boolean; _bagBare: boolean;
       _isSale: boolean; _rawProduct: string;
       _startingStock: number;
     };
@@ -248,6 +248,15 @@ export async function GET() {
 
       const _isBag = isBagOnly(rawProduct);
       const _isPublicBag = !_isBag && isPublicBag(rawProduct, category, bagKeys);
+      // Combo/set listings that pair existing products ("X + Y" titles, the
+      // PHONEPACK pouch+strap+charm set): their variant counts mirror the
+      // component products' stock across many variants (audited Aug 2026 —
+      // e.g. every PHONEPACK strap-color variant repeats the same pouch
+      // count), so counting them would duplicate stock already counted on
+      // the component SKUs. Real pre-packed bundles with their own SKUs and
+      // distinct per-variant counts (e.g. "Rhinestone Rope Bracelet - 6x
+      // Bundle", "The Rope Set") are NOT combos and stay counted.
+      const _isCombo = !_isBag && (/\bphonepack\b/i.test(rawProduct) || /\s\+\s/.test(rawProduct));
       // A bag line is "covered" when it has its own bag-only listing, so its
       // true count comes from there and every public variant is phantom.
       const _bagCovered = bagKeys.has(bagLineKey(rawProduct));
@@ -272,6 +281,7 @@ export async function GET() {
         _isGiftCard: /gift\s*card/i.test(rawProduct),
         _isHandbag: /handbag/i.test(category),
         _isPublicBag,
+        _isCombo,
         _bagCovered,
         // A "bare" bag listing has no "+ accessory" clause before the color dash
         // (the strapless / standalone bag) — its count is the true on-hand.
@@ -285,7 +295,7 @@ export async function GET() {
     // Drop sample-sale / final-sale listings entirely — not regular inventory.
     const allRows = allRowsMapped.filter(r => !r._isSale);
 
-    const strip = ({ _isBag, _isGiftCard, _isHandbag, _isPublicBag, _bagCovered, _bagBare, _isSale, _rawProduct, _startingStock, ...rest }: RawItem): InventoryItem => rest;
+    const strip = ({ _isBag, _isGiftCard, _isHandbag, _isPublicBag, _isCombo, _bagCovered, _bagBare, _isSale, _rawProduct, _startingStock, ...rest }: RawItem): InventoryItem => rest;
 
     // ── Curated Bags section ──────────────────────────────────────────────
     // The Bags section shows ONLY actual handbags in stock — one row per bag
@@ -417,7 +427,7 @@ export async function GET() {
     // Excludes gift cards, bag-ish rows, and anything consumed by the curated
     // bag list. Keep a SKU if it has stock OR sold units in the window.
     const items: InventoryItem[] = allRows
-      .filter(r => !r._isGiftCard && !r._isBag && !r._isHandbag && !r._isPublicBag
+      .filter(r => !r._isGiftCard && !r._isBag && !r._isHandbag && !r._isPublicBag && !r._isCombo
         && !consumed.has(keyOf(r)) && (r.currentStock > 0 || r.unitsSold90d > 0))
       .map(strip);
 
@@ -436,7 +446,7 @@ export async function GET() {
     // the curated set; their source rows are excluded from normalRows via
     // `consumed`, so nothing double-counts. Gift cards and phantom bag/bundle
     // listings are excluded too.
-    const normalRows = allRows.filter(r => !r._isGiftCard && !r._isBag && !r._isPublicBag && !r._isHandbag && !consumed.has(keyOf(r)));
+    const normalRows = allRows.filter(r => !r._isGiftCard && !r._isBag && !r._isPublicBag && !r._isHandbag && !r._isCombo && !consumed.has(keyOf(r)));
     const valued = normalRows.filter(r => r.currentStock > 0 && r.stockValue > 0);
     const bagsValued = bags.filter(b => b.currentStock > 0 && b.stockValue > 0);
     const totalCostValue = valued.reduce((s, r) => s + r.stockValue, 0) + bagsValued.reduce((s, b) => s + b.stockValue, 0);
@@ -468,7 +478,7 @@ export async function GET() {
     // Poor sellers to move/discount — most cash tied up in non-moving stock,
     // worst offenders first. Exclude bags (managed in their own section).
     const moveOrDiscount = staleRows
-      .filter(r => !r._isBag && !r._isPublicBag)
+      .filter(r => !r._isBag && !r._isPublicBag && !r._isCombo)
       .map(strip)
       .sort((a, b) => b.stockValue - a.stockValue)
       .slice(0, 25);
