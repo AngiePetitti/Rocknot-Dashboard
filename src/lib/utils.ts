@@ -35,7 +35,7 @@ export const TIMEFRAME_LABELS: Record<string, string> = {
   '7d': 'Last 7 Days',
   '14d': 'Last 14 Days',
   '30d': 'Last 30 Days',
-  mtd: 'Month to Date',
+  mtd: 'Month to Date (thru yesterday)',
   last_month: 'Last Month',
   '6m': 'Last 6 Months',
   ytd: 'Year to Date',

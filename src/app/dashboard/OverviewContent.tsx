@@ -242,7 +242,7 @@ export default function OverviewContent() {
     const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
     const [y, m, d] = todayStr.split('-').map(Number);
     const daysElapsed = d - 1; // complete days so far
-    if (daysElapsed < 3) return null; // too little signal to project
+    if (daysElapsed < 1) return null; // nothing complete yet (the 1st)
     const daysInMonth = new Date(y, m, 0).getDate();
     const revPace = mtdSnap.revenue / daysElapsed;
     const spendPace = mtdSnap.adSpend / daysElapsed;
@@ -573,6 +573,7 @@ export default function OverviewContent() {
               <h2 className="text-sm font-bold text-gray-700">{forecast.monthName} Forecast</h2>
               <p className="text-xs text-gray-400">
                 Projected month-end at your current pace — {formatCurrency(forecast.revPace)}/day through {forecast.daysElapsed} of {forecast.daysInMonth} days (today excluded)
+                {forecast.daysElapsed < 4 && <span className="text-amber-600 font-semibold"> · early in the month, low confidence</span>}
               </p>
             </div>
           </div>
