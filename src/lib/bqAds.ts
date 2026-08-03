@@ -218,6 +218,43 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   for (const r of tiktokDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].tiktok = Math.round(Number(r.spend || 0)); }
   for (const r of snapDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].snapchat = Math.round(Number(r.spend || 0)); }
 
+  // Patch the most recent 1-2 days from the platforms' own APIs — Windsor's
+  // once-a-day sync captures those days part-way through, understating spend
+  // until the next sync overwrites them.
+  const todayPst = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const twoDaysAgo = new Date(new Date(todayPst).getTime() - 2 * 86400000).toISOString().slice(0, 10);
+  const patchFrom = dateFrom > twoDaysAgo ? dateFrom : twoDaysAgo;
+  if (dateTo >= patchFrom) {
+    const { fetchMetaDaily } = await import('@/src/lib/metaLive');
+    const { fetchSnapDaily } = await import('@/src/lib/snapLive');
+    const [metaPatch, snapPatch] = await Promise.all([
+      fetchMetaDaily(patchFrom, dateTo).catch(() => null),
+      fetchSnapDaily(patchFrom, dateTo).catch(() => null),
+    ]);
+    for (const day of metaPatch ?? []) {
+      const b = byDate[day.date];
+      if (b && day.spend > b.meta) {
+        const delta = day.spend - b.meta;
+        b.meta = Math.round(day.spend);
+        if (metaPlatform) {
+          metaPlatform.spend = Math.round((metaPlatform.spend + delta) * 100) / 100;
+          metaPlatform.roas = metaPlatform.spend > 0 ? Math.round((metaPlatform.revenue / metaPlatform.spend) * 100) / 100 : 0;
+        }
+      }
+    }
+    for (const day of snapPatch ?? []) {
+      const b = byDate[day.date];
+      if (b && day.spend > b.snapchat) {
+        const delta = day.spend - b.snapchat;
+        b.snapchat = Math.round(day.spend);
+        if (snapPlatform) {
+          snapPlatform.spend = Math.round((snapPlatform.spend + delta) * 100) / 100;
+          snapPlatform.roas = snapPlatform.spend > 0 ? Math.round((snapPlatform.revenue / snapPlatform.spend) * 100) / 100 : 0;
+        }
+      }
+    }
+  }
+
   const dailySpend: DaySpend[] = Object.entries(byDate)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, v]) => ({ date, ...v }));

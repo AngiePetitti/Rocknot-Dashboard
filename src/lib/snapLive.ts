@@ -73,6 +73,59 @@ function findStats(node: unknown): Record<string, unknown>[] {
   return out;
 }
 
+export interface SnapDay { date: string; spend: number; revenue: number }
+
+function laOffset(): string {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', timeZoneName: 'longOffset' }).formatToParts(new Date());
+  return (parts.find(p => p.type === 'timeZoneName')?.value || 'GMT-08:00').replace('GMT', '') || '-08:00';
+}
+
+// Per-day Snap spend/purchase value for a date range (inclusive), used to
+// patch the most recent days of Windsor/BigQuery data.
+export async function fetchSnapDaily(since: string, until: string): Promise<SnapDay[] | null> {
+  if (!snapLiveConfigured()) return null;
+  try {
+    const token = await getAccessToken();
+    const offset = laOffset();
+    const [y, m, d] = until.split('-').map(Number);
+    const next = new Date(Date.UTC(y, m - 1, d + 1));
+    const end = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
+    const qs = new URLSearchParams({
+      granularity: 'DAY',
+      fields: 'spend,conversion_purchases_value',
+      start_time: `${since}T00:00:00.000${offset}`,
+      end_time: `${end}T00:00:00.000${offset}`,
+    });
+    const res = await fetch(`https://adsapi.snapchat.com/v1/adaccounts/${AD_ACCOUNT_ID}/stats?${qs}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+    const json = await res.json();
+    if (!res.ok) return null;
+    // Collect {start_time, stats} entries anywhere in the nested response.
+    const out: SnapDay[] = [];
+    const walk = (v: unknown) => {
+      if (Array.isArray(v)) { v.forEach(walk); return; }
+      if (v && typeof v === 'object') {
+        const o = v as Record<string, unknown>;
+        if (typeof o.start_time === 'string' && o.stats && typeof o.stats === 'object') {
+          const s = o.stats as Record<string, unknown>;
+          out.push({
+            date: o.start_time.slice(0, 10),
+            spend: Math.round((Number(s.spend || 0) / 1_000_000) * 100) / 100,
+            revenue: Math.round((Number(s.conversion_purchases_value || 0) / 1_000_000) * 100) / 100,
+          });
+        }
+        for (const k of Object.keys(o)) walk(o[k]);
+      }
+    };
+    walk(json);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchSnapToday(): Promise<SnapToday | null> {
   if (!snapLiveConfigured()) return null;
   try {

@@ -323,6 +323,41 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const snapByDate: Record<string, { spend: number; revenue: number }> = {};
   for (const r of snapRows) snapByDate[r.date] = { spend: Number(r.spend || 0), revenue: Number(r.revenue || 0) };
 
+  // Windsor's daily sync captures a day PART-WAY through (task runs once a
+  // day), so the most recent 1-2 days in BigQuery understate spend until the
+  // next sync overwrites them. Patch those days from the platforms' own APIs
+  // (Meta Graph, Snap Marketing) — the same sources their Ads Managers show.
+  const todayPst = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const twoDaysAgo = new Date(new Date(todayPst).getTime() - 2 * 86400000).toISOString().slice(0, 10);
+  const patchFrom = dateFrom > twoDaysAgo ? dateFrom : twoDaysAgo;
+  if (dateTo >= patchFrom) {
+    const { fetchMetaDaily } = await import('@/src/lib/metaLive');
+    const { fetchSnapDaily } = await import('@/src/lib/snapLive');
+    const [metaPatch, snapPatch] = await Promise.all([
+      fetchMetaDaily(patchFrom, dateTo).catch(() => null),
+      fetchSnapDaily(patchFrom, dateTo).catch(() => null),
+    ]);
+    if (metaPatch) {
+      const adsByDatePatch: Record<string, AdsRow> = {};
+      for (const a of adsRows) adsByDatePatch[a.date] = a;
+      for (const day of metaPatch) {
+        const row = adsByDatePatch[day.date];
+        if (row && day.spend >= Number(row.meta_spend || 0)) {
+          row.meta_spend = day.spend;
+          if (day.revenue > 0) row.meta_revenue = day.revenue;
+        }
+      }
+    }
+    if (snapPatch) {
+      for (const day of snapPatch) {
+        const existing = snapByDate[day.date];
+        if (!existing || day.spend >= existing.spend) {
+          snapByDate[day.date] = { spend: day.spend, revenue: day.revenue || existing?.revenue || 0 };
+        }
+      }
+    }
+  }
+
   const custDailyByDate: Record<string, { newCustomers: number; totalCustomers: number }> = {};
   for (const r of custDaily) {
     custDailyByDate[r.date] = { newCustomers: Number(r.new_customers || 0), totalCustomers: Number(r.buyers || 0) };

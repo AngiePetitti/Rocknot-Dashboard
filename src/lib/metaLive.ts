@@ -8,6 +8,35 @@ export interface MetaToday {
   clicks: number;
 }
 
+export interface MetaDay { date: string; spend: number; revenue: number }
+
+// Per-day Meta spend/revenue for a date range, straight from the Graph API.
+// Used to patch the most recent days of BigQuery data, which understate
+// spend until Windsor's next daily sync completes.
+export async function fetchMetaDaily(since: string, until: string): Promise<MetaDay[] | null> {
+  const token = (process.env.META_ACCESS_TOKEN || '').trim();
+  const accountId = (process.env.META_AD_ACCOUNT_ID || '').trim().replace('act_', '');
+  if (!token || !accountId) return null;
+  try {
+    const fields = 'spend,action_values';
+    const timeRange = encodeURIComponent(JSON.stringify({ since, until }));
+    const url = `https://graph.facebook.com/v19.0/act_${accountId}/insights?fields=${fields}&time_range=${timeRange}&time_increment=1&level=account&access_token=${token}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    const json = await res.json();
+    if (json.error || !Array.isArray(json.data)) return null;
+    const pick = (arr: Array<{ action_type: string; value: string }> | undefined) =>
+      arr?.find(a => a.action_type === 'omni_purchase')?.value ??
+      arr?.find(a => a.action_type === 'purchase')?.value;
+    return json.data.map((d: { date_start?: string; spend?: string; action_values?: Array<{ action_type: string; value: string }> }) => ({
+      date: String(d.date_start || ''),
+      spend: parseFloat(d.spend || '0'),
+      revenue: parseFloat(pick(d.action_values) || '0'),
+    })).filter((d: MetaDay) => d.date);
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchMetaToday(): Promise<MetaToday | null> {
   const token = (process.env.META_ACCESS_TOKEN || '').trim();
   const accountId = (process.env.META_AD_ACCOUNT_ID || '').trim().replace('act_', '');
