@@ -35,7 +35,7 @@ export const TIMEFRAME_LABELS: Record<string, string> = {
   '7d': 'Last 7 Days',
   '14d': 'Last 14 Days',
   '30d': 'Last 30 Days',
-  mtd: 'Month to Date (thru yesterday)',
+  mtd: 'Month to Date',
   last_month: 'Last Month',
   '6m': 'Last 6 Months',
   ytd: 'Year to Date',
@@ -60,12 +60,14 @@ export const TIMEFRAMES = Object.entries(TIMEFRAME_LABELS).map(([value, label]) 
   shortLabel: TIMEFRAME_SHORT_LABELS[value] || label,
 }));
 
-// Month-to-date range: 1st of the current month through YESTERDAY (today is
-// partial). On the 1st there are no complete days yet, so it falls back to
-// just the 1st. Date strings are YYYY-MM-DD in store (PST) time.
-export function mtdRange(todayStr: string, yesterdayStr: string): { from: string; to: string } {
-  const first = `${todayStr.slice(0, 7)}-01`;
-  return { from: first, to: yesterdayStr >= first ? yesterdayStr : first };
+// Month-to-date range: 1st of the current month through TODAY — matching
+// Shopify's own month-to-date. Today's portion is live: Shopify comes from
+// ShopifyQL and Meta/Snap spend is patched from their APIs (see the
+// trailing-day patch in bqOverview/bqAds); Google/TikTok today comes from
+// the most recent Windsor sync. Date strings are YYYY-MM-DD in store (PST)
+// time. (yesterdayStr kept for call-site compatibility.)
+export function mtdRange(todayStr: string, _yesterdayStr: string): { from: string; to: string } {
+  return { from: `${todayStr.slice(0, 7)}-01`, to: todayStr };
 }
 
 export function getStockStatus(daysRemaining: number): 'critical' | 'warning' | 'ok' {

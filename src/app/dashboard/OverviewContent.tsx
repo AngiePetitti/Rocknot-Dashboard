@@ -218,14 +218,22 @@ export default function OverviewContent() {
   const [lastMonthSnap, setLastMonthSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
 
   useEffect(() => {
-    cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
-      '/api/windsor?tf=mtd',
-      d => {
-        if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
-          setMtdSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
+    // Forecast pace must come from COMPLETE days only — MTD now includes
+    // today's partial data (matching Shopify), so fetch 1st→yesterday
+    // explicitly for the projection.
+    const [ty, tm, td] = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }).split('-').map(Number);
+    if (td > 1) {
+      const first = `${ty}-${String(tm).padStart(2, '0')}-01`;
+      const yest = new Date(Date.UTC(ty, tm - 1, td - 1)).toISOString().slice(0, 10);
+      cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
+        `/api/windsor?tf=custom&date_from=${first}&date_to=${yest}`,
+        d => {
+          if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
+            setMtdSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
+          }
         }
-      }
-    );
+      );
+    }
     cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
       '/api/windsor?tf=last_month',
       d => {
