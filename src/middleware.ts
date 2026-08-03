@@ -14,6 +14,13 @@ export async function middleware(req: NextRequest) {
   // Always-allowed: the auth handshake and the login page itself.
   if (pathname.startsWith('/api/auth') || pathname.startsWith('/login')) return NextResponse.next();
 
+  // Vercel Cron / internal service calls authenticate with the CRON_SECRET
+  // bearer token instead of a user session (used by the Monday restock alert).
+  const cronSecret = (process.env.CRON_SECRET || '').trim();
+  if (cronSecret && req.headers.get('authorization') === `Bearer ${cronSecret}`) {
+    return NextResponse.next();
+  }
+
   const token = await getToken({ req, secret });
   // token.role === null means the periodic re-check found the user removed
   // from the allowlist — stop honoring the session even though the JWT is

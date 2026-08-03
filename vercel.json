@@ -1,0 +1,5 @@
+{
+  "crons": [
+    { "path": "/api/alerts/restock", "schedule": "0 15 * * 1" }
+  ]
+}

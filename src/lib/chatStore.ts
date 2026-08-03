@@ -231,6 +231,108 @@ export async function deleteReport(email: string, reportId: string): Promise<voi
   }
 }
 
+// ── Reorders (same private sheet, "Reorders" tab — shared) ───────────────
+// One row per purchase order: when an item is marked ordered it leaves the
+// restock alerts until received. Columns:
+// Id | Product | Variant | Qty | Ordered Date | Ordered By | Status | Received Date
+const REORDERS_TAB = 'Reorders';
+
+export interface Reorder {
+  id: string;
+  product: string;
+  variant: string;
+  qty: number;
+  orderedDate: string;   // YYYY-MM-DD
+  orderedBy: string;
+  status: 'open' | 'received';
+  receivedDate?: string;
+}
+
+async function ensureReordersTab(sheetId: string): Promise<void> {
+  try {
+    await api(`/${sheetId}:batchUpdate`, {
+      method: 'POST',
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: REORDERS_TAB } } }] }),
+    });
+    await api(`/${sheetId}/values/${REORDERS_TAB}!A1?valueInputOption=RAW`, {
+      method: 'PUT',
+      body: JSON.stringify({ range: `${REORDERS_TAB}!A1`, majorDimension: 'ROWS', values: [['Id', 'Product', 'Variant', 'Qty', 'Ordered Date', 'Ordered By', 'Status', 'Received Date']] }),
+    });
+  } catch { /* tab already exists */ }
+}
+
+function rowToReorder(r: string[]): Reorder | null {
+  if (!(r[0] || '').trim() || !(r[1] || '').trim()) return null;
+  return {
+    id: r[0].trim(),
+    product: (r[1] || '').trim(),
+    variant: (r[2] || '').trim(),
+    qty: Number(String(r[3] || '0').replace(/[^0-9.]/g, '')) || 0,
+    orderedDate: (r[4] || '').trim(),
+    orderedBy: (r[5] || '').trim(),
+    status: (r[6] || '').trim().toLowerCase() === 'received' ? 'received' : 'open',
+    receivedDate: (r[7] || '').trim() || undefined,
+  };
+}
+
+export async function getReorders(): Promise<Reorder[]> {
+  const sheetId = await getChatSheetId(false);
+  if (!sheetId) return [];
+  try {
+    const data = await api(`/${sheetId}/values/${REORDERS_TAB}!A2:H`) as { values?: string[][] };
+    return (data.values || []).map(rowToReorder).filter((r): r is Reorder => r !== null);
+  } catch {
+    return [];
+  }
+}
+
+export async function addReorder(r: Omit<Reorder, 'id' | 'status'>): Promise<Reorder> {
+  const sheetId = await getChatSheetId(true);
+  if (!sheetId) throw new Error('Reorder storage unavailable');
+  await ensureReordersTab(sheetId);
+  const reorder: Reorder = { ...r, id: `po_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, status: 'open' };
+  await api(`/${sheetId}/values/${REORDERS_TAB}!A1:append?valueInputOption=RAW`, {
+    method: 'POST',
+    body: JSON.stringify({
+      range: `${REORDERS_TAB}!A1`, majorDimension: 'ROWS',
+      values: [[reorder.id, reorder.product, reorder.variant, String(reorder.qty), reorder.orderedDate, reorder.orderedBy, 'open', '']],
+    }),
+  });
+  return reorder;
+}
+
+export async function updateReorder(id: string, patch: { status?: 'open' | 'received'; receivedDate?: string; qty?: number }): Promise<void> {
+  const sheetId = await getChatSheetId(false);
+  if (!sheetId) throw new Error('Reorder storage unavailable');
+  const data = await api(`/${sheetId}/values/${REORDERS_TAB}!A2:H`) as { values?: string[][] };
+  const rows = data.values || [];
+  const idx = rows.findIndex(r => (r[0] || '').trim() === id);
+  if (idx === -1) throw new Error('Reorder not found');
+  const row = rows[idx];
+  if (patch.qty !== undefined) row[3] = String(patch.qty);
+  if (patch.status) row[6] = patch.status;
+  if (patch.receivedDate !== undefined) row[7] = patch.receivedDate;
+  while (row.length < 8) row.push('');
+  await api(`/${sheetId}/values/${REORDERS_TAB}!A${idx + 2}?valueInputOption=RAW`, {
+    method: 'PUT',
+    body: JSON.stringify({ range: `${REORDERS_TAB}!A${idx + 2}`, majorDimension: 'ROWS', values: [row.slice(0, 8)] }),
+  });
+}
+
+export async function deleteReorder(id: string): Promise<void> {
+  const sheetId = await getChatSheetId(false);
+  if (!sheetId) return;
+  const data = await api(`/${sheetId}/values/${REORDERS_TAB}!A2:H`) as { values?: string[][] };
+  const rows = (data.values || []).filter(r => (r[0] || '').trim() !== id);
+  await api(`/${sheetId}/values/${REORDERS_TAB}!A2:H:clear`, { method: 'POST', body: '{}' });
+  if (rows.length) {
+    await api(`/${sheetId}/values/${REORDERS_TAB}!A2?valueInputOption=RAW`, {
+      method: 'PUT',
+      body: JSON.stringify({ range: `${REORDERS_TAB}!A2`, majorDimension: 'ROWS', values: rows }),
+    });
+  }
+}
+
 // ── Goals (same private sheet, "Goals" tab — shared, not per-login) ──────
 // One row per month: Month (YYYY-MM) | Revenue Goal | Ad Spend Budget
 const GOALS_TAB = 'Goals';

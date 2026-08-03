@@ -77,6 +77,69 @@ export default function InventoryContent() {
   const [restockExpanded, setRestockExpanded] = useState(false);
   const BAG_PAGE = 10;
 
+  // ── Purchase orders (reorders) ──
+  interface Reorder { id: string; product: string; variant: string; qty: number; orderedDate: string; orderedBy: string; status: 'open' | 'received' }
+  const [reorders, setReorders] = useState<Reorder[]>([]);
+  const [orderFormId, setOrderFormId] = useState<string | null>(null);
+  const [orderQty, setOrderQty] = useState('');
+  const [orderDate, setOrderDate] = useState(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }));
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  function loadReorders() {
+    fetch('/api/reorders', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d?.reorders)) setReorders(d.reorders); })
+      .catch(() => {});
+  }
+  useEffect(() => { loadReorders(); }, []);
+
+  const openReorders = useMemo(() => reorders.filter(r => r.status === 'open'), [reorders]);
+  const onOrderKeys = useMemo(
+    () => new Set(openReorders.map(r => `${r.product}|${r.variant}`.toLowerCase())),
+    [openReorders]
+  );
+
+  async function markOrdered(item: { id: string; product: string; variant: string; reorderQty: number }) {
+    setSavingOrder(true);
+    try {
+      const res = await fetch('/api/reorders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product: item.product,
+          variant: item.variant,
+          qty: Number(orderQty) || item.reorderQty,
+          orderedDate: orderDate,
+        }),
+      });
+      if (res.ok) { setOrderFormId(null); loadReorders(); }
+    } finally {
+      setSavingOrder(false);
+    }
+  }
+
+  async function reorderAction(id: string, action: 'received' | 'delete') {
+    setReorders(prev => action === 'delete' || action === 'received'
+      ? prev.map(r => r.id === id ? { ...r, status: 'received' as const } : r).filter(r => !(action === 'delete' && r.id === id))
+      : prev);
+    try {
+      await fetch('/api/reorders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action }),
+      });
+    } finally {
+      loadReorders();
+    }
+  }
+
+  function copyOrderList() {
+    const lines = toOrderList.map(i => `${i.product}${i.variant ? ` – ${i.variant}` : ''}: order ${i.reorderQty}`);
+    const text = `Rocknot restock order — ${new Date().toLocaleDateString()}\n${lines.join('\n')}`;
+    try { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ }
+  }
+
   useEffect(() => {
     setStatus('loading');
     cachedJson<Record<string, unknown> & { source?: string }>(
@@ -165,6 +228,12 @@ export default function InventoryContent() {
       .sort((a, b) => b.dailyVelocity - a.dailyVelocity);
   }, [items]);
 
+  // The Monday order list = restock candidates minus anything already on order.
+  const toOrderList = useMemo(
+    () => restockNow.filter(i => !onOrderKeys.has(`${i.product}|${i.variant}`.toLowerCase())),
+    [restockNow, onOrderKeys]
+  );
+
   return (
     <div>
       <Header
@@ -247,46 +316,126 @@ export default function InventoryContent() {
         />
       </div>
 
-      {/* Fast-mover restock alert — only the items selling fast enough to
-          warrant an immediate reorder, ranked fastest-first, with the
-          suggested order quantity. */}
-      {status === 'ok' && restockNow.length > 0 && (
-        <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 mb-5">
-          <p className="text-xs font-bold text-orange-700 mb-1">
-            🔥 {restockNow.length} fast-selling SKU{restockNow.length !== 1 ? 's' : ''} to restock now
-          </p>
-          <p className="text-[11px] text-orange-500/80 mb-2.5">
-            Top sellers that are out or about to be — order quantity covers 90 days at current pace.
+      {/* ── To Order This Monday — the weekly purchase list. Items marked
+          ordered move to the "On order" section below and off this list
+          (and off the Monday Slack alert). ── */}
+      {status === 'ok' && toOrderList.length > 0 && (
+        <div className="bg-orange-50 border-2 border-orange-300 rounded-2xl px-4 py-4 mb-5">
+          <div className="flex items-center gap-2 mb-1">
+            <p className="text-sm font-bold text-orange-800 flex-1">
+              📦 To Order This Monday — {toOrderList.length} item{toOrderList.length !== 1 ? 's' : ''}
+            </p>
+            <button
+              onClick={copyOrderList}
+              className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-white border border-orange-200 text-orange-700 hover:bg-orange-100"
+            >
+              {copied ? '✓ Copied' : 'Copy list'}
+            </button>
+          </div>
+          <p className="text-[11px] text-orange-600/80 mb-3">
+            Fast sellers that are out or nearly out — quantities cover ~90 days at current pace.
+            When an order is placed, log it here and the item drops off this list and the Monday alert.
           </p>
           <div className="flex flex-col gap-1.5">
-            {(restockExpanded ? restockNow : restockNow.slice(0, 8)).map(item => (
-              <div
-                key={item.id}
-                onClick={() => toggleName(item.id)}
-                className="flex items-center gap-2 bg-white border border-orange-200 rounded-lg px-3 py-1.5 cursor-pointer"
-              >
-                <span className={`text-xs font-semibold text-gray-800 flex-1 min-w-0 ${expandedNames.has(item.id) ? 'break-words' : 'truncate'}`}>
-                  {item.product}{item.variant ? ` · ${item.variant}` : ''}
-                </span>
-                <span className="text-[11px] text-gray-500 whitespace-nowrap">
-                  {item.dailyVelocity.toFixed(1)}/day · {item.status === 'out_of_stock' ? 'OUT' : `${item.daysRemaining}d left`}
-                </span>
-                <span className="text-xs font-bold text-orange-700 whitespace-nowrap bg-orange-100 rounded-full px-2 py-0.5">
-                  Order {item.reorderQty.toLocaleString()}
-                </span>
+            {(restockExpanded ? toOrderList : toOrderList.slice(0, 8)).map(item => (
+              <div key={item.id} className="bg-white border border-orange-200 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span
+                    onClick={() => toggleName(item.id)}
+                    className={`text-xs font-semibold text-gray-800 flex-1 min-w-0 cursor-pointer ${expandedNames.has(item.id) ? 'break-words' : 'truncate'}`}
+                  >
+                    {item.product}{item.variant ? ` · ${item.variant}` : ''}
+                  </span>
+                  <span className="text-[11px] text-gray-500 whitespace-nowrap">
+                    {item.status === 'out_of_stock' ? 'OUT' : `${item.daysRemaining}d left`} · ~{Math.round(item.dailyVelocity * 7)}/wk
+                  </span>
+                  <span className="text-xs font-bold text-orange-700 whitespace-nowrap bg-orange-100 rounded-full px-2 py-0.5">
+                    Order {item.reorderQty.toLocaleString()}
+                  </span>
+                  <button
+                    onClick={() => setOrderFormId(orderFormId === item.id ? null : item.id)}
+                    className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-green-50 border border-green-200 text-green-700 whitespace-nowrap"
+                  >
+                    {orderFormId === item.id ? 'Cancel' : 'Ordered ✓'}
+                  </button>
+                </div>
+                {orderFormId === item.id && (
+                  <form
+                    onSubmit={e => { e.preventDefault(); markOrdered(item); }}
+                    className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-orange-100"
+                  >
+                    <label className="text-[11px] text-gray-500">Qty ordered</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={orderQty}
+                      onChange={e => setOrderQty(e.target.value)}
+                      className="w-20 px-2 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
+                    />
+                    <label className="text-[11px] text-gray-500">on</label>
+                    <input
+                      type="date"
+                      value={orderDate}
+                      onChange={e => setOrderDate(e.target.value)}
+                      className="px-2 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
+                    />
+                    <button
+                      type="submit"
+                      disabled={savingOrder}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white"
+                    >
+                      {savingOrder ? 'Saving…' : 'Log order'}
+                    </button>
+                  </form>
+                )}
               </div>
             ))}
           </div>
-          {restockNow.length > 8 && (
+          {toOrderList.length > 8 && (
             <button
               onClick={() => setRestockExpanded(e => !e)}
               className="text-xs font-semibold text-orange-600 hover:text-orange-700 mt-2.5 flex items-center gap-1"
             >
-              {restockExpanded
-                ? '↑ Show less'
-                : `↓ Show ${restockNow.length - 8} more fast mover${restockNow.length - 8 !== 1 ? 's' : ''}`}
+              {restockExpanded ? '↑ Show less' : `↓ Show ${toOrderList.length - 8} more`}
             </button>
           )}
+        </div>
+      )}
+
+      {/* ── On order — logged purchase orders awaiting delivery ── */}
+      {status === 'ok' && openReorders.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-5">
+          <p className="text-xs font-bold text-blue-800 mb-1">
+            ⏳ On order — {openReorders.length} purchase order{openReorders.length !== 1 ? 's' : ''} awaiting delivery
+          </p>
+          <p className="text-[11px] text-blue-500/80 mb-2.5">
+            These stay off the order list and Monday alerts. Tap Received when stock arrives.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {openReorders.map(r => (
+              <div key={r.id} className="flex items-center gap-2 bg-white border border-blue-200 rounded-lg px-3 py-1.5">
+                <span className="text-xs font-semibold text-gray-800 flex-1 min-w-0 truncate">
+                  {r.product}{r.variant ? ` · ${r.variant}` : ''}
+                </span>
+                <span className="text-[11px] text-gray-500 whitespace-nowrap">
+                  ×{r.qty.toLocaleString()} · {r.orderedDate}{r.orderedBy ? ` · ${r.orderedBy}` : ''}
+                </span>
+                <button
+                  onClick={() => reorderAction(r.id, 'received')}
+                  className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-green-50 border border-green-200 text-green-700 whitespace-nowrap"
+                >
+                  Received ✓
+                </button>
+                <button
+                  onClick={() => reorderAction(r.id, 'delete')}
+                  aria-label="Remove order"
+                  className="text-gray-300 hover:text-red-500 px-1"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
