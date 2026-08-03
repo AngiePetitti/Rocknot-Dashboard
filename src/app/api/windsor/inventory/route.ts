@@ -293,7 +293,49 @@ export async function GET() {
       };
     });
     // Drop sample-sale / final-sale listings entirely — not regular inventory.
-    const allRows = allRowsMapped.filter(r => !r._isSale);
+    // Then collapse mirrored variants inside set/bundle listings: jewelry sets
+    // list one shared component pool under many variants (audited Aug 2026 —
+    // "The Rope Set - Crystal" carries the identical bracelet counts under both
+    // its 13" and 16" necklace variants, matching the hidden "Rope Bracelet -
+    // INVENTORY" listing), so identical (stock, starting, value) rows within a
+    // set are one pool, counted once with sales summed — not once per variant.
+    const dedupSetMirrors = (rows: RawItem[]): RawItem[] => {
+      const out: RawItem[] = [];
+      const setsByTitle = new Map<string, RawItem[]>();
+      for (const r of rows) {
+        if (!r._isBag && r.currentStock > 0 && /\b(set|bundle)\b/i.test(r._rawProduct)) {
+          const g = setsByTitle.get(r._rawProduct);
+          if (g) g.push(r); else setsByTitle.set(r._rawProduct, [r]);
+        } else out.push(r);
+      }
+      setsByTitle.forEach(group => {
+        const mirrors = new Map<string, RawItem[]>();
+        for (const r of group) {
+          const k = `${r.currentStock}|${r._startingStock}|${r.stockValue}`;
+          const m = mirrors.get(k);
+          if (m) m.push(r); else mirrors.set(k, [r]);
+        }
+        mirrors.forEach(m => {
+          if (m.length === 1) { out.push(m[0]); return; }
+          const rep = m[0];
+          const sold = m.reduce((s, r) => s + r.unitsSold90d, 0);
+          const dailyVelocity = Math.round((sold / PERIOD_DAYS) * 100) / 100;
+          const daysRemaining = dailyVelocity > 0 ? Math.round(rep.currentStock / dailyVelocity) : null;
+          out.push({
+            ...rep,
+            variant: `${rep.variant} (+${m.length - 1} mirrored)`,
+            unitsSold90d: sold,
+            dailyVelocity,
+            daysRemaining,
+            status: statusFor(rep.currentStock, daysRemaining),
+            reorderQty: dailyVelocity > 0
+              ? Math.max(0, Math.round(dailyVelocity * SUPPLY_TARGET_DAYS) - rep.currentStock) : 0,
+          });
+        });
+      });
+      return out;
+    };
+    const allRows = dedupSetMirrors(allRowsMapped.filter(r => !r._isSale));
 
     const strip = ({ _isBag, _isGiftCard, _isHandbag, _isPublicBag, _isCombo, _bagCovered, _bagBare, _isSale, _rawProduct, _startingStock, ...rest }: RawItem): InventoryItem => rest;
 
