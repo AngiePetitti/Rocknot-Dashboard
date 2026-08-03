@@ -34,7 +34,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Inventory data unavailable', detail: inv?.error || invRes.status }, { status: 502 });
   }
 
-  const items = (inv.items as InvItem[]) ?? [];
+  // Bags are tracked separately from the SKU list — include both pools,
+  // matching the Inventory tab's order banner.
+  const items = [...((inv.bags as InvItem[]) ?? []), ...((inv.items as InvItem[]) ?? [])];
   const reorders = await getReorders().catch(() => []);
   const onOrder = new Set(
     reorders.filter(r => r.status === 'open').map(r => `${r.product}|${r.variant}`.toLowerCase())
