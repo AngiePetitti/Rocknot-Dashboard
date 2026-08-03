@@ -439,7 +439,7 @@ export default function InventoryContent() {
 
       {/* ── Order Tracker — every purchase order, its ETA countdown, and
           received history. This is where logged orders live. ── */}
-      {status === 'ok' && (openReorders.length > 0 || receivedReorders.length > 0) && (
+      {status === 'ok' && (
         <div className="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3.5 mb-5">
           <div className="flex items-center gap-2 mb-1">
             <p className="text-sm font-bold text-blue-900 flex-1">
@@ -458,7 +458,9 @@ export default function InventoryContent() {
             Incoming stock, soonest first — use the arrival dates to plan pre-orders and launches. Tap Received when a shipment lands.
           </p>
           {openReorders.length === 0 && (
-            <p className="text-xs text-blue-400 mb-1">No orders in flight.</p>
+            <p className="text-xs text-blue-400 mb-1">
+              No orders in flight yet — when you tap <b>Ordered ✓</b> on an item in the order banner above, it appears here with its expected arrival date.
+            </p>
           )}
           <div className="flex flex-col gap-1.5">
             {openReorders.map(r => {
