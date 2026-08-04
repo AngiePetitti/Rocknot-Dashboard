@@ -71,31 +71,63 @@ export async function fetchMetaToday(): Promise<MetaToday | null> {
 
 // Per-ad creative previews straight from the Graph API. Windsor's facebook
 // connector returns one shared image_url for most video ads (every card shows
-// the same picture), so the ad's own creative thumbnail must come from Meta.
-export async function fetchMetaAdMedia(): Promise<Record<string, { thumbnailUrl: string }> | null> {
+// the same picture), so the ad's own creative thumbnail — and the playable
+// video source — must come from Meta. Requests exactly the ad ids the page
+// shows (batched ?ids= lookups) instead of paging the whole account, which
+// missed the currently-spending ads.
+export interface MetaAdMedia { thumbnailUrl?: string; videoUrl?: string }
+export async function fetchMetaAdMedia(adIds: string[]): Promise<Record<string, MetaAdMedia> | null> {
   const token = (process.env.META_ACCESS_TOKEN || '').trim();
-  const accountId = (process.env.META_AD_ACCOUNT_ID || '').trim().replace('act_', '');
-  if (!token || !accountId) return null;
+  if (!token || adIds.length === 0) return null;
+  const ids = Array.from(new Set(adIds.filter(id => /^\d+$/.test(id)))).sort();
+  if (ids.length === 0) return null;
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 50) chunks.push(ids.slice(i, i + 50));
+
   try {
-    const media: Record<string, { thumbnailUrl: string }> = {};
-    const fields = 'id,creative.thumbnail_width(512).thumbnail_height(512){thumbnail_url,image_url}';
-    let url: string | null =
-      `https://graph.facebook.com/v19.0/act_${accountId}/ads?fields=${encodeURIComponent(fields)}&limit=250&access_token=${token}`;
-    // Paginate a few pages max — enough for every ad that ran recently.
-    for (let page = 0; page < 6 && url; page++) {
+    const media: Record<string, MetaAdMedia> = {};
+    const videoToAds = new Map<string, string[]>();
+
+    const fields = 'creative.thumbnail_width(512).thumbnail_height(512){thumbnail_url,image_url,video_id}';
+    await Promise.all(chunks.map(async chunk => {
+      const url = `https://graph.facebook.com/v19.0/?ids=${chunk.join(',')}&fields=${encodeURIComponent(fields)}&access_token=${token}`;
       const res = await fetch(url, { next: { revalidate: 3600 } });
-      const json: {
-        error?: unknown;
-        data?: Array<{ id?: string; creative?: { thumbnail_url?: string; image_url?: string } }>;
-        paging?: { next?: string };
-      } = await res.json();
-      if (json.error || !Array.isArray(json.data)) break;
-      for (const ad of json.data) {
-        const thumb = ad.creative?.thumbnail_url || ad.creative?.image_url || '';
-        if (ad.id && thumb.startsWith('http')) media[ad.id] = { thumbnailUrl: thumb };
+      const json: Record<string, { creative?: { thumbnail_url?: string; image_url?: string; video_id?: string } }> & { error?: unknown } = await res.json();
+      if (json.error) return;
+      for (const id of chunk) {
+        const c = json[id]?.creative;
+        if (!c) continue;
+        const thumb = c.thumbnail_url || c.image_url || '';
+        if (thumb.startsWith('http')) media[id] = { thumbnailUrl: thumb };
+        if (c.video_id) {
+          const g = videoToAds.get(c.video_id);
+          if (g) g.push(id); else videoToAds.set(c.video_id, [id]);
+        }
       }
-      url = json.paging?.next || null;
-    }
+    }));
+
+    // Playable video sources (and full-size video posters) for video ads.
+    // `source` can be permission-gated per video — failures just leave the
+    // thumbnail-only card.
+    const videoIds = Array.from(videoToAds.keys()).sort();
+    const vChunks: string[][] = [];
+    for (let i = 0; i < videoIds.length; i += 50) vChunks.push(videoIds.slice(i, i + 50));
+    await Promise.all(vChunks.map(async chunk => {
+      const url = `https://graph.facebook.com/v19.0/?ids=${chunk.join(',')}&fields=source,picture&access_token=${token}`;
+      const res = await fetch(url, { next: { revalidate: 3600 } });
+      const json: Record<string, { source?: string; picture?: string }> & { error?: unknown } = await res.json();
+      if (json.error) return;
+      for (const vid of chunk) {
+        const v = json[vid];
+        if (!v) continue;
+        for (const adId of videoToAds.get(vid) || []) {
+          const m = media[adId] || (media[adId] = {});
+          if (v.source?.startsWith('http')) m.videoUrl = v.source;
+          if (!m.thumbnailUrl && v.picture?.startsWith('http')) m.thumbnailUrl = v.picture;
+        }
+      }
+    }));
+
     return Object.keys(media).length > 0 ? media : null;
   } catch {
     return null;
