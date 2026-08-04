@@ -137,6 +137,29 @@ export default function CreativesContent() {
               {opt.label}
             </button>
           ))}
+          {(() => {
+            const downloadable = creatives.filter(c =>
+              (platformFilter === 'all' || c.platform === platformFilter) && c.videoUrl);
+            if (downloadable.length === 0) return null;
+            return (
+              <button
+                onClick={() => {
+                  // Stagger the attachment downloads so the browser accepts them all.
+                  downloadable.forEach((c, i) => setTimeout(() => {
+                    const a = document.createElement('a');
+                    a.href = `/api/creative-download?url=${encodeURIComponent(c.videoUrl!)}&name=${encodeURIComponent(c.name)}`;
+                    a.download = '';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                  }, i * 800));
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 transition-colors ml-auto"
+              >
+                ⬇ Download all videos ({downloadable.length})
+              </button>
+            );
+          })()}
         </div>
       )}
 
@@ -270,7 +293,7 @@ export default function CreativesContent() {
             onClick={e => e.stopPropagation()}
           >
             {/* Preview */}
-            <div className={`${!selected.videoUrl && selected.previewUrl ? 'h-[500px]' : 'aspect-video'} bg-gray-100 flex items-center justify-center overflow-hidden relative rounded-t-2xl`}>
+            <div className={`${selected.videoUrl ? 'h-[70dvh] sm:aspect-video sm:h-auto' : selected.previewUrl ? 'h-[75dvh] sm:h-[560px]' : 'aspect-video'} bg-gray-100 flex items-center justify-center overflow-hidden relative rounded-t-2xl`}>
               {selected.videoUrl ? (
                 <video
                   src={selected.videoUrl}
@@ -375,8 +398,16 @@ export default function CreativesContent() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-4">
                 <p className="text-[11px] text-gray-400">Period: {TIMEFRAME_LABELS[tf] || tf}</p>
+                {selected.videoUrl && (
+                  <a
+                    href={`/api/creative-download?url=${encodeURIComponent(selected.videoUrl)}&name=${encodeURIComponent(selected.name)}`}
+                    className="text-xs font-semibold text-emerald-600 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-3 py-2 transition-colors"
+                  >
+                    ⬇ Download video
+                  </a>
+                )}
                 {selected.adUrl && (
                   <a
                     href={selected.adUrl}
