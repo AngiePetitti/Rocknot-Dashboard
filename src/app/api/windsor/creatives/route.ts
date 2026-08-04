@@ -66,6 +66,7 @@ export interface CreativePerformance {
   platform: 'Meta' | 'TikTok' | 'Snapchat';
   thumbnailUrl: string | null;
   videoUrl: string | null;
+  previewUrl?: string | null; // Meta ad-preview iframe (plays the real creative)
   adUrl: string | null;
   campaign: string;
   adset: string;
@@ -311,6 +312,7 @@ export async function GET(request: NextRequest) {
     for (const c of metaCreatives) {
       c.thumbnailUrl = metaGraphMedia?.[c.id]?.thumbnailUrl || metaThumbs.urls[c.id] || null;
       c.videoUrl = metaGraphMedia?.[c.id]?.videoUrl || null;
+      c.previewUrl = metaGraphMedia?.[c.id]?.previewUrl || null;
     }
     for (const c of tiktokCreatives) {
       c.thumbnailUrl = tiktokThumbs.urls[c.id] || null;

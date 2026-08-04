@@ -75,7 +75,7 @@ export async function fetchMetaToday(): Promise<MetaToday | null> {
 // video source — must come from Meta. Requests exactly the ad ids the page
 // shows (batched ?ids= lookups) instead of paging the whole account, which
 // missed the currently-spending ads.
-export interface MetaAdMedia { thumbnailUrl?: string; videoUrl?: string }
+export interface MetaAdMedia { thumbnailUrl?: string; videoUrl?: string; previewUrl?: string }
 export async function fetchMetaAdMedia(adIds: string[]): Promise<Record<string, MetaAdMedia> | null> {
   const token = (process.env.META_ACCESS_TOKEN || '').trim();
   if (!token || adIds.length === 0) return null;
@@ -88,18 +88,28 @@ export async function fetchMetaAdMedia(adIds: string[]): Promise<Record<string, 
     const media: Record<string, MetaAdMedia> = {};
     const videoToAds = new Map<string, string[]>();
 
-    const fields = 'creative.thumbnail_width(512).thumbnail_height(512){thumbnail_url,image_url,video_id}';
+    // previews{body} is Meta's official embeddable ad preview (an iframe that
+    // plays the real creative) — it works with ads-scope tokens even when the
+    // raw video `source` is gated to the owning Page.
+    const fields = 'creative.thumbnail_width(512).thumbnail_height(512){thumbnail_url,image_url,video_id},previews.ad_format(MOBILE_FEED_STANDARD){body}';
     await Promise.all(chunks.map(async chunk => {
       const url = `https://graph.facebook.com/v19.0/?ids=${chunk.join(',')}&fields=${encodeURIComponent(fields)}&access_token=${token}`;
       const res = await fetch(url, { next: { revalidate: 3600 } });
-      const json: Record<string, { creative?: { thumbnail_url?: string; image_url?: string; video_id?: string } }> & { error?: unknown } = await res.json();
+      const json: Record<string, {
+        creative?: { thumbnail_url?: string; image_url?: string; video_id?: string };
+        previews?: { data?: Array<{ body?: string }> };
+      }> & { error?: unknown } = await res.json();
       if (json.error) return;
       for (const id of chunk) {
-        const c = json[id]?.creative;
-        if (!c) continue;
-        const thumb = c.thumbnail_url || c.image_url || '';
-        if (thumb.startsWith('http')) media[id] = { thumbnailUrl: thumb };
-        if (c.video_id) {
+        const node = json[id];
+        if (!node) continue;
+        const m: MetaAdMedia = (media[id] = media[id] || {});
+        const c = node.creative;
+        const thumb = c?.thumbnail_url || c?.image_url || '';
+        if (thumb.startsWith('http')) m.thumbnailUrl = thumb;
+        const src = /src="([^"]+)"/.exec(node.previews?.data?.[0]?.body || '')?.[1];
+        if (src) m.previewUrl = src.replace(/&amp;/g, '&');
+        if (c?.video_id) {
           const g = videoToAds.get(c.video_id);
           if (g) g.push(id); else videoToAds.set(c.video_id, [id]);
         }

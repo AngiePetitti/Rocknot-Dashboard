@@ -16,6 +16,7 @@ interface CreativePerformance {
   platform: 'Meta' | 'TikTok' | 'Snapchat';
   thumbnailUrl: string | null;
   videoUrl: string | null;
+  previewUrl?: string | null;
   adUrl: string | null;
   campaign: string;
   adset: string;
@@ -269,7 +270,7 @@ export default function CreativesContent() {
             onClick={e => e.stopPropagation()}
           >
             {/* Preview */}
-            <div className="aspect-video bg-gray-100 flex items-center justify-center overflow-hidden relative rounded-t-2xl">
+            <div className={`${!selected.videoUrl && selected.previewUrl ? 'h-[500px]' : 'aspect-video'} bg-gray-100 flex items-center justify-center overflow-hidden relative rounded-t-2xl`}>
               {selected.videoUrl ? (
                 <video
                   src={selected.videoUrl}
@@ -279,6 +280,16 @@ export default function CreativesContent() {
                   muted
                   playsInline
                   className="w-full h-full object-contain bg-gray-900"
+                />
+              ) : selected.previewUrl ? (
+                // Meta's official ad-preview embed — plays the real creative
+                // when the raw video file is permission-gated.
+                <iframe
+                  src={selected.previewUrl}
+                  className="w-full h-full border-0 bg-gray-900"
+                  allow="autoplay; encrypted-media"
+                  scrolling="no"
+                  title={selected.name}
                 />
               ) : selected.thumbnailUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
