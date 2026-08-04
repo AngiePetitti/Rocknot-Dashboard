@@ -89,6 +89,8 @@ export default function AdsContent() {
   const [creativesLoading, setCreativesLoading] = useState(true);
   const [status, setStatus] = useState<'loading' | 'live' | 'error'>('loading');
   const [adSort, setAdSort] = useState<{ key: AdSortKey; dir: 'asc' | 'desc' }>({ key: 'spend', dir: 'desc' });
+  const [adPlatformFilter, setAdPlatformFilter] = useState<'All' | CreativeRow['platform']>('All');
+  const [showAllAds, setShowAllAds] = useState(false);
   const [reconcile, setReconcile] = useState<ReconcileResult | null>(null);
   const [cac, setCac] = useState<{ newCustomers: number; returningCustomers: number; totalAdSpend: number } | null>(null);
 
@@ -116,7 +118,7 @@ export default function AdsContent() {
     const hadCreativesCache = cachedJson<{ creatives?: CreativeRow[] }>(
       `/api/windsor/creatives?tf=${tfRaw}`,
       creativesData => {
-        setCreatives((creativesData.creatives || []).slice(0, 20));
+        setCreatives((creativesData.creatives || []).slice(0, 100));
         setCreativesLoading(false);
       },
       () => setCreativesLoading(false)
@@ -150,13 +152,19 @@ export default function AdsContent() {
   const blendedROAS = totalSpend > 0 ? totalRevenue / totalSpend : 0;
   const bestPlatform = platforms.length > 0 ? platforms.reduce((b, p) => p.roas > b.roas ? p : b) : null;
 
-  const sortedCreatives = [...creatives].sort((a, b) => {
-    const dir = adSort.dir === 'desc' ? -1 : 1;
-    if (adSort.key === 'name' || adSort.key === 'platform') {
-      return a[adSort.key].localeCompare(b[adSort.key]) * dir;
-    }
-    return ((a[adSort.key] ?? 0) - (b[adSort.key] ?? 0)) * dir;
-  });
+  const sortedCreatives = [...creatives]
+    .filter(ad => adPlatformFilter === 'All' || ad.platform === adPlatformFilter)
+    .sort((a, b) => {
+      const dir = adSort.dir === 'desc' ? -1 : 1;
+      if (adSort.key === 'name' || adSort.key === 'platform') {
+        return a[adSort.key].localeCompare(b[adSort.key]) * dir;
+      }
+      return ((a[adSort.key] ?? 0) - (b[adSort.key] ?? 0)) * dir;
+    });
+  const visibleCreatives = showAllAds ? sortedCreatives : sortedCreatives.slice(0, 15);
+  const adPlatforms: Array<'All' | CreativeRow['platform']> =
+    ['All', ...Array.from(new Set(creatives.map(c => c.platform)))];
+  const PLATFORM_CHIP_COLORS: Record<string, string> = { Meta: '#818cf8', TikTok: '#f472b6', Snapchat: '#eab308' };
 
   const subtitle = tfRaw === 'custom' && dateFrom && dateTo
     ? `Ad Performance · ${dateFrom} → ${dateTo}`
@@ -416,7 +424,33 @@ export default function AdsContent() {
           )}
           {creatives.length > 0 && (
             <Card accentColor="#86efac">
-              <h2 className="text-sm font-bold text-gray-700 mb-4">Top Performing Ads</h2>
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                <h2 className="text-sm font-bold text-gray-700">Top Performing Ads</h2>
+                {/* Platform filter chips — tap to focus on one platform */}
+                <div className="flex items-center gap-1.5 ml-auto">
+                  {adPlatforms.map(p => {
+                    const count = p === 'All' ? creatives.length : creatives.filter(c => c.platform === p).length;
+                    const active = adPlatformFilter === p;
+                    return (
+                      <button
+                        key={p}
+                        onClick={() => { setAdPlatformFilter(p); setShowAllAds(false); }}
+                        className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors ${
+                          active
+                            ? 'bg-purple-600 border-purple-600 text-white'
+                            : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                        }`}
+                      >
+                        {p !== 'All' && (
+                          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PLATFORM_CHIP_COLORS[p] }} />
+                        )}
+                        {p}
+                        <span className={active ? 'text-purple-200' : 'text-gray-400'}>{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[700px]">
                   <thead>
@@ -447,7 +481,7 @@ export default function AdsContent() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedCreatives.map(ad => (
+                    {visibleCreatives.map(ad => (
                       <tr key={`${ad.platform}-${ad.id}`} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                         <td className="py-2.5 pr-3">
                           <span className="font-medium text-gray-800 line-clamp-1 block">{ad.name}</span>
@@ -481,6 +515,14 @@ export default function AdsContent() {
                   </tbody>
                 </table>
               </div>
+              {sortedCreatives.length > 15 && (
+                <button
+                  onClick={() => setShowAllAds(a => !a)}
+                  className="mt-3 w-full text-xs text-purple-500 hover:text-purple-700 font-semibold py-1.5 rounded-lg border border-purple-100 hover:border-purple-200 transition-colors bg-purple-50 hover:bg-purple-100"
+                >
+                  {showAllAds ? '↑ Show top 15' : `↓ Show all ${sortedCreatives.length} ads`}
+                </button>
+              )}
             </Card>
           )}
 

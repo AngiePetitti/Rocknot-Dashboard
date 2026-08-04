@@ -274,11 +274,16 @@ export async function GET(request: NextRequest) {
   const isToday = tfRaw === 'today';
 
   try {
-    const [metaResult, tiktokResult, snapResult, metaThumbs, tiktokThumbs, tiktokVideos, snapMedia] = await Promise.all([
+    const { fetchMetaAdMedia } = await import('@/src/lib/metaLive');
+    const [metaResult, tiktokResult, snapResult, metaThumbs, metaGraphMedia, tiktokThumbs, tiktokVideos, snapMedia] = await Promise.all([
       fetchCreatives('facebook', params, isToday),
       fetchCreatives('tiktok', params, isToday),
       fetchCreatives('snapchat', params, isToday).catch(() => ({ rows: [] as CreativeRow[] })),
       fetchWindsorAdUrls('facebook', urlParams, ['thumbnail_url', 'image_url']),
+      // Per-ad creative thumbnails straight from Meta's Graph API — Windsor's
+      // facebook connector returns one shared image for most video ads, so the
+      // Graph thumbnails are authoritative; Windsor is only the fallback.
+      fetchMetaAdMedia(),
       fetchWindsorAdUrls('tiktok', urlParams, ['video_thumbnail_url']),
       // Playable video sources. Only TikTok: Windsor's facebook connector is
       // Insights-based and has no video source field (verified Jun 2026) —
@@ -303,7 +308,7 @@ export async function GET(request: NextRequest) {
     const tiktokCreatives = aggregateCreatives(tiktokResult.rows, 'TikTok');
     const snapCreatives = aggregateCreatives(snapResult.rows, 'Snapchat');
     for (const c of metaCreatives) {
-      c.thumbnailUrl = metaThumbs.urls[c.id] || null;
+      c.thumbnailUrl = metaGraphMedia?.[c.id]?.thumbnailUrl || metaThumbs.urls[c.id] || null;
     }
     for (const c of tiktokCreatives) {
       c.thumbnailUrl = tiktokThumbs.urls[c.id] || null;
@@ -322,6 +327,7 @@ export async function GET(request: NextRequest) {
       source: 'windsor_live',
       metaActId,
       thumbnailsFound: Object.keys(metaThumbs.urls).length + Object.keys(tiktokThumbs.urls).length + Object.keys(snapMedia.urls).length,
+      metaGraphThumbs: metaGraphMedia ? Object.keys(metaGraphMedia).length : 0,
       videosFound: Object.keys(tiktokVideos.urls).length,
       snapMediaFound: Object.keys(snapMedia.urls).length,
       snapMediaError: snapMedia.error,
