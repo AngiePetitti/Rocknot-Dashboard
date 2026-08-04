@@ -86,12 +86,56 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     description: 'The marketing calendar: campaigns/launches that are live now and everything scheduled ahead, with type, channel, and status.',
     input_schema: { type: 'object', properties: {} },
   },
+  {
+    name: 'get_ad_creatives',
+    description: 'Per-AD creative performance (individual ads, not platform totals) across Meta/TikTok/Snapchat: spend, attributed revenue, ROAS, CTR, conversions, cost per conversion, campaign and ad set. Use to find winning/losing creatives.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        timeframe: { type: 'string', enum: ['today', 'yesterday', '7d', '14d', '30d', 'mtd', 'last_month', '6m', 'ytd'], description: 'Period preset (default 30d)' },
+      },
+    },
+  },
+  {
+    name: 'get_customer_intel',
+    description: 'Customer analytics for a date range: repeat-purchaser rate, average LTV, first/second/third+ order values, customer counts by order count (1, 2, 3+) with their LTVs, and monthly cohort repeat behavior.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        date_from: { type: 'string', description: 'YYYY-MM-DD' },
+        date_to: { type: 'string', description: 'YYYY-MM-DD' },
+      },
+      required: ['date_from', 'date_to'],
+    },
+  },
+  {
+    name: 'get_attribution',
+    description: 'Revenue attribution for a date range: how total Shopify revenue splits across ad platforms (attributed revenue, orders, spend, ROAS, cost per order, % of revenue) plus the Direct/Other remainder.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        date_from: { type: 'string', description: 'YYYY-MM-DD' },
+        date_to: { type: 'string', description: 'YYYY-MM-DD' },
+      },
+      required: ['date_from', 'date_to'],
+    },
+  },
+  {
+    name: 'get_goals',
+    description: "The company's monthly revenue goals and ad-spend budgets (the Goals tab plan, including which months are pinned/manually set). Compare against get_metrics actuals to judge pace toward the annual target.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_purchase_orders',
+    description: 'Inventory purchase orders logged on the dashboard: open orders with quantity, order date, who ordered, and expected arrival (ETA), plus recently received ones. Use with get_inventory to judge what restock is already inbound.',
+    input_schema: { type: 'object', properties: {} },
+  },
 ];
 
 export async function execTool(get: Getter, name: string, input: Record<string, unknown>): Promise<string> {
   const from = String(input.date_from ?? '');
   const to = String(input.date_to ?? '');
-  const needsRange = ['get_metrics', 'get_top_products', 'get_ad_performance', 'get_returns'].includes(name);
+  const needsRange = ['get_metrics', 'get_top_products', 'get_ad_performance', 'get_returns', 'get_customer_intel', 'get_attribution'].includes(name);
   if (needsRange && (!DATE_RE.test(from) || !DATE_RE.test(to) || from > to)) {
     return 'Error: date_from and date_to must be YYYY-MM-DD with date_from <= date_to.';
   }
@@ -178,6 +222,57 @@ True bag stock: ${bags.slice(0, 40).map(b => `${b.product} ${b.currentStock}u ($
     return `Marketing calendar:
 Live now: ${live.map(e => `${e.title} (${e.type}, thru ${e.endDate || e.date})`).join(' | ') || 'nothing'}
 Upcoming: ${upcoming.map(e => `${e.date}: ${e.title} (${e.type}${e.channel ? ', ' + e.channel : ''}${e.status ? ', ' + e.status : ''})`).join(' | ') || 'nothing scheduled'}`;
+  }
+
+  if (name === 'get_ad_creatives') {
+    const tf = String(input.timeframe || '30d');
+    const d = await get(`/api/windsor/creatives?tf=${encodeURIComponent(tf)}`);
+    const rows = (d?.creatives as { name: string; platform: string; campaign: string; adset: string; spend: number; revenue: number; roas: number; ctr: number; conversions: number; costPerConversion: number }[]) ?? [];
+    if (!rows.length) return `No per-ad creative data for ${tf}.`;
+    return `Per-ad creative performance (${tf}), by spend:\n${rows.slice(0, 40).map((c, i) =>
+      `${i + 1}. [${c.platform}] ${c.name} — $${c.spend.toLocaleString()} spend · $${c.revenue.toLocaleString()} rev · ${c.roas}x ROAS · ${c.ctr}% CTR · ${c.conversions} conv${c.costPerConversion ? ` @ $${c.costPerConversion}` : ''} · campaign ${c.campaign || '?'}`
+    ).join('\n')}`;
+  }
+
+  if (name === 'get_customer_intel') {
+    const d = await get(`/api/windsor/customers?${params}`);
+    const m = d?.customerMetrics as Record<string, number> | null;
+    if (!m) return `No customer data for ${from} → ${to}.`;
+    const cohorts = (d?.cohortData as { month: string; newCustomers: number; repeatRate: number }[]) ?? [];
+    return `Customer intel ${from} → ${to}:
+Customers ${m.totalCustomers?.toLocaleString?.() ?? 'N/A'} · repeat purchasers ${m.repeatCustomers?.toLocaleString?.() ?? 'N/A'} (${m.repeatPurchaserRate ?? '?'}%)
+Avg LTV $${m.avgLTV ?? '?'} · order values: 1st $${m.firstOrderAvg ?? '?'} · 2nd $${m.secondOrderAvg ?? '?'} · 3rd+ $${m.thirdPlusOrderAvg ?? '?'}
+By order count: 1 order ${m.oneOrderCount?.toLocaleString?.() ?? '?'} (LTV $${m.ltvOneOrder ?? '?'}) · 2 orders ${m.twoOrderCount?.toLocaleString?.() ?? '?'} (LTV $${m.ltvTwoOrders ?? '?'}) · 3+ ${m.threePlusCount?.toLocaleString?.() ?? '?'} (LTV $${m.ltvThreePlus ?? '?'})${cohorts.length ? `\nCohorts (month, new customers, repeat rate %): ${cohorts.map(c => `${c.month}: ${c.newCustomers}, ${c.repeatRate}%`).join(' | ')}` : ''}`;
+  }
+
+  if (name === 'get_attribution') {
+    const d = await get(`/api/windsor/attribution?${params}`);
+    const rows = (d?.attribution as { platform: string; revenue: number; orders: number; spend: number; roas: number; costPerOrder: number; percentage: number }[]) ?? [];
+    if (!rows.length) return `No attribution data for ${from} → ${to}.`;
+    return `Revenue attribution ${from} → ${to} (total $${((d?.totalRevenue as number) ?? 0).toLocaleString()}):\n${rows.map(a =>
+      `${a.platform}: $${a.revenue.toLocaleString()} (${a.percentage}%) · ${a.orders} orders${a.spend ? ` · $${a.spend.toLocaleString()} spend · ${a.roas}x ROAS · $${a.costPerOrder}/order` : ''}`
+    ).join('\n')}`;
+  }
+
+  if (name === 'get_goals') {
+    const d = await get('/api/goals');
+    const goals = (d?.goals as { month: string; revenueGoal: number; adBudget: number; pinned?: boolean }[]) ?? [];
+    if (!goals.length) return 'No monthly goals are set on the Goals tab yet.';
+    const total = goals.reduce((s, g) => s + g.revenueGoal, 0);
+    return `Monthly plan (Goals tab) — planned total $${total.toLocaleString()}:\n${goals.sort((a, b) => a.month.localeCompare(b.month)).map(g =>
+      `${g.month}: revenue goal $${g.revenueGoal.toLocaleString()} · ad budget $${g.adBudget.toLocaleString()}${g.pinned ? ' (pinned/manual)' : ''}`
+    ).join('\n')}`;
+  }
+
+  if (name === 'get_purchase_orders') {
+    const d = await get('/api/reorders');
+    const rs = (d?.reorders as { product: string; variant: string; qty: number; orderedDate: string; orderedBy: string; status: string; receivedDate?: string; eta?: string }[]) ?? [];
+    const open = rs.filter(r => r.status === 'open');
+    const received = rs.filter(r => r.status === 'received').slice(-10);
+    if (!rs.length) return 'No purchase orders have been logged on the Inventory tab.';
+    return `Purchase orders:
+Open (${open.length}): ${open.map(r => `${r.product}${r.variant ? ' – ' + r.variant : ''} ×${r.qty} ordered ${r.orderedDate}${r.orderedBy ? ` by ${r.orderedBy}` : ''}${r.eta ? `, expected ${r.eta}` : ''}`).join(' | ') || 'none'}
+Recently received: ${received.map(r => `${r.product}${r.variant ? ' – ' + r.variant : ''} ×${r.qty} (received ${r.receivedDate})`).join(' | ') || 'none'}`;
   }
 
   return `Unknown tool: ${name}`;
