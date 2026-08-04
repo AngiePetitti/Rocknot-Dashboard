@@ -42,6 +42,34 @@ export default function CreativesContent() {
   const [sortKey, setSortKey] = useState<SortKey>('spend');
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>('all');
   const [selected, setSelected] = useState<CreativePerformance | null>(null);
+  const [sharing, setSharing] = useState(false);
+
+  // iOS/Android: fetch the video and hand it to the native share sheet, where
+  // "Save Video" drops it straight into the photo album — no Downloads detour.
+  async function saveToPhotos(c: CreativePerformance) {
+    if (!c.videoUrl) return;
+    setSharing(true);
+    try {
+      const res = await fetch(`/api/creative-download?url=${encodeURIComponent(c.videoUrl)}&name=${encodeURIComponent(c.name)}`);
+      const blob = await res.blob();
+      const file = new File([blob], `${c.name.replace(/[^\w\- ]+/g, '_').slice(0, 80)}.mp4`, { type: blob.type || 'video/mp4' });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file] });
+      } else {
+        // Desktop or unsupported browser — regular download.
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = file.name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+    } catch {
+      /* user cancelled the share sheet or fetch failed — nothing to clean up */
+    } finally {
+      setSharing(false);
+    }
+  }
 
   useEffect(() => {
     setStatus('loading');
@@ -401,11 +429,20 @@ export default function CreativesContent() {
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-4">
                 <p className="text-[11px] text-gray-400">Period: {TIMEFRAME_LABELS[tf] || tf}</p>
                 {selected.videoUrl && (
+                  <button
+                    onClick={() => saveToPhotos(selected)}
+                    disabled={sharing}
+                    className="text-xs font-semibold text-emerald-600 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-3 py-2 transition-colors disabled:opacity-60"
+                  >
+                    {sharing ? 'Preparing…' : '📱 Save to Photos'}
+                  </button>
+                )}
+                {selected.videoUrl && (
                   <a
                     href={`/api/creative-download?url=${encodeURIComponent(selected.videoUrl)}&name=${encodeURIComponent(selected.name)}`}
                     className="text-xs font-semibold text-emerald-600 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-3 py-2 transition-colors"
                   >
-                    ⬇ Download video
+                    ⬇ Download
                   </a>
                 )}
                 {selected.adUrl && (
