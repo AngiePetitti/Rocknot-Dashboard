@@ -320,16 +320,28 @@ export default function CreativesContent() {
             className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
             onClick={e => e.stopPropagation()}
           >
+            {/* Header strip — badge + close live OUTSIDE the video so they
+                never cover the player's own controls (mute button, etc.). */}
+            <div className="flex items-center justify-between px-3 py-2 bg-gray-900 rounded-t-2xl">
+              <PlatformBadge platform={selected.platform} />
+              <button
+                onClick={() => setSelected(null)}
+                className="bg-white/90 hover:bg-white text-gray-600 hover:text-gray-900 rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold shadow-sm"
+              >
+                ✕
+              </button>
+            </div>
             {/* Preview */}
-            <div className={`${selected.videoUrl ? 'h-[70dvh] sm:aspect-video sm:h-auto' : selected.previewUrl ? 'h-[75dvh] sm:h-[560px]' : 'aspect-video'} bg-gray-100 flex items-center justify-center overflow-hidden relative rounded-t-2xl`}>
+            <div className={`${selected.videoUrl ? 'h-[68dvh] sm:aspect-video sm:h-auto' : selected.previewUrl ? 'h-[72dvh] sm:h-[560px]' : 'aspect-video'} bg-gray-100 flex items-center justify-center overflow-hidden relative`}>
               {selected.videoUrl ? (
+                // No autoplay/muted: iOS only allows sound when playback starts
+                // from the user's own tap, so the tap-to-play video keeps audio.
                 <video
                   src={selected.videoUrl}
                   poster={selected.thumbnailUrl ?? undefined}
                   controls
-                  autoPlay
-                  muted
                   playsInline
+                  preload="metadata"
                   className="w-full h-full object-contain bg-gray-900"
                 />
               ) : selected.previewUrl ? (
@@ -348,15 +360,6 @@ export default function CreativesContent() {
               ) : (
                 <span className="text-gray-300 text-5xl">🎨</span>
               )}
-              <div className="absolute top-3 left-3">
-                <PlatformBadge platform={selected.platform} />
-              </div>
-              <button
-                onClick={() => setSelected(null)}
-                className="absolute top-3 right-3 bg-white/90 hover:bg-white text-gray-600 hover:text-gray-900 rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold shadow-sm"
-              >
-                ✕
-              </button>
             </div>
 
             <div className="p-6">
