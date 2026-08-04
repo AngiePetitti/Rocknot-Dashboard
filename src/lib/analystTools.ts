@@ -78,7 +78,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_inventory',
-    description: 'CURRENT inventory state (not historical): stock value at cost/retail, slow/dead stock, out-of-stock fast sellers with weekly velocity, true bag stock counts with listing prices.',
+    description: 'CURRENT inventory state (not historical): stock value at cost/retail, the full slow/dead stock list ACROSS ALL CATEGORIES (straps, jewelry, accessories) with per-SKU on-hand units, 90-day sales, days of supply and cash tied up (use this for discount/sale candidates), out-of-stock fast sellers with weekly velocity, true bag stock counts with listing prices.',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -150,14 +150,20 @@ New customers ${m.newCustomers ?? 'N/A'} (${m.pctNew ?? '?'}%) · Returning ${m.
   if (name === 'get_inventory') {
     const d = await get('/api/windsor/inventory');
     if (d?.source !== 'shopify_live') return 'Inventory data unavailable right now.';
-    const items = (d.items as { product: string; variant: string; status: string; dailyVelocity: number; unitPrice: number }[]) ?? [];
+    type Item = { product: string; variant: string; category: string; status: string; currentStock: number; unitsSold90d: number; dailyVelocity: number; daysRemaining: number | null; stockValue: number; unitPrice: number };
+    const items = (d.items as Item[]) ?? [];
     const bags = (d.bags as { product: string; currentStock: number; unitsSold90d: number; unitPrice: number }[]) ?? [];
+    const slow = (d.moveOrDiscount as Item[]) ?? [];
     const fin = d.finance as { totalCostValue?: number; totalRetailValue?: number; slowStockCostValue?: number; slowStockCount?: number } | undefined;
     const oos = items.filter(i => i.status === 'out_of_stock' && i.dailyVelocity >= 0.25)
       .sort((a, b) => b.dailyVelocity - a.dailyVelocity).slice(0, 10)
       .map(i => `${i.product}${i.variant ? ' – ' + i.variant : ''} (~${Math.round(i.dailyVelocity * 7)}/wk, $${i.unitPrice})`);
-    return `Current inventory:
-Stock at cost $${(fin?.totalCostValue ?? 0).toLocaleString()} · at retail $${(fin?.totalRetailValue ?? 0).toLocaleString()} · slow/dead $${(fin?.slowStockCostValue ?? 0).toLocaleString()} across ${fin?.slowStockCount ?? 0} items
+    const fmtSlow = (i: Item) =>
+      `${i.product}${i.variant ? ' – ' + i.variant : ''} [${i.category}]: ${i.currentStock}u on hand, sold ${i.unitsSold90d} in 90d${i.daysRemaining !== null ? `, ${i.daysRemaining}d supply` : ' (no sales)'}, $${i.stockValue.toLocaleString()} at cost, sells $${i.unitPrice}`;
+    return `Current inventory (all categories — straps, jewelry, accessories, bags):
+Stock at cost $${(fin?.totalCostValue ?? 0).toLocaleString()} · at retail $${(fin?.totalRetailValue ?? 0).toLocaleString()} · slow/dead $${(fin?.slowStockCostValue ?? 0).toLocaleString()} across ${fin?.slowStockCount ?? 0} SKUs
+Slow/dead stock (in stock the whole period but not selling — dead = zero 90d sales, slow = over a year of supply; the top ${slow.length} by cash tied up, discount/bundle candidates):
+${slow.map(fmtSlow).join('\n') || 'none'}
 Out-of-stock fast sellers: ${oos.join(' | ') || 'none'}
 True bag stock: ${bags.slice(0, 40).map(b => `${b.product} ${b.currentStock}u ($${b.unitPrice}, sold90 ${b.unitsSold90d})`).join(' | ')}`;
   }
