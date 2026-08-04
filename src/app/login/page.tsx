@@ -13,8 +13,20 @@ function LoginInner() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center">
-        <div className="w-12 h-12 rounded-full bg-pink-500 text-white text-xl font-bold flex items-center justify-center mx-auto mb-4">R</div>
-        <h1 className="text-lg font-bold text-gray-800">Rocknot Dashboard</h1>
+        <div className="w-12 h-12 rounded-full bg-pink-500 text-white text-xl font-bold flex items-center justify-center mx-auto mb-4 overflow-hidden">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo.png"
+            alt="ROCKNOT"
+            className="w-full h-full object-cover"
+            onError={e => {
+              e.currentTarget.style.display = 'none';
+              (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty('display');
+            }}
+          />
+          <span style={{ display: 'none' }}>R</span>
+        </div>
+        <h1 className="text-lg font-bold text-gray-800">ROCKNOT Dashboard</h1>
         <p className="text-sm text-gray-400 mt-1 mb-6">Sign in to continue</p>
 
         {denied && (

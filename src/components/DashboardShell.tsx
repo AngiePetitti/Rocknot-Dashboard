@@ -36,10 +36,20 @@ export default function DashboardShell({ children }: { children: React.ReactNode
             </svg>
           </button>
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-400 to-pink-400 flex items-center justify-center">
-              <span className="text-white font-bold text-xs">R</span>
+            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-400 to-pink-400 flex items-center justify-center overflow-hidden">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logo.png"
+                alt="ROCKNOT"
+                className="w-full h-full object-cover"
+                onError={e => {
+                  e.currentTarget.style.display = 'none';
+                  (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty('display');
+                }}
+              />
+              <span style={{ display: 'none' }} className="text-white font-bold text-xs">R</span>
             </div>
-            <span className="font-bold text-gray-900 text-sm">Rocknot</span>
+            <span className="font-bold text-gray-900 text-sm tracking-wide">ROCKNOT</span>
           </div>
         </div>
 

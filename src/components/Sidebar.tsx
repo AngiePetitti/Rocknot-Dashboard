@@ -52,11 +52,22 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       {/* Logo */}
       <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-400 to-pink-400 flex items-center justify-center">
-            <span className="text-white font-bold text-sm">R</span>
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-400 to-pink-400 flex items-center justify-center overflow-hidden">
+            {/* Brand logo from /public/logo.png; falls back to the R mark until one is uploaded. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt="ROCKNOT"
+              className="w-full h-full object-cover"
+              onError={e => {
+                e.currentTarget.style.display = 'none';
+                (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty('display');
+              }}
+            />
+            <span style={{ display: 'none' }} className="text-white font-bold text-sm">R</span>
           </div>
           <div>
-            <p className="font-bold text-gray-900 text-sm leading-none">Rocknot</p>
+            <p className="font-bold text-gray-900 text-sm leading-none tracking-wide">ROCKNOT</p>
             <p className="text-[10px] text-gray-400 leading-none mt-0.5">Dashboard</p>
           </div>
         </div>
