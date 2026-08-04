@@ -307,8 +307,9 @@ export async function GET(request: NextRequest) {
     // being shown — Windsor's facebook connector returns one shared image for
     // most video ads, so Graph thumbnails/videos are authoritative and Windsor
     // is only the fallback when the token is missing.
-    const { fetchMetaAdMedia } = await import('@/src/lib/metaLive');
-    const metaGraphMedia = await fetchMetaAdMedia(metaCreatives.map(c => c.id));
+    const metaLiveMod = await import('@/src/lib/metaLive');
+    const metaGraphMedia = await metaLiveMod.fetchMetaAdMedia(metaCreatives.map(c => c.id));
+    const metaVideoError = metaLiveMod.lastMetaVideoError;
     for (const c of metaCreatives) {
       c.thumbnailUrl = metaGraphMedia?.[c.id]?.thumbnailUrl || metaThumbs.urls[c.id] || null;
       c.videoUrl = metaGraphMedia?.[c.id]?.videoUrl || null;
@@ -332,6 +333,8 @@ export async function GET(request: NextRequest) {
       metaActId,
       thumbnailsFound: Object.keys(metaThumbs.urls).length + Object.keys(tiktokThumbs.urls).length + Object.keys(snapMedia.urls).length,
       metaGraphThumbs: metaGraphMedia ? Object.keys(metaGraphMedia).length : 0,
+      metaVideosFound: metaGraphMedia ? Object.values(metaGraphMedia).filter(m => m.videoUrl).length : 0,
+      metaVideoError,
       videosFound: Object.keys(tiktokVideos.urls).length,
       snapMediaFound: Object.keys(snapMedia.urls).length,
       snapMediaError: snapMedia.error,

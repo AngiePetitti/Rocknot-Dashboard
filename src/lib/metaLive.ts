@@ -76,6 +76,10 @@ export async function fetchMetaToday(): Promise<MetaToday | null> {
 // shows (batched ?ids= lookups) instead of paging the whole account, which
 // missed the currently-spending ads.
 export interface MetaAdMedia { thumbnailUrl?: string; videoUrl?: string; previewUrl?: string }
+
+// Most recent per-video Graph error (e.g. permission message) — surfaced in
+// the creatives API response for debugging token/asset issues.
+export let lastMetaVideoError: string | null = null;
 export async function fetchMetaAdMedia(adIds: string[]): Promise<Record<string, MetaAdMedia> | null> {
   const token = (process.env.META_ACCESS_TOKEN || '').trim();
   if (!token || adIds.length === 0) return null;
@@ -117,27 +121,25 @@ export async function fetchMetaAdMedia(adIds: string[]): Promise<Record<string, 
     }));
 
     // Playable video sources (and full-size video posters) for video ads.
-    // `source` can be permission-gated per video — failures just leave the
-    // thumbnail-only card.
+    // Fetched one video at a time: a batched ?ids= call fails WHOLE if any
+    // single video in it is permission-gated, which starved every ad of its
+    // videoUrl. Individually, one gated video costs only itself.
     const videoIds = Array.from(videoToAds.keys()).sort();
-    const vChunks: string[][] = [];
-    for (let i = 0; i < videoIds.length; i += 50) vChunks.push(videoIds.slice(i, i + 50));
-    await Promise.all(vChunks.map(async chunk => {
-      // `length` is included only to distinguish this URL from the pre-Page-
-      // access one, so the hour-long fetch cache doesn't serve the old
-      // permission-denied responses.
-      const url = `https://graph.facebook.com/v19.0/?ids=${chunk.join(',')}&fields=source,picture,length&access_token=${token}`;
-      const res = await fetch(url, { next: { revalidate: 3600 } });
-      const json: Record<string, { source?: string; picture?: string }> & { error?: unknown } = await res.json();
-      if (json.error) return;
-      for (const vid of chunk) {
-        const v = json[vid];
-        if (!v) continue;
+    await Promise.all(videoIds.map(async vid => {
+      try {
+        const res = await fetch(`https://graph.facebook.com/v19.0/${vid}?fields=source,picture&access_token=${token}`, { next: { revalidate: 3600 } });
+        const v: { source?: string; picture?: string; error?: { message?: string } } = await res.json();
+        if (v.error) {
+          lastMetaVideoError = String(v.error.message || 'unknown Graph error');
+          return;
+        }
         for (const adId of videoToAds.get(vid) || []) {
           const m = media[adId] || (media[adId] = {});
           if (v.source?.startsWith('http')) m.videoUrl = v.source;
           if (!m.thumbnailUrl && v.picture?.startsWith('http')) m.thumbnailUrl = v.picture;
         }
+      } catch {
+        /* single video failed — skip it */
       }
     }));
 
