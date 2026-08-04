@@ -58,7 +58,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
             <img
               src="/logo.png"
               alt="ROCKNOT"
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain p-0.5"
               onError={e => {
                 e.currentTarget.style.display = 'none';
                 (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty('display');
