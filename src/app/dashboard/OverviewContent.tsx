@@ -128,6 +128,9 @@ export default function OverviewContent() {
     const platforms: PlatformSpend[] = [];
     const push = (platform: string, spend: number, revenue: number, color: string) => {
       if (spend <= 0) return;
+      // CAC = spend ÷ attributed purchases, with purchases estimated from the
+      // platform's attributed revenue at the store's blended AOV (= AOV ÷ ROAS).
+      const estOrders = m.aov > 0 ? revenue / m.aov : 0;
       platforms.push({
         platform,
         spend,
@@ -135,6 +138,7 @@ export default function OverviewContent() {
         roas: spend > 0 ? Math.round((revenue / spend) * 100) / 100 : 0,
         ctr: 0,
         impressions: 0,
+        cac: estOrders > 0 ? Math.round(spend / estOrders) : null,
         color,
       });
     };
@@ -836,7 +840,7 @@ export default function OverviewContent() {
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Revenue</th>
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">ROAS</th>
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">CTR</th>
-                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-4">Impressions</th>
+                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-4">CAC</th>
               </tr>
             </thead>
             <tbody>
@@ -862,14 +866,17 @@ export default function OverviewContent() {
                     </span>
                   </td>
                   <td className="py-3 px-4 text-right text-gray-600">{formatPercent(p.ctr)}</td>
-                  <td className="py-3 pl-4 text-right text-gray-600">
-                    {(p.impressions / 1000).toFixed(0)}k
+                  <td className="py-3 pl-4 text-right font-semibold text-gray-700">
+                    {p.cac ? formatCurrency(p.cac) : '—'}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        <p className="text-[11px] text-gray-400 mt-3">
+          CAC = spend ÷ attributed purchases (platform-attributed revenue at store AOV).
+        </p>
       </Card>
     </div>
   );

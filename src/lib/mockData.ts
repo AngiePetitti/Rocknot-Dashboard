@@ -20,6 +20,8 @@ export interface PlatformSpend {
   roas: number;
   ctr: number;
   impressions: number;
+  // Cost per attributed purchase: spend ÷ (platform revenue ÷ store AOV).
+  cac?: number | null;
   color: string;
 }
 
