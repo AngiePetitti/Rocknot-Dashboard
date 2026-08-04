@@ -123,7 +123,10 @@ export async function fetchMetaAdMedia(adIds: string[]): Promise<Record<string, 
     const vChunks: string[][] = [];
     for (let i = 0; i < videoIds.length; i += 50) vChunks.push(videoIds.slice(i, i + 50));
     await Promise.all(vChunks.map(async chunk => {
-      const url = `https://graph.facebook.com/v19.0/?ids=${chunk.join(',')}&fields=source,picture&access_token=${token}`;
+      // `length` is included only to distinguish this URL from the pre-Page-
+      // access one, so the hour-long fetch cache doesn't serve the old
+      // permission-denied responses.
+      const url = `https://graph.facebook.com/v19.0/?ids=${chunk.join(',')}&fields=source,picture,length&access_token=${token}`;
       const res = await fetch(url, { next: { revalidate: 3600 } });
       const json: Record<string, { source?: string; picture?: string }> & { error?: unknown } = await res.json();
       if (json.error) return;
