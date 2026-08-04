@@ -314,13 +314,15 @@ export default function InventoryContent() {
           <p className="text-[11px] text-orange-600/80 mb-3">
             When an order is placed, tap <b>Ordered ✓</b> and log the quantity + dates — the item moves to the Order Tracker below and off Monday's Slack alert.
           </p>
-          <div className="flex flex-col gap-1.5">
+          {/* Scrolls within the banner so a long list doesn't take over the
+              page; full product names wrap on mobile instead of truncating. */}
+          <div className="flex flex-col gap-1.5 max-h-[60vh] overflow-y-auto overscroll-contain pr-0.5">
             {(restockExpanded ? toOrderList : toOrderList.slice(0, 8)).map(item => (
               <div key={item.id} className="bg-white border border-orange-200 rounded-lg px-3 py-2">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-1">
                   <span
                     onClick={() => toggleName(item.id)}
-                    className={`text-xs font-semibold text-gray-800 flex-1 min-w-0 cursor-pointer ${expandedNames.has(item.id) ? 'break-words' : 'truncate'}`}
+                    className={`text-xs font-semibold text-gray-800 w-full sm:w-auto sm:flex-1 min-w-0 cursor-pointer break-words ${expandedNames.has(item.id) ? '' : 'sm:truncate'}`}
                   >
                     {item.product}{item.variant ? ` · ${item.variant}` : ''}
                   </span>
