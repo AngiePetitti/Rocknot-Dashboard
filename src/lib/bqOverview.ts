@@ -328,23 +328,37 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // next sync overwrites them. Patch those days from the platforms' own APIs
   // (Meta Graph, Snap Marketing) — the same sources their Ads Managers show.
   const todayPst = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  const twoDaysAgo = new Date(new Date(todayPst).getTime() - 2 * 86400000).toISOString().slice(0, 10);
-  const patchFrom = dateFrom > twoDaysAgo ? dateFrom : twoDaysAgo;
+  // Patch the last ~35 days (covers any point of the current month, so MTD is
+  // always right) from each platform's freshest source: BigQuery only updates
+  // on Windsor's daily sync and understates recent days badly.
+  const patchWindowStart = new Date(new Date(todayPst).getTime() - 35 * 86400000).toISOString().slice(0, 10);
+  const patchFrom = dateFrom > patchWindowStart ? dateFrom : patchWindowStart;
   if (dateTo >= patchFrom) {
     const { fetchMetaDaily } = await import('@/src/lib/metaLive');
     const { fetchSnapDaily } = await import('@/src/lib/snapLive');
-    const [metaPatch, snapPatch] = await Promise.all([
+    const { fetchTiktokDaily } = await import('@/src/lib/tiktokLive');
+    const [metaPatch, snapPatch, tiktokPatch] = await Promise.all([
       fetchMetaDaily(patchFrom, dateTo).catch(() => null),
       fetchSnapDaily(patchFrom, dateTo).catch(() => null),
+      fetchTiktokDaily(patchFrom, dateTo).catch(() => null),
     ]);
+    const adsByDatePatch: Record<string, AdsRow> = {};
+    for (const a of adsRows) adsByDatePatch[a.date] = a;
     if (metaPatch) {
-      const adsByDatePatch: Record<string, AdsRow> = {};
-      for (const a of adsRows) adsByDatePatch[a.date] = a;
       for (const day of metaPatch) {
         const row = adsByDatePatch[day.date];
         if (row && day.spend >= Number(row.meta_spend || 0)) {
           row.meta_spend = day.spend;
           if (day.revenue > 0) row.meta_revenue = day.revenue;
+        }
+      }
+    }
+    if (tiktokPatch) {
+      for (const day of tiktokPatch) {
+        const row = adsByDatePatch[day.date];
+        if (row && day.spend >= Number(row.tiktok_spend || 0)) {
+          row.tiktok_spend = day.spend;
+          if (day.revenue > 0) row.tiktok_revenue = day.revenue;
         }
       }
     }

@@ -222,15 +222,31 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   // once-a-day sync captures those days part-way through, understating spend
   // until the next sync overwrites them.
   const todayPst = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  const twoDaysAgo = new Date(new Date(todayPst).getTime() - 2 * 86400000).toISOString().slice(0, 10);
-  const patchFrom = dateFrom > twoDaysAgo ? dateFrom : twoDaysAgo;
+  // ~35-day patch window so MTD stays right anywhere in the month — BigQuery
+  // only updates on Windsor's daily sync and understates recent days badly.
+  const patchWindowStart = new Date(new Date(todayPst).getTime() - 35 * 86400000).toISOString().slice(0, 10);
+  const patchFrom = dateFrom > patchWindowStart ? dateFrom : patchWindowStart;
   if (dateTo >= patchFrom) {
     const { fetchMetaDaily } = await import('@/src/lib/metaLive');
     const { fetchSnapDaily } = await import('@/src/lib/snapLive');
-    const [metaPatch, snapPatch] = await Promise.all([
+    const { fetchTiktokDaily } = await import('@/src/lib/tiktokLive');
+    const [metaPatch, snapPatch, tiktokPatch] = await Promise.all([
       fetchMetaDaily(patchFrom, dateTo).catch(() => null),
       fetchSnapDaily(patchFrom, dateTo).catch(() => null),
+      fetchTiktokDaily(patchFrom, dateTo).catch(() => null),
     ]);
+    for (const day of tiktokPatch ?? []) {
+      const b = byDate[day.date];
+      if (b && day.spend > b.tiktok) {
+        const delta = day.spend - b.tiktok;
+        b.tiktok = Math.round(day.spend);
+        if (tiktokPlatform) {
+          tiktokPlatform.spend = Math.round((tiktokPlatform.spend + delta) * 100) / 100;
+          if (day.revenue > 0) tiktokPlatform.revenue = Math.round(tiktokPlatform.revenue);
+          tiktokPlatform.roas = tiktokPlatform.spend > 0 ? Math.round((tiktokPlatform.revenue / tiktokPlatform.spend) * 100) / 100 : 0;
+        }
+      }
+    }
     for (const day of metaPatch ?? []) {
       const b = byDate[day.date];
       if (b && day.spend > b.meta) {
