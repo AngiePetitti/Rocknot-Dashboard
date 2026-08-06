@@ -336,10 +336,10 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   if (dateTo >= patchFrom) {
     const { fetchMetaDaily } = await import('@/src/lib/metaLive');
     const { fetchSnapDaily } = await import('@/src/lib/snapLive');
-    const { fetchTiktokDaily } = await import('@/src/lib/tiktokLive');
+    const { fetchTiktokDaily, fetchSnapDailyFromWindsor } = await import('@/src/lib/tiktokLive');
     const [metaPatch, snapPatch, tiktokPatch] = await Promise.all([
       fetchMetaDaily(patchFrom, dateTo).catch(() => null),
-      fetchSnapDaily(patchFrom, dateTo).catch(() => null),
+      fetchSnapDaily(patchFrom, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFrom, dateTo)).catch(() => null),
       fetchTiktokDaily(patchFrom, dateTo).catch(() => null),
     ]);
     const adsByDatePatch: Record<string, AdsRow> = {};
