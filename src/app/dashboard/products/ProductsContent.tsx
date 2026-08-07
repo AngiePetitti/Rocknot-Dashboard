@@ -21,6 +21,28 @@ import {
 
 const PRODUCT_COLORS = ['#c4b5fd', '#f9a8d4', '#fde68a', '#86efac', '#93c5fd', '#fdba74', '#ddd6fe', '#fce7f3', '#fef9c3', '#dcfce7'];
 
+// Y-axis tick that wraps the full product name across up to 3 lines instead
+// of clipping it ("Gali Chain Top - Cha…").
+function WrappedNameTick(props: { x?: number; y?: number; payload?: { value?: string } }) {
+  const { x = 0, y = 0, payload } = props;
+  const words = String(payload?.value ?? '').split(' ');
+  const lines: string[] = [];
+  let cur = '';
+  for (const w of words) {
+    if ((cur + ' ' + w).trim().length > 18 && cur) { lines.push(cur); cur = w; }
+    else cur = (cur + ' ' + w).trim();
+  }
+  if (cur) lines.push(cur);
+  const shown = lines.slice(0, 3);
+  return (
+    <text x={x} y={y} textAnchor="end" fill="#374151" fontSize={10} fontWeight={500}>
+      {shown.map((l, i) => (
+        <tspan key={i} x={x} dy={i === 0 ? 4 - (shown.length - 1) * 5.5 : 11}>{l}</tspan>
+      ))}
+    </text>
+  );
+}
+
 interface ProductSales {
   id: string;
   name: string;
@@ -81,7 +103,7 @@ export default function ProductsContent() {
 
   // The chart always shows the top revenue products in API (revenue-desc) order.
   const barData = products.slice(0, 8).map((p, i) => ({
-    name: p.name.slice(0, 20),
+    name: p.name,
     revenue: p.revenue,
     color: PRODUCT_COLORS[i],
   }));
@@ -162,7 +184,7 @@ export default function ProductsContent() {
       <Card accentColor="#fde68a" className="mb-6">
         <h2 className="text-sm font-bold text-gray-700 mb-1">Revenue by Product</h2>
         <p className="text-xs text-gray-400 mb-4">Top 8 products</p>
-        <ResponsiveContainer width="100%" height={280}>
+        <ResponsiveContainer width="100%" height={320}>
           <BarChart data={barData} layout="vertical" margin={{ top: 0, right: 20, left: 10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
             <XAxis
@@ -175,10 +197,10 @@ export default function ProductsContent() {
             <YAxis
               type="category"
               dataKey="name"
-              tick={{ fontSize: 10, fill: '#374151', fontWeight: 500 }}
+              tick={<WrappedNameTick />}
               axisLine={false}
               tickLine={false}
-              width={130}
+              width={150}
             />
             <Tooltip
               formatter={(v: unknown) => [formatCurrency(Number(v)), 'Revenue']}
