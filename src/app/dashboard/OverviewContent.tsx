@@ -97,13 +97,18 @@ export default function OverviewContent() {
     dayFraction: number; avgDayRevenue: number; lowConfidence: boolean;
     backtest?: { projected: number; actual: number } | null;
   }>(null);
+  const [forecastError, setForecastError] = useState<string | null>(null);
   useEffect(() => {
-    if (tfRaw !== 'today') { setTodayForecast(null); return; }
+    if (tfRaw !== 'today') { setTodayForecast(null); setForecastError(null); return; }
     let alive = true;
     const load = () => fetch('/api/forecast/today', { cache: 'no-store' })
       .then(r => r.json())
-      .then(d => { if (alive && typeof d?.forecastRevenue === 'number') setTodayForecast(d); })
-      .catch(() => {});
+      .then(d => {
+        if (!alive) return;
+        if (typeof d?.forecastRevenue === 'number') setTodayForecast(d);
+        else setForecastError(String(d?.error || 'no data returned'));
+      })
+      .catch(e => { if (alive) setForecastError(String(e)); });
     load();
     const t = setInterval(load, 5 * 60 * 1000); // refresh every 5 min while watching
     return () => { alive = false; clearInterval(t); };
@@ -482,29 +487,40 @@ export default function OverviewContent() {
         </Card>
       </div>
 
-      {/* Today's end-of-day forecast — live view only */}
-      {tfRaw === 'today' && todayForecast && !todayForecast.lowConfidence && (
+      {/* Today's end-of-day forecast — live view only. Always renders (with an
+          honest status) so a failing forecast is visible, never just missing. */}
+      {tfRaw === 'today' && (todayForecast || forecastError) && (
         <Card accentColor="#a5b4fc" className="mb-4">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <div>
-              <p className="text-xs text-gray-400 uppercase tracking-wider">📈 Today&apos;s Forecast</p>
-              <p className="text-2xl font-bold" style={{ color: todayForecast.forecastRevenue >= todayForecast.avgDayRevenue ? '#22c55e' : '#f59e0b' }}>
-                {formatCurrency(todayForecast.forecastRevenue)}
-              </p>
+          {todayForecast ? (
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <div>
+                <p className="text-xs text-gray-400 uppercase tracking-wider">📈 Today&apos;s Forecast</p>
+                <p className="text-2xl font-bold" style={{ color: todayForecast.lowConfidence ? '#9ca3af' : todayForecast.forecastRevenue >= todayForecast.avgDayRevenue ? '#22c55e' : '#f59e0b' }}>
+                  {formatCurrency(todayForecast.forecastRevenue)}
+                </p>
+              </div>
+              <div className="text-xs text-gray-500 leading-relaxed">
+                {todayForecast.lowConfidence ? (
+                  <>Too early in the day for a pace-based projection — showing the 7-day average day ({formatCurrency(todayForecast.avgDayRevenue)}) until enough of today is in.</>
+                ) : (
+                  <>
+                    {formatCurrency(todayForecast.todaySoFar)} so far ÷ {todayForecast.dayFraction}% (share of a typical day&apos;s revenue in by this hour).
+                    {todayForecast.forecastOrders ? <> ~{todayForecast.forecastOrders} orders expected.</> : null}
+                    <br />
+                    7-day avg full day: {formatCurrency(todayForecast.avgDayRevenue)} · tracking {todayForecast.forecastRevenue >= todayForecast.avgDayRevenue ? 'ahead of' : 'behind'} pace
+                    {todayForecast.backtest && (
+                      <>
+                        <br />
+                        Accuracy check: at this hour yesterday, this method projected {formatCurrency(todayForecast.backtest.projected)} — actual close {formatCurrency(todayForecast.backtest.actual)}
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
-            <div className="text-xs text-gray-500 leading-relaxed">
-              {formatCurrency(todayForecast.todaySoFar)} so far ÷ {todayForecast.dayFraction}% (share of a typical day&apos;s revenue in by this hour).
-              {todayForecast.forecastOrders ? <> ~{todayForecast.forecastOrders} orders expected.</> : null}
-              <br />
-              7-day avg full day: {formatCurrency(todayForecast.avgDayRevenue)} · tracking {todayForecast.forecastRevenue >= todayForecast.avgDayRevenue ? 'ahead of' : 'behind'} pace
-              {todayForecast.backtest && (
-                <>
-                  <br />
-                  Accuracy check: at this hour yesterday, this method projected {formatCurrency(todayForecast.backtest.projected)} — actual close {formatCurrency(todayForecast.backtest.actual)}
-                </>
-              )}
-            </div>
-          </div>
+          ) : (
+            <p className="text-xs text-gray-400">📈 Today&apos;s forecast unavailable — {forecastError}</p>
+          )}
         </Card>
       )}
 
