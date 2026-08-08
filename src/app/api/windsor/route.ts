@@ -8,6 +8,7 @@ import { fetchMetaToday } from '@/src/lib/metaLive';
 import { fetchSnapToday } from '@/src/lib/snapLive';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 

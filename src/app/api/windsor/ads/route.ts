@@ -7,6 +7,7 @@ import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 // Rocknot's Meta ad account. Other clients connected to the same Windsor

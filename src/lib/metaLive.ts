@@ -21,7 +21,7 @@ export async function fetchMetaDaily(since: string, until: string): Promise<Meta
     const fields = 'spend,action_values';
     const timeRange = encodeURIComponent(JSON.stringify({ since, until }));
     const url = `https://graph.facebook.com/v19.0/act_${accountId}/insights?fields=${fields}&time_range=${timeRange}&time_increment=1&level=account&access_token=${token}`;
-    const res = await fetch(url, { cache: 'no-store' });
+    const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
     const json = await res.json();
     if (json.error || !Array.isArray(json.data)) return null;
     const pick = (arr: Array<{ action_type: string; value: string }> | undefined) =>
@@ -46,7 +46,7 @@ export async function fetchMetaToday(): Promise<MetaToday | null> {
     // level=account forces a single aggregated row for the whole account.
     const fields = 'spend,clicks,actions,action_values';
     const url = `https://graph.facebook.com/v19.0/act_${accountId}/insights?fields=${fields}&date_preset=today&level=account&access_token=${token}`;
-    const res = await fetch(url, { cache: 'no-store' });
+    const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
     const json = await res.json();
     if (json.error || !json.data?.length) return null;
 

@@ -20,7 +20,9 @@ async function fetchWindsorDaily(
       fields: ['date', 'spend', ...revenueFields].join(','),
       _renderer: 'json',
     });
-    const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store' });
+    // Hard timeout: this runs inside the main metrics request — a slow Windsor
+    // response must degrade to "no patch", never hang the whole dashboard.
+    const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
     const json = await res.json();
     if (json.error || !Array.isArray(json.data)) return null;
     const byDate = new Map<string, PlatformDay>();
