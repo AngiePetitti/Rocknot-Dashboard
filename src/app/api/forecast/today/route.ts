@@ -81,23 +81,33 @@ export async function GET() {
       byDay.set(date, d);
     }
 
-    const todayData = byDay.get(today);
+    // "Today" and "now" are read from the DATA, not a wall clock: the latest
+    // date in the series is today, and its last populated hour bucket is the
+    // current hour. Past days are measured at that exact same bucket position,
+    // so whatever timezone ShopifyQL buckets in, both sides line up — a clock
+    // in a different zone than the buckets shifted the curve and wildly
+    // inflated forecasts.
+    const dates = Array.from(byDay.keys()).sort();
+    const dataToday = dates[dates.length - 1] || today;
+    const todayData = byDay.get(dataToday);
     const pastDays = Array.from(byDay.entries())
-      .filter(([d]) => d < today)
+      .filter(([d]) => d < dataToday)
       .map(([, v]) => v)
       .filter(v => v.total > 0);
 
-    const nowHour = Number(
-      new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hour12: false }).format(new Date())
-    );
-    // Fraction of a typical day's revenue that lands by the end of the
-    // PREVIOUS hour plus a pro-rated share of the current hour.
-    const minute = Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, minute: 'numeric' }).format(new Date()));
+    // Latest hour bucket with sales today; the bucket is partial, so past
+    // days count fully through the previous hour plus half of this one.
+    let nowHour = 0;
+    if (todayData) {
+      for (let h = 23; h >= 0; h--) {
+        if (todayData.rev[h] > 0) { nowHour = h; break; }
+      }
+    }
     let fracSum = 0;
     for (const d of pastDays) {
       let done = 0;
       for (let h = 0; h < nowHour; h++) done += d.rev[h];
-      done += (d.rev[nowHour] || 0) * (minute / 60);
+      done += (d.rev[nowHour] || 0) * 0.5;
       fracSum += done / d.total;
     }
     const fraction = pastDays.length ? fracSum / pastDays.length : 0;

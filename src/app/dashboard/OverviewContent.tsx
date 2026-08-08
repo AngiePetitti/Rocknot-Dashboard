@@ -492,7 +492,7 @@ export default function OverviewContent() {
               </p>
             </div>
             <div className="text-xs text-gray-500 leading-relaxed">
-              Projected end-of-day from today&apos;s pace — a typical day is {todayForecast.dayFraction}% done (revenue-wise) at this hour.
+              {formatCurrency(todayForecast.todaySoFar)} so far ÷ {todayForecast.dayFraction}% (share of a typical day&apos;s revenue in by this hour).
               {todayForecast.forecastOrders ? <> ~{todayForecast.forecastOrders} orders expected.</> : null}
               <br />
               7-day avg full day: {formatCurrency(todayForecast.avgDayRevenue)} · tracking {todayForecast.forecastRevenue >= todayForecast.avgDayRevenue ? 'ahead of' : 'behind'} pace
