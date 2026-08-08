@@ -21,7 +21,8 @@ export async function fetchMetaDaily(since: string, until: string): Promise<Meta
     const fields = 'spend,action_values';
     const timeRange = encodeURIComponent(JSON.stringify({ since, until }));
     const url = `https://graph.facebook.com/v19.0/act_${accountId}/insights?fields=${fields}&time_range=${timeRange}&time_increment=1&level=account&access_token=${token}`;
-    const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+    // 5-min cache: this backs the trailing-day patch, not the live Today card.
+    const res = await fetch(url, { next: { revalidate: 300 }, signal: AbortSignal.timeout(8000) });
     const json = await res.json();
     if (json.error || !Array.isArray(json.data)) return null;
     const pick = (arr: Array<{ action_type: string; value: string }> | undefined) =>

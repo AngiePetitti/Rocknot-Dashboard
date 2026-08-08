@@ -307,6 +307,24 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     GROUP BY date
   `;
 
+  // Kick the platform-API patch fetches off NOW so they run concurrently with
+  // the BigQuery/Shopify queries below instead of adding their latency on top.
+  const todayPst = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const patchWindowStart = new Date(new Date(todayPst).getTime() - 35 * 86400000).toISOString().slice(0, 10);
+  const patchFrom = dateFrom > patchWindowStart ? dateFrom : patchWindowStart;
+  const patchPromise = dateTo >= patchFrom
+    ? (async () => {
+        const { fetchMetaDaily } = await import('@/src/lib/metaLive');
+        const { fetchSnapDaily } = await import('@/src/lib/snapLive');
+        const { fetchTiktokDaily, fetchSnapDailyFromWindsor } = await import('@/src/lib/tiktokLive');
+        return Promise.all([
+          fetchMetaDaily(patchFrom, dateTo).catch(() => null),
+          fetchSnapDaily(patchFrom, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFrom, dateTo)).catch(() => null),
+          fetchTiktokDaily(patchFrom, dateTo).catch(() => null),
+        ]);
+      })()
+    : null;
+
   let adsQueryError: string | undefined;
   const [shopifyDays, adsRows, custRows, custDaily, conversionRate, snapRows] = await Promise.all([
     fetchShopifyDaily(dateFrom, dateTo).catch(() => [] as ShopifyDay[]),
@@ -324,24 +342,11 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   for (const r of snapRows) snapByDate[r.date] = { spend: Number(r.spend || 0), revenue: Number(r.revenue || 0) };
 
   // Windsor's daily sync captures a day PART-WAY through (task runs once a
-  // day), so the most recent 1-2 days in BigQuery understate spend until the
-  // next sync overwrites them. Patch those days from the platforms' own APIs
-  // (Meta Graph, Snap Marketing) — the same sources their Ads Managers show.
-  const todayPst = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  // Patch the last ~35 days (covers any point of the current month, so MTD is
-  // always right) from each platform's freshest source: BigQuery only updates
-  // on Windsor's daily sync and understates recent days badly.
-  const patchWindowStart = new Date(new Date(todayPst).getTime() - 35 * 86400000).toISOString().slice(0, 10);
-  const patchFrom = dateFrom > patchWindowStart ? dateFrom : patchWindowStart;
-  if (dateTo >= patchFrom) {
-    const { fetchMetaDaily } = await import('@/src/lib/metaLive');
-    const { fetchSnapDaily } = await import('@/src/lib/snapLive');
-    const { fetchTiktokDaily, fetchSnapDailyFromWindsor } = await import('@/src/lib/tiktokLive');
-    const [metaPatch, snapPatch, tiktokPatch] = await Promise.all([
-      fetchMetaDaily(patchFrom, dateTo).catch(() => null),
-      fetchSnapDaily(patchFrom, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFrom, dateTo)).catch(() => null),
-      fetchTiktokDaily(patchFrom, dateTo).catch(() => null),
-    ]);
+  // day), so recent days in BigQuery understate spend until the next sync.
+  // Apply the ~35-day patch (kicked off above) from each platform's freshest
+  // source — the same numbers their Ads Managers show.
+  if (patchPromise) {
+    const [metaPatch, snapPatch, tiktokPatch] = await patchPromise;
     const adsByDatePatch: Record<string, AdsRow> = {};
     for (const a of adsRows) adsByDatePatch[a.date] = a;
     if (metaPatch) {

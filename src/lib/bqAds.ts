@@ -181,6 +181,24 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     WHERE DATE(date) BETWEEN @date_from AND @date_to
   `;
 
+  // Kick the platform-API patch fetches off NOW so they run concurrently with
+  // the BigQuery queries below instead of adding their latency on top.
+  const todayPstEarly = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const patchWindowStartEarly = new Date(new Date(todayPstEarly).getTime() - 35 * 86400000).toISOString().slice(0, 10);
+  const patchFromEarly = dateFrom > patchWindowStartEarly ? dateFrom : patchWindowStartEarly;
+  const patchPromise = dateTo >= patchFromEarly
+    ? (async () => {
+        const { fetchMetaDaily } = await import('@/src/lib/metaLive');
+        const { fetchSnapDaily } = await import('@/src/lib/snapLive');
+        const { fetchTiktokDaily, fetchSnapDailyFromWindsor } = await import('@/src/lib/tiktokLive');
+        return Promise.all([
+          fetchMetaDaily(patchFromEarly, dateTo).catch(() => null),
+          fetchSnapDaily(patchFromEarly, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFromEarly, dateTo)).catch(() => null),
+          fetchTiktokDaily(patchFromEarly, dateTo).catch(() => null),
+        ]);
+      })()
+    : null;
+
   const [metaRows, googleRows, tiktokRows, snapRows, metaDaily, googleDaily, tiktokDaily, snapDaily] = await Promise.all([
     runQuery<RawRow>(metaSql, params)
       .catch(() => runQuery<RawRow>(metaSqlMin, params))
@@ -221,20 +239,8 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   // Patch the most recent 1-2 days from the platforms' own APIs — Windsor's
   // once-a-day sync captures those days part-way through, understating spend
   // until the next sync overwrites them.
-  const todayPst = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  // ~35-day patch window so MTD stays right anywhere in the month — BigQuery
-  // only updates on Windsor's daily sync and understates recent days badly.
-  const patchWindowStart = new Date(new Date(todayPst).getTime() - 35 * 86400000).toISOString().slice(0, 10);
-  const patchFrom = dateFrom > patchWindowStart ? dateFrom : patchWindowStart;
-  if (dateTo >= patchFrom) {
-    const { fetchMetaDaily } = await import('@/src/lib/metaLive');
-    const { fetchSnapDaily } = await import('@/src/lib/snapLive');
-    const { fetchTiktokDaily, fetchSnapDailyFromWindsor } = await import('@/src/lib/tiktokLive');
-    const [metaPatch, snapPatch, tiktokPatch] = await Promise.all([
-      fetchMetaDaily(patchFrom, dateTo).catch(() => null),
-      fetchSnapDaily(patchFrom, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFrom, dateTo)).catch(() => null),
-      fetchTiktokDaily(patchFrom, dateTo).catch(() => null),
-    ]);
+  if (patchPromise) {
+    const [metaPatch, snapPatch, tiktokPatch] = await patchPromise;
     for (const day of tiktokPatch ?? []) {
       const b = byDate[day.date];
       if (b && day.spend > b.tiktok) {

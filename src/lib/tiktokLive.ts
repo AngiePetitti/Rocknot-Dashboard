@@ -22,7 +22,9 @@ async function fetchWindsorDaily(
     });
     // Hard timeout: this runs inside the main metrics request — a slow Windsor
     // response must degrade to "no patch", never hang the whole dashboard.
-    const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+    // Cached 10 min: Windsor itself refreshes hourly at best, so re-fetching
+    // this on every dashboard load was pure added latency.
+    const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { next: { revalidate: 600 }, signal: AbortSignal.timeout(8000) });
     const json = await res.json();
     if (json.error || !Array.isArray(json.data)) return null;
     const byDate = new Map<string, PlatformDay>();
