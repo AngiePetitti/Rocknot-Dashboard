@@ -40,10 +40,29 @@ async function hourlySales(ql: string) {
   }));
 }
 
+// ShopifyQL buckets hours in the STORE's timezone — "now" must be computed in
+// that same zone or the day-fraction is shifted by hours and the projection
+// lands way off (the original PT assumption overshot for an ET store).
+async function shopTimezone(): Promise<string> {
+  try {
+    const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
+      body: JSON.stringify({ query: '{ shop { ianaTimezone } }' }),
+      next: { revalidate: 86400 },
+    });
+    const json = await res.json();
+    return json?.data?.shop?.ianaTimezone || 'America/Los_Angeles';
+  } catch {
+    return 'America/Los_Angeles';
+  }
+}
+
 export async function GET() {
   if (!TOKEN) return NextResponse.json({ error: 'Shopify not configured' }, { status: 500 });
   try {
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const tz = await shopTimezone();
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: tz });
     const rows = await hourlySales(
       `FROM sales SHOW total_sales, orders TIMESERIES hour SINCE -7d UNTIL ${today}`
     );
@@ -69,11 +88,11 @@ export async function GET() {
       .filter(v => v.total > 0);
 
     const nowHour = Number(
-      new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hour12: false }).format(new Date())
+      new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hour12: false }).format(new Date())
     );
     // Fraction of a typical day's revenue that lands by the end of the
     // PREVIOUS hour plus a pro-rated share of the current hour.
-    const minute = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', minute: 'numeric' }).format(new Date()));
+    const minute = Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, minute: 'numeric' }).format(new Date()));
     let fracSum = 0;
     for (const d of pastDays) {
       let done = 0;
