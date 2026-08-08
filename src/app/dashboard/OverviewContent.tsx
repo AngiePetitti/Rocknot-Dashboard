@@ -92,6 +92,22 @@ export default function OverviewContent() {
     platforms: Array<{ platform: string; dashboardSpend: number; referenceSpend: number | null; referenceSource: string; diff: number | null; diffPct: number | null; status: string }>;
   }>(null);
 
+  const [todayForecast, setTodayForecast] = useState<null | {
+    todaySoFar: number; forecastRevenue: number; forecastOrders: number | null;
+    dayFraction: number; avgDayRevenue: number; lowConfidence: boolean;
+  }>(null);
+  useEffect(() => {
+    if (tfRaw !== 'today') { setTodayForecast(null); return; }
+    let alive = true;
+    const load = () => fetch('/api/forecast/today', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (alive && typeof d?.forecastRevenue === 'number') setTodayForecast(d); })
+      .catch(() => {});
+    load();
+    const t = setInterval(load, 5 * 60 * 1000); // refresh every 5 min while watching
+    return () => { alive = false; clearInterval(t); };
+  }, [tfRaw]);
+
   const [calEvents, setCalEvents] = useState<MarketingEvent[]>([]);
   useEffect(() => {
     fetch('/api/calendar').then(r => r.json()).then(d => { if (Array.isArray(d?.events)) setCalEvents(d.events); }).catch(() => {});
@@ -464,6 +480,26 @@ export default function OverviewContent() {
           </div>
         </Card>
       </div>
+
+      {/* Today's end-of-day forecast — live view only */}
+      {tfRaw === 'today' && todayForecast && !todayForecast.lowConfidence && (
+        <Card accentColor="#a5b4fc" className="mb-4">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div>
+              <p className="text-xs text-gray-400 uppercase tracking-wider">📈 Today&apos;s Forecast</p>
+              <p className="text-2xl font-bold" style={{ color: todayForecast.forecastRevenue >= todayForecast.avgDayRevenue ? '#22c55e' : '#f59e0b' }}>
+                {formatCurrency(todayForecast.forecastRevenue)}
+              </p>
+            </div>
+            <div className="text-xs text-gray-500 leading-relaxed">
+              Projected end-of-day from today&apos;s pace — a typical day is {todayForecast.dayFraction}% done (revenue-wise) at this hour.
+              {todayForecast.forecastOrders ? <> ~{todayForecast.forecastOrders} orders expected.</> : null}
+              <br />
+              7-day avg full day: {formatCurrency(todayForecast.avgDayRevenue)} · tracking {todayForecast.forecastRevenue >= todayForecast.avgDayRevenue ? 'ahead of' : 'behind'} pace
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
