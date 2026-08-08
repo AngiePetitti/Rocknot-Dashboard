@@ -116,6 +116,35 @@ export async function GET() {
     const todayOrders = todayData?.orders ?? 0;
     const avgDayRevenue = pastDays.length ? pastDays.reduce((s, d) => s + d.total, 0) / pastDays.length : 0;
 
+    // Self-check: run the SAME method on yesterday frozen at this hour and
+    // compare with yesterday's real close, so the card can prove (or expose)
+    // its own accuracy every day.
+    let backtest: { projected: number; actual: number } | null = null;
+    const yDate = dates[dates.length - 2];
+    const yData = yDate ? byDay.get(yDate) : undefined;
+    if (yData && yData.total > 0) {
+      const earlier = Array.from(byDay.entries())
+        .filter(([d]) => d < yDate)
+        .map(([, v]) => v)
+        .filter(v => v.total > 0);
+      if (earlier.length >= 3) {
+        let fSum = 0;
+        for (const d of earlier) {
+          let done = 0;
+          for (let h = 0; h < nowHour; h++) done += d.rev[h];
+          done += (d.rev[nowHour] || 0) * 0.5;
+          fSum += done / d.total;
+        }
+        const f = fSum / earlier.length;
+        let ySoFar = 0;
+        for (let h = 0; h < nowHour; h++) ySoFar += yData.rev[h];
+        ySoFar += (yData.rev[nowHour] || 0) * 0.5;
+        if (f >= 0.1 && ySoFar > 0) {
+          backtest = { projected: Math.round(ySoFar / f), actual: Math.round(yData.total) };
+        }
+      }
+    }
+
     // Below ~10% of the curve (early morning) the projection is noise — fall
     // back to the 7-day average as the anchor and flag low confidence.
     const usable = fraction >= 0.1 && todaySoFar > 0;
@@ -131,6 +160,7 @@ export async function GET() {
       avgDayRevenue: Math.round(avgDayRevenue),
       daysInCurve: pastDays.length,
       lowConfidence: !usable,
+      backtest,
     });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });

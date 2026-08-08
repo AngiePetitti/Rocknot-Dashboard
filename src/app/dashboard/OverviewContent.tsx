@@ -95,6 +95,7 @@ export default function OverviewContent() {
   const [todayForecast, setTodayForecast] = useState<null | {
     todaySoFar: number; forecastRevenue: number; forecastOrders: number | null;
     dayFraction: number; avgDayRevenue: number; lowConfidence: boolean;
+    backtest?: { projected: number; actual: number } | null;
   }>(null);
   useEffect(() => {
     if (tfRaw !== 'today') { setTodayForecast(null); return; }
@@ -496,6 +497,12 @@ export default function OverviewContent() {
               {todayForecast.forecastOrders ? <> ~{todayForecast.forecastOrders} orders expected.</> : null}
               <br />
               7-day avg full day: {formatCurrency(todayForecast.avgDayRevenue)} · tracking {todayForecast.forecastRevenue >= todayForecast.avgDayRevenue ? 'ahead of' : 'behind'} pace
+              {todayForecast.backtest && (
+                <>
+                  <br />
+                  Accuracy check: at this hour yesterday, this method projected {formatCurrency(todayForecast.backtest.projected)} — actual close {formatCurrency(todayForecast.backtest.actual)}
+                </>
+              )}
             </div>
           </div>
         </Card>
