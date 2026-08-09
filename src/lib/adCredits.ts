@@ -5,8 +5,10 @@
 export interface AdCredit { platform: 'snapchat' | 'meta' | 'google' | 'tiktok'; amount: number; from: string }
 
 export const AD_CREDITS: AdCredit[] = [
-  // Snapchat gave Rocknot a $7,500 ad credit (Aug 2026).
-  { platform: 'snapchat', amount: 7500, from: '2026-08-01' },
+  // Snapchat gave Rocknot a $7,500 ad credit covering the FIRST $7,500 ever
+  // spent on Snap ads — `from` predates the account so all spend counts
+  // against it from day one.
+  { platform: 'snapchat', amount: 7500, from: '2026-01-01' },
 ];
 
 // How much credit applies to a query range, given the platform's spend inside
