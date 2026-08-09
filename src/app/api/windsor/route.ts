@@ -123,6 +123,8 @@ interface AggregatedMetrics {
   googleRevenue: number;
   tiktokRevenue: number;
   snapchatRevenue: number;
+  adCreditApplied?: number;
+  netAdSpend?: number;
   newCustomers: number;
   returningCustomers: number;
   newCustomerRevenue: number;
@@ -559,6 +561,36 @@ export async function GET(request: NextRequest) {
         if (current.revenueData.length > 0) {
           current.revenueData[0].adSpend = Math.round(current.metrics.totalAdSpend);
         }
+      }
+    }
+
+    // Platform ad credits (Snap's $7.5K): promo spend isn't real cash out, so
+    // MER divides by NET spend. Prior consumption since the credit start is
+    // summed from BigQuery when available; otherwise assumed zero (fresh credit).
+    {
+      const { AD_CREDITS, creditAppliedInRange } = await import('@/src/lib/adCredits');
+      let applied = 0;
+      for (const credit of AD_CREDITS) {
+        if (credit.platform !== 'snapchat' || currentParams.date_to < credit.from) continue;
+        let spendBefore = 0;
+        if (currentParams.date_from > credit.from && isBigQueryConfigured()) {
+          try {
+            const { runQuery, getDataset } = await import('@/src/lib/bigquery');
+            const rows = await runQuery<{ spend: number | null }>(
+              `SELECT SUM(CAST(spend AS FLOAT64)) AS spend FROM \`${getDataset()}.snapchat_ads\`
+               WHERE DATE(date) >= @cf AND DATE(date) < @df`,
+              { cf: credit.from, df: currentParams.date_from }
+            );
+            spendBefore = Number(rows?.[0]?.spend || 0);
+          } catch { /* table missing — assume nothing consumed */ }
+        }
+        applied += creditAppliedInRange(credit, spendBefore, current.metrics.snapchatSpend ?? 0, currentParams.date_to);
+      }
+      if (applied > 0) {
+        current.metrics.adCreditApplied = Math.round(applied * 100) / 100;
+        current.metrics.netAdSpend = Math.max(0, Math.round((current.metrics.totalAdSpend - applied) * 100) / 100);
+        current.metrics.mer = current.metrics.netAdSpend > 0
+          ? Math.round((current.metrics.totalRevenue / current.metrics.netAdSpend) * 100) / 100 : 0;
       }
     }
 

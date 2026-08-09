@@ -1,4 +1,5 @@
 import { runQuery, getDataset, dedupedOrdersCte } from '@/src/lib/bigquery';
+import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
 
 export interface OverviewResult {
   adsError?: string;
@@ -17,6 +18,8 @@ export interface OverviewResult {
     tiktokRevenue: number;
     snapchatSpend?: number;
     snapchatRevenue?: number;
+    adCreditApplied?: number;
+    netAdSpend?: number;
     newCustomers: number;
     returningCustomers: number;
     newCustomerRevenue: number;
@@ -431,6 +434,32 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   });
 
   const totalAdSpend = metaSpend + googleSpend + tiktokSpend + snapchatSpend;
+
+  // Platform ad credits (e.g. Snap's $7.5K): promo spend isn't real cash out,
+  // so MER divides by NET spend. Spend before this range (since the credit
+  // started) already consumed part of the credit — summed from BigQuery.
+  let adCreditApplied = 0;
+  for (const credit of AD_CREDITS) {
+    if (credit.platform !== 'snapchat' || dateTo < credit.from) continue;
+    let spendBefore = 0;
+    if (dateFrom > credit.from) {
+      try {
+        const prior = await runQuery<{ spend: number | null }>(
+          `SELECT SUM(CAST(spend AS FLOAT64)) AS spend FROM \`${ds}.snapchat_ads\`
+           WHERE DATE(date) >= @credit_from AND DATE(date) < @date_from`,
+          { credit_from: credit.from, date_from: dateFrom }
+        );
+        spendBefore = Number(prior?.[0]?.spend || 0);
+      } catch { /* table missing — assume nothing consumed yet */ }
+    }
+    // Only spend on/after the credit start counts against it.
+    const snapInCreditWindow = dateFrom >= credit.from
+      ? snapchatSpend
+      : Object.entries(snapByDate).filter(([d]) => d >= credit.from).reduce((s, [, v]) => s + v.spend, 0);
+    adCreditApplied += creditAppliedInRange(credit, spendBefore, snapInCreditWindow, dateTo);
+  }
+  const netAdSpend = Math.max(0, totalAdSpend - adCreditApplied);
+
   const newCustomers = Number(cust.new_customers || 0);
   const returningCustomers = Number(cust.returning_customers || 0);
   const newCustomerRevenue = Number(cust.new_customer_revenue || 0);
@@ -443,7 +472,9 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       totalOrders,
       totalAdSpend: Math.round(totalAdSpend * 100) / 100,
       aov: totalOrders > 0 ? Math.round((totalNetSales / totalOrders) * 100) / 100 : 0,
-      mer: totalAdSpend > 0 ? Math.round((totalRevenue / totalAdSpend) * 100) / 100 : 0,
+      mer: netAdSpend > 0 ? Math.round((totalRevenue / netAdSpend) * 100) / 100 : 0,
+      adCreditApplied: Math.round(adCreditApplied * 100) / 100,
+      netAdSpend: Math.round(netAdSpend * 100) / 100,
       returns: 0,
       metaSpend: Math.round(metaSpend * 100) / 100,
       googleSpend: Math.round(googleSpend * 100) / 100,

@@ -42,6 +42,8 @@ interface LiveMetrics {
   tiktokRevenue?: number;
   snapchatSpend?: number;
   snapchatRevenue?: number;
+  adCreditApplied?: number;
+  netAdSpend?: number;
   newCustomers?: number;
   returningCustomers?: number;
   newCustomerRevenue?: number;
@@ -459,11 +461,16 @@ export default function OverviewContent() {
               </div>
             </div>
             <p className="text-sm text-gray-400 mt-1">
-              Total Revenue ÷ Total Ad Spend ={' '}
+              Total Revenue ÷ {metrics.adCreditApplied ? 'Net Ad Spend' : 'Total Ad Spend'} ={' '}
               <span className="font-semibold text-gray-600">
-                {formatCurrency(metrics.totalRevenue)} ÷ {formatCurrency(metrics.totalAdSpend)}
+                {formatCurrency(metrics.totalRevenue)} ÷ {formatCurrency(metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend)}
               </span>
             </p>
+            {(metrics.adCreditApplied ?? 0) > 0 && (
+              <p className="text-[11px] text-emerald-600 mt-0.5">
+                🎁 {formatCurrency(metrics.adCreditApplied!)} Snapchat ad credit deducted (gross spend {formatCurrency(metrics.totalAdSpend)})
+              </p>
+            )}
           </div>
           <div className="hidden sm:block w-px h-20 bg-gray-100" />
           <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-4 sm:gap-8">
