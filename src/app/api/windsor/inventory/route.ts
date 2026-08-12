@@ -519,9 +519,18 @@ export async function GET() {
 
     // Poor sellers to move/discount — most cash tied up in non-moving stock,
     // worst offenders first. Exclude bags (managed in their own section).
+    // Each row also carries the PRODUCT's total 90-day sales across all
+    // variants: a slow 16" variant of a strap whose 20" sells briskly is a
+    // "discount this length" call, not a dead product — without the product
+    // total, the list reads as contradicting Shopify's product pages.
+    const soldByProduct = new Map<string, number>();
+    for (const r of allRows) {
+      const k = norm(r._rawProduct);
+      soldByProduct.set(k, (soldByProduct.get(k) ?? 0) + r.unitsSold90d);
+    }
     const moveOrDiscount = staleRows
       .filter(r => !r._isBag && !r._isPublicBag && !r._isCombo)
-      .map(strip)
+      .map(r => ({ ...strip(r), productUnitsSold90d: soldByProduct.get(norm(r._rawProduct)) ?? r.unitsSold90d }))
       .sort((a, b) => b.stockValue - a.stockValue)
       .slice(0, 25);
 

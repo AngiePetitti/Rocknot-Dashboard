@@ -7,6 +7,7 @@ import Card from '@/src/components/ui/Card';
 import MetricCard from '@/src/components/ui/MetricCard';
 
 interface InventoryItem {
+  productUnitsSold90d?: number;
   id: string;
   product: string;
   variant: string;
@@ -657,7 +658,10 @@ export default function InventoryContent() {
                   {item.product}{item.variant ? ` · ${item.variant}` : ''}
                 </span>
                 <span className="text-[11px] text-gray-500 whitespace-nowrap">
-                  {item.currentStock.toLocaleString()} units · {item.unitsSold90d === 0 ? 'no sales 90d' : `${item.sellThroughRate}% sell-through`}
+                  {item.currentStock.toLocaleString()} units · {item.unitsSold90d === 0 ? 'no sales 90d' : `sold ${item.unitsSold90d}/90d`}
+                  {(item.productUnitsSold90d ?? 0) > item.unitsSold90d
+                    ? ` · other variants sell (${item.productUnitsSold90d} product-wide)`
+                    : ''}
                 </span>
                 <span className="text-xs font-bold text-red-700 whitespace-nowrap bg-red-100 rounded-full px-2 py-0.5">
                   {fmtMoney(item.stockValue)} tied up
