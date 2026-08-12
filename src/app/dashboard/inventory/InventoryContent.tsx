@@ -652,18 +652,18 @@ export default function InventoryContent() {
               <div
                 key={item.id}
                 onClick={() => toggleName(item.id)}
-                className="flex items-center gap-2 bg-white border border-red-200 rounded-lg px-3 py-1.5 cursor-pointer"
+                className="flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-1 bg-white border border-red-200 rounded-lg px-3 py-1.5 cursor-pointer"
               >
-                <span className={`text-xs font-semibold text-gray-800 flex-1 min-w-0 ${expandedNames.has(item.id) ? 'break-words' : 'truncate'}`}>
+                <span className={`text-xs font-semibold text-gray-800 w-full sm:w-auto sm:flex-1 min-w-0 break-words ${expandedNames.has(item.id) ? '' : 'sm:truncate'}`}>
                   {item.product}{item.variant ? ` · ${item.variant}` : ''}
                 </span>
-                <span className="text-[11px] text-gray-500 whitespace-nowrap">
+                <span className="text-[11px] text-gray-500">
                   {item.currentStock.toLocaleString()} units · {item.unitsSold90d === 0 ? 'no sales 90d' : `sold ${item.unitsSold90d}/90d`}
                   {(item.productUnitsSold90d ?? 0) > item.unitsSold90d
-                    ? ` · other variants sell (${item.productUnitsSold90d} product-wide)`
+                    ? ` · rest of product sells ${item.productUnitsSold90d}`
                     : ''}
                 </span>
-                <span className="text-xs font-bold text-red-700 whitespace-nowrap bg-red-100 rounded-full px-2 py-0.5">
+                <span className="text-xs font-bold text-red-700 whitespace-nowrap bg-red-100 rounded-full px-2 py-0.5 ml-auto sm:ml-0">
                   {fmtMoney(item.stockValue)} tied up
                 </span>
               </div>
