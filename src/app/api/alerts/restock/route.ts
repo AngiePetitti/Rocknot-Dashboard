@@ -17,8 +17,13 @@ interface InvItem {
 
 export async function GET(req: NextRequest) {
   const webhook = (process.env.SLACK_RESTOCK_WEBHOOK_URL || '').trim();
-  if (!webhook) {
-    return NextResponse.json({ error: 'SLACK_RESTOCK_WEBHOOK_URL not configured — create a Slack incoming webhook and add it to Vercel.' }, { status: 500 });
+  const resendKey = (process.env.RESEND_API_KEY || '').trim();
+  const emailTo = (process.env.RESTOCK_EMAIL_TO || '').split(',').map(s => s.trim()).filter(Boolean);
+  const emailFrom = (process.env.RESTOCK_EMAIL_FROM || 'Rocknot Dashboard <onboarding@resend.dev>').trim();
+  if (!webhook && !(resendKey && emailTo.length)) {
+    return NextResponse.json({
+      error: 'No alert channel configured — set SLACK_RESTOCK_WEBHOOK_URL and/or RESEND_API_KEY + RESTOCK_EMAIL_TO in Vercel.',
+    }, { status: 500 });
   }
 
   // Reuse the inventory API (forward whatever auth admitted this request).
@@ -65,13 +70,58 @@ export async function GET(req: NextRequest) {
     text += `\n\n🚚 *Already on order (${openOrders.length}):* ${openOrders.map(r => `${r.product}${r.variant ? ` – ${r.variant}` : ''} ×${r.qty}${r.eta ? ` (expected ${r.eta})` : ` (ordered ${r.orderedDate})`}`).join(' · ')}`;
   }
 
-  const slackRes = await fetch(webhook, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
-  });
-  if (!slackRes.ok) {
-    return NextResponse.json({ error: `Slack webhook failed (${slackRes.status})` }, { status: 502 });
+  // Send to every configured channel; report each result.
+  let slackOk: boolean | null = null;
+  if (webhook) {
+    const slackRes = await fetch(webhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }).catch(() => null);
+    slackOk = Boolean(slackRes?.ok);
   }
-  return NextResponse.json({ ok: true, itemsToOrder: toOrder.length, openOrders: openOrders.length });
+
+  let emailOk: boolean | null = null;
+  let emailError: string | undefined;
+  if (resendKey && emailTo.length) {
+    // Same content as the Slack post, formatted for email.
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const rowsHtml = toOrder.map(i => `
+      <tr>
+        <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;font-weight:600;color:#1f2937">${esc(i.product)}${i.variant ? ` — ${esc(i.variant)}` : ''}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;text-align:right;color:#c2410c;font-weight:700">Order ${i.reorderQty.toLocaleString()}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;text-align:right;color:#6b7280">${i.status === 'out_of_stock' ? 'OUT OF STOCK' : `${i.daysRemaining}d left`} · ~${Math.round(i.dailyVelocity * 7)}/wk</td>
+      </tr>`).join('');
+    const openHtml = openOrders.length
+      ? `<p style="color:#1d4ed8;font-size:13px">🚚 Already on order: ${openOrders.map(r => `${esc(r.product)}${r.variant ? ` – ${esc(r.variant)}` : ''} ×${r.qty}${r.eta ? ` (expected ${r.eta})` : ''}`).join(' · ')}</p>`
+      : '';
+    const html = `
+      <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:640px;margin:0 auto">
+        <h2 style="color:#ea580c">📦 Rocknot Monday Restock — ${today}</h2>
+        ${toOrder.length === 0
+          ? '<p style="color:#16a34a;font-weight:600">✅ Nothing needs ordering this week — all fast sellers are stocked or already on order.</p>'
+          : `<p style="color:#374151">${toOrder.length} item${toOrder.length !== 1 ? 's' : ''} to order this week (quantities cover ~90 days at current pace):</p>
+             <table style="border-collapse:collapse;width:100%;font-size:13px">${rowsHtml}</table>
+             <p style="color:#9ca3af;font-size:12px">Once ordered, log the quantity + dates on the dashboard's Inventory tab so it drops off next week's list.</p>`}
+        ${openHtml}
+        <p style="font-size:12px"><a href="https://rocknot-dashboard.vercel.app/dashboard/inventory" style="color:#7c3aed">Open the Inventory tab →</a></p>
+      </div>`;
+    const emailRes = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${resendKey}` },
+      body: JSON.stringify({
+        from: emailFrom,
+        to: emailTo,
+        subject: `📦 Monday Restock — ${toOrder.length === 0 ? 'nothing to order' : `${toOrder.length} item${toOrder.length !== 1 ? 's' : ''} to order`} (${today})`,
+        html,
+      }),
+    }).catch(() => null);
+    emailOk = Boolean(emailRes?.ok);
+    if (emailRes && !emailRes.ok) emailError = await emailRes.text().catch(() => String(emailRes.status));
+  }
+
+  if (slackOk === false && emailOk !== true) {
+    return NextResponse.json({ error: 'All configured channels failed', emailError }, { status: 502 });
+  }
+  return NextResponse.json({ ok: true, itemsToOrder: toOrder.length, openOrders: openOrders.length, slackOk, emailOk, emailError });
 }
