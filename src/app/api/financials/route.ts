@@ -23,6 +23,44 @@ const FIELDSETS: string[][] = [
 
 interface QBRow { [key: string]: string | number | null | undefined }
 
+// Windsor's docs page is the authority on QB field ids (their API errors
+// point to it). Fetch and parse it server-side, then build field sets from
+// what actually exists. Cached a day — the schema rarely changes.
+async function discoverQbFields(): Promise<string[]> {
+  try {
+    const res = await fetch('https://windsor.ai/data-field/quickbooks/', {
+      next: { revalidate: 86400 },
+      signal: AbortSignal.timeout(15000),
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RocknotDashboard/1.0)' },
+    });
+    const html = await res.text();
+    const tokens = html.match(/\b[a-z0-9]+(?:_[a-z0-9]+)+\b/g) || [];
+    const blacklist = /^(utm_|wp_|data_|font_|text_|margin_|border_|nav_|menu_|post_|page_id)/;
+    return Array.from(new Set(tokens)).filter(t => !blacklist.test(t) && t.length <= 48);
+  } catch {
+    return [];
+  }
+}
+
+function buildDiscoveredSets(fields: string[]): string[][] {
+  const has = (re: RegExp) => fields.filter(f => re.test(f));
+  const dates = has(/(^|_)date$/).concat(fields.includes('date') ? ['date'] : []);
+  const names = has(/account.*name|(^|_)name$/);
+  const types = has(/account.*type|classification|category/);
+  const amounts = has(/amount|balance|(^|_)total|net_income|income$|expense/);
+  const sets: string[][] = [];
+  for (const d of dates.slice(0, 2)) {
+    for (const a of amounts.slice(0, 6)) {
+      const base = [d, a];
+      const n = names[0]; const t = types[0];
+      if (n && t) sets.push([...base, n, t]);
+      if (n) sets.push([...base, n]);
+      sets.push(base);
+    }
+  }
+  return sets.slice(0, 12);
+}
+
 export async function GET(req: NextRequest) {
   // Admin-only, enforced server-side — P&L never reaches non-admin sessions.
   if (authConfigured()) {
@@ -42,7 +80,11 @@ export async function GET(req: NextRequest) {
   const dateTo = searchParams.get('date_to') || today;
 
   const attempts: Array<{ fields: string; error: string }> = [];
-  for (const fs of FIELDSETS) {
+  // Static guesses first (cheap), then field sets built from Windsor's own
+  // published QuickBooks field reference.
+  const discovered = await discoverQbFields();
+  const candidates = [...FIELDSETS, ...buildDiscoveredSets(discovered)];
+  for (const fs of candidates) {
     const qs = new URLSearchParams({
       api_key: WINDSOR_API_KEY,
       date_from: dateFrom,
@@ -82,5 +124,6 @@ export async function GET(req: NextRequest) {
     source: 'error',
     error: 'No candidate QuickBooks field set was accepted by Windsor — see attempts for the exact connector errors.',
     attempts,
+    discoveredFields: discovered.filter(f => /account|amount|balance|income|expense|invoice|bill|total|date|net|gross/.test(f)).slice(0, 120),
   }, { status: 502 });
 }
