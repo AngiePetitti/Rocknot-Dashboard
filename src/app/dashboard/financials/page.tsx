@@ -2,6 +2,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
+import FinancialsContent from './FinancialsContent';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,15 +25,5 @@ export default async function FinancialsPage() {
     );
   }
 
-  return (
-    <div>
-      <Header title="Financials" subtitle="P&L · admin only" />
-      <Card accentColor="#86efac">
-        <p className="text-sm text-gray-500 py-6 text-center">
-          Your P&amp;L will live here — visible only to admins. Tell me how you want it structured
-          (revenue, COGS, ad spend, opex, net) and where the numbers come from, and I&apos;ll build it out.
-        </p>
-      </Card>
-    </div>
-  );
+  return <FinancialsContent />;
 }
