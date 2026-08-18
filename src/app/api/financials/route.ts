@@ -13,6 +13,7 @@ const WINDSOR_API_KEY = (process.env.WINDSOR_API_KEY || '').trim();
 // totalexpenses) are used directly rather than re-derived.
 const PNL_FIELDS = [
   'date',
+  'account_name',
   'profitandloss__totalincome',
   'profitandloss__cogs',
   'profitandloss__grossprofit',
@@ -61,7 +62,13 @@ export async function GET(req: NextRequest) {
     if (json.error) {
       return NextResponse.json({ source: 'error', error: String(json.error), fields: PNL_FIELDS }, { status: 502 });
     }
-    const rows = (json.data || []) as QBRow[];
+    let rows = (json.data || []) as QBRow[];
+
+    // The Windsor connection can carry multiple QuickBooks companies — only
+    // Rocknot LLC belongs on this P&L. Track what we saw for verification.
+    const accountsSeen = Array.from(new Set(rows.map(r => String(r.account_name || '')))).filter(Boolean);
+    const rocknotRows = rows.filter(r => /rocknot/i.test(String(r.account_name || '')));
+    if (rocknotRows.length > 0) rows = rocknotRows;
 
     const totals = {
       income: 0, cogs: 0, grossProfit: 0, expenses: 0, totalExpenses: 0,
@@ -107,6 +114,8 @@ export async function GET(req: NextRequest) {
       source: 'windsor_quickbooks_pnl',
       range: { from: dateFrom, to: dateTo },
       rowCount: rows.length,
+      accountsSeen,
+      accountUsed: accountsSeen.find(a => /rocknot/i.test(a)) || accountsSeen[0] || 'unknown',
       totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, round(v)])),
       monthly: Array.from(monthly.entries()).sort(([a], [b]) => a.localeCompare(b))
         .map(([month, m]) => ({ month, income: round(m.income), cogs: round(m.cogs), expenses: round(m.expenses), net: round(m.net) })),

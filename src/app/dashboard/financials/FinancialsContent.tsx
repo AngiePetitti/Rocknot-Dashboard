@@ -16,6 +16,8 @@ interface FinResponse {
   error?: string;
   range?: { from: string; to: string };
   rowCount?: number;
+  accountUsed?: string;
+  accountsSeen?: string[];
   totals?: Totals;
   monthly?: MonthRow[];
 }
@@ -167,7 +169,7 @@ export default function FinancialsContent() {
           )}
 
           <p className="text-[11px] text-gray-300">
-            QuickBooks via Windsor · {data?.range?.from} → {data?.range?.to}
+            QuickBooks via Windsor · account: {data?.accountUsed || 'unknown'}{(data?.accountsSeen?.length ?? 0) > 1 ? ` (of ${data!.accountsSeen!.length} on the connection — others excluded)` : ''} · {data?.range?.from} → {data?.range?.to}
             {data?.rowCount === 0 ? ' · no rows returned for this range yet (QuickBooks syncs may lag a day)' : ''}
           </p>
         </>
