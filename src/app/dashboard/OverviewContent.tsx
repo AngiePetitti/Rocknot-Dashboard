@@ -116,6 +116,16 @@ export default function OverviewContent() {
     return () => { alive = false; clearInterval(t); };
   }, [tfRaw]);
 
+  // Profitability basis (admin-only; 403 for others hides the card). COGS and
+  // non-ad overhead rates from the last booked months, applied to live numbers.
+  const [profitBasis, setProfitBasis] = useState<null | { cogsPct: number; nonAdOpexPct: number; basisMonths: string[] }>(null);
+  useEffect(() => {
+    fetch('/api/financials/basis', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d && typeof d.cogsPct === 'number') setProfitBasis(d); })
+      .catch(() => {});
+  }, []);
+
   const [calEvents, setCalEvents] = useState<MarketingEvent[]>([]);
   useEffect(() => {
     fetch('/api/calendar').then(r => r.json()).then(d => { if (Array.isArray(d?.events)) setCalEvents(d.events); }).catch(() => {});
@@ -530,6 +540,35 @@ export default function OverviewContent() {
           )}
         </Card>
       )}
+
+      {/* Estimated net profit — admin-only (basis endpoint 403s for others).
+          Live revenue/ad spend at the booked months' cost structure. */}
+      {profitBasis && metrics.totalRevenue > 0 && (() => {
+        const rev = metrics.totalRevenue;
+        const adSpend = metrics.netAdSpend ?? metrics.totalAdSpend;
+        const estCogs = rev * (profitBasis.cogsPct / 100);
+        const estOpex = rev * (profitBasis.nonAdOpexPct / 100);
+        const estNet = rev - estCogs - estOpex - adSpend;
+        const margin = (estNet / rev) * 100;
+        return (
+          <Card accentColor="#6ee7b7" className="mb-4">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <div>
+                <p className="text-xs text-gray-400 uppercase tracking-wider">💰 Est. Net Profit</p>
+                <p className="text-2xl font-bold" style={{ color: estNet >= 0 ? '#16a34a' : '#dc2626' }}>
+                  {formatCurrency(estNet)}
+                  <span className="text-sm font-semibold text-gray-400 ml-2">{margin.toFixed(1)}% margin</span>
+                </p>
+              </div>
+              <div className="text-xs text-gray-500 leading-relaxed">
+                {formatCurrency(rev)} revenue − {formatCurrency(estCogs)} COGS ({profitBasis.cogsPct}%) − {formatCurrency(estOpex)} overhead ({profitBasis.nonAdOpexPct}%) − {formatCurrency(adSpend)} ad spend
+                <br />
+                Cost rates from your booked P&L ({profitBasis.basisMonths.join(', ')}) · exact figure lands on the Financials tab once the month is booked
+              </div>
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
