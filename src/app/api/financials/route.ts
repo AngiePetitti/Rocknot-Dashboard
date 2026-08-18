@@ -12,13 +12,23 @@ const WINDSOR_API_KEY = (process.env.WINDSOR_API_KEY || '').trim();
 // order and use the first one the connector accepts; every failure's exact
 // error is returned so unknown-field messages are visible on the tab and the
 // list below can be corrected in one pass.
+// Windsor namespaces QuickBooks fields by entity table in CamelCase
+// (confirmed in their field picker: accounts.AccountType, accounts.
+// CurrentBalance, …). QuickBooks entities use TxnDate/TotalAmt naming.
+// P&L flows come from the transaction tables; the accounts table only has
+// point-in-time balances.
 const FIELDSETS: string[][] = [
-  ['date', 'account_name', 'account_type', 'amount'],
-  ['date', 'account_name', 'account_type', 'total_amount'],
-  ['transaction_date', 'account_name', 'account_type', 'amount'],
-  ['date', 'account_fully_qualified_name', 'account_type', 'amount'],
-  ['expense_transaction_date', 'expense_account_name', 'expense_total_amount'],
-  ['date', 'account_name', 'account_current_balance'],
+  // P&L-report style tables, if Windsor exposes them
+  ['date', 'profit_and_loss.AccountName', 'profit_and_loss.Amount'],
+  ['date', 'profitandloss.AccountName', 'profitandloss.Amount'],
+  // Transaction entities (QuickBooks API naming)
+  ['date', 'invoices.TxnDate', 'invoices.TotalAmt'],
+  ['date', 'salesreceipts.TxnDate', 'salesreceipts.TotalAmt'],
+  ['date', 'purchases.TxnDate', 'purchases.TotalAmt'],
+  ['date', 'bills.TxnDate', 'bills.TotalAmt'],
+  // Account list with classification + balances (fallback context)
+  ['date', 'account_name', 'accounts.Classification', 'accounts.AccountType', 'accounts.CurrentBalance'],
+  ['date', 'account_name', 'accounts.AccountType', 'accounts.CurrentBalance'],
 ];
 
 interface QBRow { [key: string]: string | number | null | undefined }
@@ -105,6 +115,12 @@ export async function GET(req: NextRequest) {
       const rows = (json.data || []) as QBRow[];
       if (!Array.isArray(rows)) {
         attempts.push({ fields: fs.join(','), error: 'no data array in response' });
+        continue;
+      }
+      // Valid fields but zero rows: remember it, keep probing for a set that
+      // actually carries data in this range.
+      if (rows.length === 0) {
+        attempts.push({ fields: fs.join(','), error: 'accepted, but 0 rows in range' });
         continue;
       }
       return NextResponse.json({
