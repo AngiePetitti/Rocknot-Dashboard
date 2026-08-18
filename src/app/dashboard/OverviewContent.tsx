@@ -116,15 +116,24 @@ export default function OverviewContent() {
     return () => { alive = false; clearInterval(t); };
   }, [tfRaw]);
 
-  // Profitability basis (admin-only; 403 for others hides the card). COGS and
-  // non-ad overhead rates from the last booked months, applied to live numbers.
-  const [profitBasis, setProfitBasis] = useState<null | { cogsPct: number; nonAdOpexPct: number; basisMonths: string[] }>(null);
+  // Profitability data (admin-only; 403 for others hides the card): QB
+  // actuals for booked months in the range, plus cost rates for estimating
+  // only the unbooked remainder.
+  const [profitBasis, setProfitBasis] = useState<null | {
+    cogsPct: number | null; nonAdOpexPct: number | null; basisMonths: string[];
+    actual: { net: number; revenue: number; adSpend: number; months: string[] };
+  }>(null);
   useEffect(() => {
-    fetch('/api/financials/basis', { cache: 'no-store' })
+    setProfitBasis(null);
+    const params = new URLSearchParams({ tf: tfRaw });
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    // Basis endpoint wants explicit dates; derive the same range the metrics use.
+    fetch(`/api/financials/basis?${params}`, { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : null))
-      .then(d => { if (d && typeof d.cogsPct === 'number') setProfitBasis(d); })
+      .then(d => { if (d && d.actual) setProfitBasis(d); })
       .catch(() => {});
-  }, []);
+  }, [tfRaw, dateFrom, dateTo]);
 
   const [calEvents, setCalEvents] = useState<MarketingEvent[]>([]);
   useEffect(() => {
@@ -541,29 +550,43 @@ export default function OverviewContent() {
         </Card>
       )}
 
-      {/* Estimated net profit — admin-only (basis endpoint 403s for others).
-          Live revenue/ad spend at the booked months' cost structure. */}
+      {/* Net profit — admin-only (basis endpoint 403s for others). Booked
+          months show QuickBooks ACTUALS; only the unbooked remainder is
+          estimated at the booked months' cost rates. */}
       {profitBasis && metrics.totalRevenue > 0 && (() => {
         const rev = metrics.totalRevenue;
         const adSpend = metrics.netAdSpend ?? metrics.totalAdSpend;
-        const estCogs = rev * (profitBasis.cogsPct / 100);
-        const estOpex = rev * (profitBasis.nonAdOpexPct / 100);
-        const estNet = rev - estCogs - estOpex - adSpend;
-        const margin = (estNet / rev) * 100;
+        const a = profitBasis.actual;
+        const remRev = Math.max(0, rev - a.revenue);
+        const remAd = Math.max(0, adSpend - a.adSpend);
+        const canEstimate = profitBasis.cogsPct !== null && profitBasis.nonAdOpexPct !== null;
+        const remNet = canEstimate
+          ? remRev - remRev * ((profitBasis.cogsPct! + profitBasis.nonAdOpexPct!) / 100) - remAd
+          : 0;
+        const hasActual = a.months.length > 0 && a.revenue > 0;
+        const hasRemainder = remRev > rev * 0.01;
+        if (!hasActual && !canEstimate) return null;
+        const total = (hasActual ? a.net : 0) + (hasRemainder && canEstimate ? remNet : 0);
+        const margin = (total / rev) * 100;
+        const title = hasActual && !hasRemainder ? '💰 Net Profit (actual)'
+          : hasActual ? '💰 Net Profit (actual + est.)'
+          : '💰 Est. Net Profit';
         return (
           <Card accentColor="#6ee7b7" className="mb-4">
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
               <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wider">💰 Est. Net Profit</p>
-                <p className="text-2xl font-bold" style={{ color: estNet >= 0 ? '#16a34a' : '#dc2626' }}>
-                  {formatCurrency(estNet)}
+                <p className="text-xs text-gray-400 uppercase tracking-wider">{title}</p>
+                <p className="text-2xl font-bold" style={{ color: total >= 0 ? '#16a34a' : '#dc2626' }}>
+                  {formatCurrency(total)}
                   <span className="text-sm font-semibold text-gray-400 ml-2">{margin.toFixed(1)}% margin</span>
                 </p>
               </div>
               <div className="text-xs text-gray-500 leading-relaxed">
-                {formatCurrency(rev)} revenue − {formatCurrency(estCogs)} COGS ({profitBasis.cogsPct}%) − {formatCurrency(estOpex)} overhead ({profitBasis.nonAdOpexPct}%) − {formatCurrency(adSpend)} ad spend
-                <br />
-                Cost rates from your booked P&L ({profitBasis.basisMonths.join(', ')}) · exact figure lands on the Financials tab once the month is booked
+                {hasActual && <>Booked ({a.months.join(', ')}): {formatCurrency(a.net)} actual from QuickBooks</>}
+                {hasActual && hasRemainder && <br />}
+                {hasRemainder && canEstimate && (
+                  <>Unbooked remainder: est. {formatCurrency(remNet)} — {formatCurrency(remRev)} revenue − COGS {profitBasis.cogsPct}% − overhead {profitBasis.nonAdOpexPct}% − {formatCurrency(remAd)} ad spend (rates from {profitBasis.basisMonths.join(', ')})</>
+                )}
               </div>
             </div>
           </Card>
