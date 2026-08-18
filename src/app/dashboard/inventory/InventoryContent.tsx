@@ -310,6 +310,13 @@ export default function InventoryContent() {
   }, [items, bags]);
 
   // The Monday order list = restock candidates minus anything already on order.
+  // Skipped seasonal items leave the slow/dead list instantly (server drops
+  // them from the totals on the next load).
+  const visibleMove = useMemo(
+    () => moveOrDiscount.filter(i => !discontinuedKeys.has(`${i.product}|${i.variant}`.toLowerCase())),
+    [moveOrDiscount, discontinuedKeys]
+  );
+
   const toOrderList = useMemo(
     () => restockNow.filter(i => !onOrderKeys.has(`${i.product}|${i.variant}`.toLowerCase())
       && !discontinuedKeys.has(`${i.product}|${i.variant}`.toLowerCase())),
@@ -716,7 +723,7 @@ export default function InventoryContent() {
             No sales in 90 days or 180+ days of supply on hand. Most cash tied up first — discount or bundle to free it up.
           </p>
           <div className="flex flex-col gap-1.5">
-            {(moveExpanded ? moveOrDiscount : moveOrDiscount.slice(0, 6)).map(item => (
+            {(moveExpanded ? visibleMove : visibleMove.slice(0, 6)).map(item => (
               <div
                 key={item.id}
                 onClick={() => toggleName(item.id)}
@@ -734,17 +741,24 @@ export default function InventoryContent() {
                 <span className="text-xs font-bold text-red-700 whitespace-nowrap bg-red-100 rounded-full px-2 py-0.5 ml-auto sm:ml-0">
                   {fmtMoney(item.stockValue)} tied up
                 </span>
+                <button
+                  onClick={e => { e.stopPropagation(); skipItem(item); }}
+                  title="Seasonal — bringing back next season, don't flag as slow/dead"
+                  className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-gray-50 border border-gray-200 text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                >
+                  Skip ✕
+                </button>
               </div>
             ))}
           </div>
-          {moveOrDiscount.length > 6 && (
+          {visibleMove.length > 6 && (
             <button
               onClick={() => setMoveExpanded(e => !e)}
               className="text-xs font-semibold text-red-600 hover:text-red-700 mt-2.5 flex items-center gap-1"
             >
               {moveExpanded
                 ? '↑ Show less'
-                : `↓ Show ${moveOrDiscount.length - 6} more`}
+                : `↓ Show ${visibleMove.length - 6} more`}
             </button>
           )}
         </div>

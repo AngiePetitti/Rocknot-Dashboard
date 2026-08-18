@@ -513,7 +513,16 @@ export async function GET() {
         (r._startingStock > 0 && r.unitsSold90d === 0 && r.daysRemaining === null) || // dead despite being in stock
         (r.daysRemaining !== null && r.daysRemaining > 365)                            // >1 yr supply, clearly slow
       );
-    const staleRows = valued.filter(isStale);
+    // Items marked "skipped" (seasonal — held over to sell next season, or
+    // discontinued) aren't stuck capital to discount, so they leave the
+    // slow/dead list AND its $ totals. Guarded: a storage hiccup just means
+    // no exclusions this load.
+    const skippedKeys = await import('@/src/lib/chatStore')
+      .then(m => m.getDiscontinued())
+      .then(list => new Set(list.map(d => `${d.product}|${d.variant}`.toLowerCase())))
+      .catch(() => new Set<string>());
+    const staleRows = valued.filter(isStale)
+      .filter(r => !skippedKeys.has(`${r.product}|${r.variant}`.toLowerCase()));
     const slowStockCostValue = staleRows.reduce((s, r) => s + r.stockValue, 0);
     const slowStockUnits = staleRows.reduce((s, r) => s + r.currentStock, 0);
 
