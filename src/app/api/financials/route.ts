@@ -118,6 +118,20 @@ export async function GET(req: NextRequest) {
     // (Windsor's connector carries only summary rollups; verified Aug 2026).
     // Requires the one-time connect at /api/debug/qb-oauth.
     const round = (n: number) => Math.round(n * 100) / 100;
+
+    // Reconciliation column: Shopify's own monthly total sales next to the
+    // QuickBooks income — a visible books-vs-store gap check (bookkeeping
+    // lag, fee-netting, or missing entries show up as deltas).
+    const shopifyMonthly = new Map<string, number>();
+    try {
+      const { fetchShopifyDaily } = await import('@/src/lib/bqOverview');
+      const days = await fetchShopifyDaily(dateFrom, dateTo);
+      for (const d of days) {
+        const mk = d.date.slice(0, 7);
+        if (mk) shopifyMonthly.set(mk, (shopifyMonthly.get(mk) ?? 0) + d.totalSales);
+      }
+    } catch { /* Shopify column is optional */ }
+
     let lineItems: Array<{ account: string; amount: number; section: string; isSummary?: boolean }> | null = null;
     let qbDirect = false;
     let qbError: string | null = null;
@@ -175,7 +189,14 @@ export async function GET(req: NextRequest) {
       accountUsed: accountsSeen.find(a => /rocknot/i.test(a)) || accountsSeen[0] || 'unknown',
       totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, round(v)])),
       monthly: Array.from(monthly.entries()).sort(([a], [b]) => a.localeCompare(b))
-        .map(([month, m]) => ({ month, income: round(m.income), cogs: round(m.cogs), expenses: round(m.expenses), net: round(m.net) })),
+        .map(([month, m]) => ({
+          month,
+          income: round(m.income),
+          shopifySales: round(shopifyMonthly.get(month) ?? 0),
+          cogs: round(m.cogs),
+          expenses: round(m.expenses),
+          net: round(m.net),
+        })),
       lineItems,
       qbDirect,
       qbError,

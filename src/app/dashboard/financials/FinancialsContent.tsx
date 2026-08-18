@@ -10,7 +10,7 @@ interface Totals {
   totalExpenses: number; otherIncome: number; otherExpenses: number;
   incomeTax: number; netOperatingIncome: number; netIncome: number;
 }
-interface MonthRow { month: string; income: number; cogs: number; expenses: number; net: number }
+interface MonthRow { month: string; income: number; shopifySales?: number; cogs: number; expenses: number; net: number }
 interface FinResponse {
   source?: string;
   error?: string;
@@ -166,13 +166,16 @@ export default function FinancialsContent() {
 
           {(data?.monthly?.length ?? 0) > 1 && (
             <Card className="mb-4" accentColor="#a5b4fc">
-              <h2 className="text-sm font-bold text-gray-700 mb-3">📅 Monthly Breakdown</h2>
+              <h2 className="text-sm font-bold text-gray-700 mb-1">📅 Monthly Breakdown</h2>
+              <p className="text-xs text-gray-400 mb-3">Gap = QuickBooks income − Shopify total sales. Small gaps are normal (fees, timing); big amber gaps usually mean bookkeeping hasn't caught up for that month.</p>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[480px]">
+                <table className="w-full text-sm min-w-[640px]">
                   <thead>
                     <tr className="border-b border-gray-100">
                       <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2">Month</th>
-                      <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Income</th>
+                      <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">QB Income</th>
+                      <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Shopify Sales</th>
+                      <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Gap</th>
                       <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">COGS</th>
                       <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Expenses</th>
                       <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-3">Net</th>
@@ -183,6 +186,10 @@ export default function FinancialsContent() {
                       <tr key={m.month} className="border-b border-gray-50">
                         <td className="py-2 text-gray-700 font-medium">{monthLabel(m.month)}</td>
                         <td className="py-2 px-3 text-right text-gray-600">{fmt(m.income)}</td>
+                        <td className="py-2 px-3 text-right text-gray-600">{m.shopifySales ? fmt(m.shopifySales) : '—'}</td>
+                        <td className={`py-2 px-3 text-right text-xs font-semibold ${m.shopifySales && Math.abs(m.income - m.shopifySales) / m.shopifySales > 0.15 ? 'text-amber-600' : 'text-gray-400'}`}>
+                          {m.shopifySales ? fmt(m.income - m.shopifySales) : '—'}
+                        </td>
                         <td className="py-2 px-3 text-right text-gray-600">{fmt(m.cogs)}</td>
                         <td className="py-2 px-3 text-right text-gray-600">{fmt(m.expenses)}</td>
                         <td className={`py-2 pl-3 text-right font-semibold ${m.net >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt(m.net)}</td>
