@@ -122,6 +122,7 @@ export default function OverviewContent() {
   const [profitBasis, setProfitBasis] = useState<null | {
     cogsPct: number | null; nonAdOpexPct: number | null; basisMonths: string[];
     actual: { net: number; revenue: number; adSpend: number; months: string[] };
+    unbookedPastMonths?: Array<{ month: string; qbIncome: number; shopifySales: number }>;
   }>(null);
   useEffect(() => {
     setProfitBasis(null);
@@ -586,6 +587,14 @@ export default function OverviewContent() {
                 {hasActual && hasRemainder && <br />}
                 {hasRemainder && canEstimate && (
                   <>Unbooked remainder: est. {formatCurrency(remNet)} — {formatCurrency(remRev)} revenue − COGS {profitBasis.cogsPct}% − overhead {profitBasis.nonAdOpexPct}% − {formatCurrency(remAd)} ad spend (rates from {profitBasis.basisMonths.join(', ')})</>
+                )}
+                {(profitBasis.unbookedPastMonths?.length ?? 0) > 0 && (
+                  <>
+                    <br />
+                    <span className="text-amber-600">
+                      ⏳ {profitBasis.unbookedPastMonths!.map(u => `${u.month}: QuickBooks has ${formatCurrency(u.qbIncome)} of ${formatCurrency(u.shopifySales)} booked`).join(' · ')} — actuals replace the estimate automatically once bookkeeping is done
+                    </span>
+                  </>
                 )}
               </div>
             </div>

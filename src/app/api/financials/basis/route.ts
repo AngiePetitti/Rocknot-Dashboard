@@ -152,7 +152,23 @@ export async function GET(req: NextRequest) {
     }
 
     const round = (n: number) => Math.round(n * 100) / 100;
+
+    // Past months inside the range whose books aren't done — surfaced on the
+    // card so "why is this still an estimate?" answers itself.
+    const unbookedPastMonths: Array<{ month: string; qbIncome: number; shopifySales: number }> = [];
+    const monthsInRange = new Set<string>();
+    for (let d = rangeFrom; d <= rangeTo; d = addDays(d, 1)) monthsInRange.add(d.slice(0, 7));
+    for (const mk of Array.from(monthsInRange).sort()) {
+      if (mk >= currentMonth || isBooked(mk)) continue;
+      unbookedPastMonths.push({
+        month: mk,
+        qbIncome: round(qbMonthly.get(mk)?.income ?? 0),
+        shopifySales: round(shopifyMonthly.get(mk) ?? 0),
+      });
+    }
+
     return NextResponse.json({
+      unbookedPastMonths,
       cogsPct: sumSales > 0 ? Math.round((sumCogs / sumSales) * 1000) / 10 : null,
       nonAdOpexPct: sumSales > 0 ? Math.round((sumNonAdOpex / sumSales) * 1000) / 10 : null,
       basisMonths: basisMonths.sort(),
