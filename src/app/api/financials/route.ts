@@ -7,69 +7,26 @@ export const maxDuration = 60;
 
 const WINDSOR_API_KEY = (process.env.WINDSOR_API_KEY || '').trim();
 
-// P&L data from QuickBooks via Windsor's quickbooks connector. Windsor's QB
-// field names aren't fully documented, so we probe candidate field sets in
-// order and use the first one the connector accepts; every failure's exact
-// error is returned so unknown-field messages are visible on the tab and the
-// list below can be corrected in one pass.
-// Windsor namespaces QuickBooks fields by entity table in CamelCase
-// (confirmed in their field picker: accounts.AccountType, accounts.
-// CurrentBalance, …). QuickBooks entities use TxnDate/TotalAmt naming.
-// P&L flows come from the transaction tables; the accounts table only has
-// point-in-time balances.
-const FIELDSETS: string[][] = [
-  // P&L-report style tables, if Windsor exposes them
-  ['date', 'profit_and_loss.AccountName', 'profit_and_loss.Amount'],
-  ['date', 'profitandloss.AccountName', 'profitandloss.Amount'],
-  // Transaction entities (QuickBooks API naming)
-  ['date', 'invoices.TxnDate', 'invoices.TotalAmt'],
-  ['date', 'salesreceipts.TxnDate', 'salesreceipts.TotalAmt'],
-  ['date', 'purchases.TxnDate', 'purchases.TotalAmt'],
-  ['date', 'bills.TxnDate', 'bills.TotalAmt'],
-  // Account list with classification + balances (fallback context)
-  ['date', 'account_name', 'accounts.Classification', 'accounts.AccountType', 'accounts.CurrentBalance'],
-  ['date', 'account_name', 'accounts.AccountType', 'accounts.CurrentBalance'],
+// P&L straight from Windsor's QuickBooks profitandloss table. Field names use
+// the API's double-underscore form (confirmed from a real Windsor query URL,
+// Aug 2026); QuickBooks' own computed totals (netincome, totalincome,
+// totalexpenses) are used directly rather than re-derived.
+const PNL_FIELDS = [
+  'date',
+  'profitandloss__totalincome',
+  'profitandloss__cogs',
+  'profitandloss__grossprofit',
+  'profitandloss__operatingexpenses',
+  'profitandloss__totalexpenses',
+  'profitandloss__otherincome',
+  'profitandloss__otherexpenses',
+  'profitandloss__incometaxexpenses',
+  'profitandloss__netoperatingincome',
+  'profitandloss__netincome',
 ];
 
 interface QBRow { [key: string]: string | number | null | undefined }
-
-// Windsor's docs page is the authority on QB field ids (their API errors
-// point to it). Fetch and parse it server-side, then build field sets from
-// what actually exists. Cached a day — the schema rarely changes.
-async function discoverQbFields(): Promise<string[]> {
-  try {
-    const res = await fetch('https://windsor.ai/data-field/quickbooks/', {
-      next: { revalidate: 86400 },
-      signal: AbortSignal.timeout(15000),
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RocknotDashboard/1.0)' },
-    });
-    const html = await res.text();
-    const tokens = html.match(/\b[a-z0-9]+(?:_[a-z0-9]+)+\b/g) || [];
-    const blacklist = /^(utm_|wp_|data_|font_|text_|margin_|border_|nav_|menu_|post_|page_id)/;
-    return Array.from(new Set(tokens)).filter(t => !blacklist.test(t) && t.length <= 48);
-  } catch {
-    return [];
-  }
-}
-
-function buildDiscoveredSets(fields: string[]): string[][] {
-  const has = (re: RegExp) => fields.filter(f => re.test(f));
-  const dates = has(/(^|_)date$/).concat(fields.includes('date') ? ['date'] : []);
-  const names = has(/account.*name|(^|_)name$/);
-  const types = has(/account.*type|classification|category/);
-  const amounts = has(/amount|balance|(^|_)total|net_income|income$|expense/);
-  const sets: string[][] = [];
-  for (const d of dates.slice(0, 2)) {
-    for (const a of amounts.slice(0, 6)) {
-      const base = [d, a];
-      const n = names[0]; const t = types[0];
-      if (n && t) sets.push([...base, n, t]);
-      if (n) sets.push([...base, n]);
-      sets.push(base);
-    }
-  }
-  return sets.slice(0, 12);
-}
+const num = (v: unknown) => Number(v ?? 0) || 0;
 
 export async function GET(req: NextRequest) {
   // Admin-only, enforced server-side — P&L never reaches non-admin sessions.
@@ -85,61 +42,76 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = req.nextUrl;
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  const yearStart = `${today.slice(0, 4)}-01-01`;
-  const dateFrom = searchParams.get('date_from') || yearStart;
+  const dateFrom = searchParams.get('date_from') || `${today.slice(0, 4)}-01-01`;
   const dateTo = searchParams.get('date_to') || today;
 
-  const attempts: Array<{ fields: string; error: string }> = [];
-  // Static guesses first (cheap), then field sets built from Windsor's own
-  // published QuickBooks field reference.
-  const discovered = await discoverQbFields();
-  const candidates = [...FIELDSETS, ...buildDiscoveredSets(discovered)];
-  for (const fs of candidates) {
-    const qs = new URLSearchParams({
-      api_key: WINDSOR_API_KEY,
-      date_from: dateFrom,
-      date_to: dateTo,
-      fields: fs.join(','),
-      _renderer: 'json',
+  const qs = new URLSearchParams({
+    api_key: WINDSOR_API_KEY,
+    date_from: dateFrom,
+    date_to: dateTo,
+    fields: PNL_FIELDS.join(','),
+    _renderer: 'json',
+  });
+  try {
+    const res = await fetch(`https://connectors.windsor.ai/quickbooks?${qs}`, {
+      next: { revalidate: 900 },
+      signal: AbortSignal.timeout(30000),
     });
-    try {
-      const res = await fetch(`https://connectors.windsor.ai/quickbooks?${qs}`, {
-        next: { revalidate: 900 },
-        signal: AbortSignal.timeout(20000),
-      });
-      const json = await res.json();
-      if (json.error) {
-        attempts.push({ fields: fs.join(','), error: String(json.error) });
-        continue;
-      }
-      const rows = (json.data || []) as QBRow[];
-      if (!Array.isArray(rows)) {
-        attempts.push({ fields: fs.join(','), error: 'no data array in response' });
-        continue;
-      }
-      // Valid fields but zero rows: remember it, keep probing for a set that
-      // actually carries data in this range.
-      if (rows.length === 0) {
-        attempts.push({ fields: fs.join(','), error: 'accepted, but 0 rows in range' });
-        continue;
-      }
-      return NextResponse.json({
-        source: 'windsor_quickbooks',
-        fieldsUsed: fs,
-        range: { from: dateFrom, to: dateTo },
-        rowCount: rows.length,
-        rows: rows.slice(0, 2000),
-        attempts,
-      });
-    } catch (e) {
-      attempts.push({ fields: fs.join(','), error: String(e) });
+    const json = await res.json();
+    if (json.error) {
+      return NextResponse.json({ source: 'error', error: String(json.error), fields: PNL_FIELDS }, { status: 502 });
     }
-  }
+    const rows = (json.data || []) as QBRow[];
 
-  return NextResponse.json({
-    source: 'error',
-    error: 'No candidate QuickBooks field set was accepted by Windsor — see attempts for the exact connector errors.',
-    attempts,
-    discoveredFields: discovered.filter(f => /account|amount|balance|income|expense|invoice|bill|total|date|net|gross/.test(f)).slice(0, 120),
-  }, { status: 502 });
+    const totals = {
+      income: 0, cogs: 0, grossProfit: 0, expenses: 0, totalExpenses: 0,
+      otherIncome: 0, otherExpenses: 0, incomeTax: 0, netOperatingIncome: 0, netIncome: 0,
+    };
+    const monthly = new Map<string, { income: number; cogs: number; expenses: number; net: number }>();
+
+    for (const r of rows) {
+      const date = String(r.date || '').split('T')[0];
+      const income = num(r.profitandloss__totalincome);
+      const cogs = num(r.profitandloss__cogs);
+      const opex = num(r.profitandloss__operatingexpenses);
+      const net = num(r.profitandloss__netincome);
+
+      totals.income += income;
+      totals.cogs += cogs;
+      totals.grossProfit += num(r.profitandloss__grossprofit);
+      totals.expenses += opex;
+      totals.totalExpenses += num(r.profitandloss__totalexpenses);
+      totals.otherIncome += num(r.profitandloss__otherincome);
+      totals.otherExpenses += num(r.profitandloss__otherexpenses);
+      totals.incomeTax += num(r.profitandloss__incometaxexpenses);
+      totals.netOperatingIncome += num(r.profitandloss__netoperatingincome);
+      totals.netIncome += net;
+
+      const mk = date.slice(0, 7);
+      if (mk) {
+        const m = monthly.get(mk) || { income: 0, cogs: 0, expenses: 0, net: 0 };
+        m.income += income; m.cogs += cogs; m.expenses += opex; m.net += net;
+        monthly.set(mk, m);
+      }
+    }
+
+    // Fall back to derived figures when QuickBooks' computed columns are zero.
+    if (totals.grossProfit === 0) totals.grossProfit = totals.income - totals.cogs;
+    if (totals.netIncome === 0 && (totals.income || totals.totalExpenses)) {
+      totals.netIncome = totals.income - totals.cogs - (totals.expenses || totals.totalExpenses)
+        + totals.otherIncome - totals.otherExpenses - totals.incomeTax;
+    }
+
+    const round = (n: number) => Math.round(n * 100) / 100;
+    return NextResponse.json({
+      source: 'windsor_quickbooks_pnl',
+      range: { from: dateFrom, to: dateTo },
+      rowCount: rows.length,
+      totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, round(v)])),
+      monthly: Array.from(monthly.entries()).sort(([a], [b]) => a.localeCompare(b))
+        .map(([month, m]) => ({ month, income: round(m.income), cogs: round(m.cogs), expenses: round(m.expenses), net: round(m.net) })),
+    });
+  } catch (e) {
+    return NextResponse.json({ source: 'error', error: String(e) }, { status: 502 });
+  }
 }
