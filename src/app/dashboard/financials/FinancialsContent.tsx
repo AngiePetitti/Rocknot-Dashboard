@@ -13,6 +13,7 @@ interface FinResponse {
   range?: { from: string; to: string };
   rows?: QBRow[];
   attempts?: Array<{ fields: string; error: string }>;
+  discoveredFields?: string[];
 }
 
 const fmt = (n: number) => `$${Math.round(n).toLocaleString()}`;
@@ -131,6 +132,12 @@ export default function FinancialsContent() {
               {data.attempts!.map((a, i) => (
                 <p key={i}><span className="font-mono">{a.fields}</span> → {a.error}</p>
               ))}
+            </div>
+          )}
+          {(data.discoveredFields?.length ?? 0) > 0 && (
+            <div className="mt-3 pt-2 border-t border-gray-100">
+              <p className="text-[11px] font-semibold text-gray-500 mb-1">Fields found on Windsor's QuickBooks reference page:</p>
+              <p className="text-[11px] text-gray-400 font-mono break-words">{data.discoveredFields!.join(', ')}</p>
             </div>
           )}
           <p className="text-xs text-gray-500 mt-3">Screenshot this and send it to Claude — the connector errors above name the fields it expects.</p>
