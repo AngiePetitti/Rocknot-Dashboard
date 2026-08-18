@@ -15,6 +15,9 @@ const PNL_FIELDS = [
   'date',
   'account_name',
   'profitandloss__totalincome',
+  'profitandloss__income',
+  'profitandloss__revenue',
+  'profitandloss__expenses',
   'profitandloss__cogs',
   'profitandloss__grossprofit',
   'profitandloss__operatingexpenses',
@@ -78,9 +81,11 @@ export async function GET(req: NextRequest) {
 
     for (const r of rows) {
       const date = String(r.date || '').split('T')[0];
-      const income = num(r.profitandloss__totalincome);
+      // QuickBooks P&Ls populate different column variants depending on the
+      // chart of accounts — take the first non-zero of each family.
+      const income = num(r.profitandloss__totalincome) || num(r.profitandloss__income) || num(r.profitandloss__revenue);
       const cogs = num(r.profitandloss__cogs);
-      const opex = num(r.profitandloss__operatingexpenses);
+      const opex = num(r.profitandloss__operatingexpenses) || num(r.profitandloss__expenses);
       const net = num(r.profitandloss__netincome);
 
       totals.income += income;
