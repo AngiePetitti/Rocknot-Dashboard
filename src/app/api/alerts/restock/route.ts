@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getReorders } from '@/src/lib/chatStore';
+import { getReorders, getDiscontinued } from '@/src/lib/chatStore';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -43,15 +43,19 @@ export async function GET(req: NextRequest) {
   // matching the Inventory tab's order banner.
   const items = [...((inv.bags as InvItem[]) ?? []), ...((inv.items as InvItem[]) ?? [])];
   const reorders = await getReorders().catch(() => []);
+  const discontinued = await getDiscontinued().catch(() => []);
   const onOrder = new Set(
     reorders.filter(r => r.status === 'open').map(r => `${r.product}|${r.variant}`.toLowerCase())
   );
+  const skipped = new Set(discontinued.map(d => `${d.product}|${d.variant}`.toLowerCase()));
 
   // Same rule as the Inventory tab's "restock now": real movers that are out
-  // or nearly out — minus anything already on order.
+  // or nearly out — minus anything already on order or marked seasonal /
+  // not coming back.
   const toOrder = items
     .filter(i => i.dailyVelocity >= 0.25 && (i.status === 'out_of_stock' || i.status === 'critical'))
     .filter(i => !onOrder.has(`${i.product}|${i.variant}`.toLowerCase()))
+    .filter(i => !skipped.has(`${i.product}|${i.variant}`.toLowerCase()))
     .sort((a, b) => b.dailyVelocity - a.dailyVelocity);
 
   const openOrders = reorders.filter(r => r.status === 'open');

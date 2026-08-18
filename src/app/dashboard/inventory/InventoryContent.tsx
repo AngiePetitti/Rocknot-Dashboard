@@ -109,6 +109,45 @@ export default function InventoryContent() {
   const [savingOrder, setSavingOrder] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // ── Discontinued (seasonal, not coming back) — skipped from order alerts ──
+  interface Discontinued { product: string; variant: string; skippedBy: string; date: string }
+  const [discontinued, setDiscontinued] = useState<Discontinued[]>([]);
+  function loadDiscontinued() {
+    fetch('/api/discontinued', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d?.discontinued)) setDiscontinued(d.discontinued); })
+      .catch(() => {});
+  }
+  useEffect(() => { loadDiscontinued(); }, []);
+  const discontinuedKeys = useMemo(
+    () => new Set(discontinued.map(d => `${d.product}|${d.variant}`.toLowerCase())),
+    [discontinued]
+  );
+  async function skipItem(item: { product: string; variant: string }) {
+    setDiscontinued(prev => [...prev, { ...item, skippedBy: '', date: '' }]);
+    try {
+      await fetch('/api/discontinued', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product: item.product, variant: item.variant }),
+      });
+    } finally {
+      loadDiscontinued();
+    }
+  }
+  async function unskipItem(item: { product: string; variant: string }) {
+    setDiscontinued(prev => prev.filter(d => `${d.product}|${d.variant}`.toLowerCase() !== `${item.product}|${item.variant}`.toLowerCase()));
+    try {
+      await fetch('/api/discontinued', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product: item.product, variant: item.variant }),
+      });
+    } finally {
+      loadDiscontinued();
+    }
+  }
+
   function loadReorders() {
     fetch('/api/reorders', { cache: 'no-store' })
       .then(r => r.json())
@@ -272,8 +311,9 @@ export default function InventoryContent() {
 
   // The Monday order list = restock candidates minus anything already on order.
   const toOrderList = useMemo(
-    () => restockNow.filter(i => !onOrderKeys.has(`${i.product}|${i.variant}`.toLowerCase())),
-    [restockNow, onOrderKeys]
+    () => restockNow.filter(i => !onOrderKeys.has(`${i.product}|${i.variant}`.toLowerCase())
+      && !discontinuedKeys.has(`${i.product}|${i.variant}`.toLowerCase())),
+    [restockNow, onOrderKeys, discontinuedKeys]
   );
 
   return (
@@ -338,6 +378,13 @@ export default function InventoryContent() {
                     className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-green-50 border border-green-200 text-green-700 whitespace-nowrap"
                   >
                     {orderFormId === item.id ? 'Cancel' : 'Ordered ✓'}
+                  </button>
+                  <button
+                    onClick={() => skipItem(item)}
+                    title="Seasonal / not coming back — remove from order alerts permanently"
+                    className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-gray-50 border border-gray-200 text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                  >
+                    Skip ✕
                   </button>
                 </div>
                 {orderFormId === item.id && (
@@ -455,6 +502,27 @@ export default function InventoryContent() {
                     <span className="flex-1 min-w-0 truncate">✓ {r.product}{r.variant ? ` · ${r.variant}` : ''}</span>
                     <span className="whitespace-nowrap">×{r.qty.toLocaleString()} · ordered {r.orderedDate.slice(5)} → received {(r.receivedDate || '').slice(5)}</span>
                   </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {discontinued.length > 0 && (
+            <div className="mt-3 pt-2 border-t border-blue-100">
+              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">
+                Skipped — seasonal / not coming back ({discontinued.length})
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {discontinued.map(d => (
+                  <span key={`${d.product}|${d.variant}`} className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 bg-gray-50 border border-gray-200 rounded-full px-2.5 py-1">
+                    {d.product}{d.variant ? ` · ${d.variant}` : ''}
+                    <button
+                      onClick={() => unskipItem(d)}
+                      title="Bring back — include in order alerts again"
+                      className="text-gray-400 hover:text-green-600 font-bold"
+                    >
+                      ↺
+                    </button>
+                  </span>
                 ))}
               </div>
             </div>

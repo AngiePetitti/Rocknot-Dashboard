@@ -335,6 +335,67 @@ export async function deleteReorder(id: string): Promise<void> {
   }
 }
 
+// ── Discontinued items (same private sheet, "Discontinued" tab — shared) ─
+// Seasonal / not-coming-back products: skipped from the Monday order list and
+// restock alerts permanently. Columns: Product | Variant | Skipped By | Date
+const DISCONTINUED_TAB = 'Discontinued';
+
+export interface DiscontinuedItem { product: string; variant: string; skippedBy: string; date: string }
+
+async function ensureDiscontinuedTab(sheetId: string): Promise<void> {
+  try {
+    await api(`/${sheetId}:batchUpdate`, {
+      method: 'POST',
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: DISCONTINUED_TAB } } }] }),
+    });
+    await api(`/${sheetId}/values/${DISCONTINUED_TAB}!A1?valueInputOption=RAW`, {
+      method: 'PUT',
+      body: JSON.stringify({ range: `${DISCONTINUED_TAB}!A1`, majorDimension: 'ROWS', values: [['Product', 'Variant', 'Skipped By', 'Date']] }),
+    });
+  } catch { /* tab already exists */ }
+}
+
+export async function getDiscontinued(): Promise<DiscontinuedItem[]> {
+  const sheetId = await getChatSheetId(false);
+  if (!sheetId) return [];
+  try {
+    const data = await api(`/${sheetId}/values/${DISCONTINUED_TAB}!A2:D`) as { values?: string[][] };
+    return (data.values || [])
+      .filter(r => (r[0] || '').trim())
+      .map(r => ({ product: r[0].trim(), variant: (r[1] || '').trim(), skippedBy: (r[2] || '').trim(), date: (r[3] || '').trim() }));
+  } catch {
+    return [];
+  }
+}
+
+export async function addDiscontinued(item: Omit<DiscontinuedItem, 'date'> & { date?: string }): Promise<void> {
+  const sheetId = await getChatSheetId(true);
+  if (!sheetId) throw new Error('Storage unavailable');
+  await ensureDiscontinuedTab(sheetId);
+  await api(`/${sheetId}/values/${DISCONTINUED_TAB}!A1:append?valueInputOption=RAW`, {
+    method: 'POST',
+    body: JSON.stringify({
+      range: `${DISCONTINUED_TAB}!A1`, majorDimension: 'ROWS',
+      values: [[item.product, item.variant, item.skippedBy, item.date || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })]],
+    }),
+  });
+}
+
+export async function removeDiscontinued(product: string, variant: string): Promise<void> {
+  const sheetId = await getChatSheetId(false);
+  if (!sheetId) return;
+  const key = `${product}|${variant}`.toLowerCase();
+  const data = await api(`/${sheetId}/values/${DISCONTINUED_TAB}!A2:D`) as { values?: string[][] };
+  const rows = (data.values || []).filter(r => `${(r[0] || '').trim()}|${(r[1] || '').trim()}`.toLowerCase() !== key);
+  await api(`/${sheetId}/values/${DISCONTINUED_TAB}!A2:D:clear`, { method: 'POST', body: '{}' });
+  if (rows.length) {
+    await api(`/${sheetId}/values/${DISCONTINUED_TAB}!A2?valueInputOption=RAW`, {
+      method: 'PUT',
+      body: JSON.stringify({ range: `${DISCONTINUED_TAB}!A2`, majorDimension: 'ROWS', values: rows }),
+    });
+  }
+}
+
 // ── Goals (same private sheet, "Goals" tab — shared, not per-login) ──────
 // One row per month: Month (YYYY-MM) | Revenue Goal | Ad Spend Budget
 const GOALS_TAB = 'Goals';
