@@ -114,7 +114,52 @@ export async function GET(req: NextRequest) {
         + totals.otherIncome - totals.otherExpenses - totals.incomeTax;
     }
 
+    // ── Account-level line items (like QuickBooks' actual P&L report) ──
+    // Windsor may expose the ProfitAndLossDetail report as its own table;
+    // probe the likely field spellings and group by account when one works.
     const round = (n: number) => Math.round(n * 100) / 100;
+    let lineItems: Array<{ account: string; amount: number }> | null = null;
+    const detailAttempts: Array<{ fields: string; error: string }> = [];
+    const DETAIL_CANDIDATES = [
+      ['date', 'profitandlossdetail__accountname', 'profitandlossdetail__amount'],
+      ['date', 'profitandlossdetail__account_name', 'profitandlossdetail__amount'],
+      ['date', 'profitandlossdetail__account', 'profitandlossdetail__amount'],
+      ['date', 'profitandlossdetail__name', 'profitandlossdetail__subtotal'],
+    ];
+    for (const fs of DETAIL_CANDIDATES) {
+      const dqs = new URLSearchParams({
+        api_key: WINDSOR_API_KEY, date_from: dateFrom, date_to: dateTo,
+        fields: ['account_name', ...fs].join(','), _renderer: 'json',
+      });
+      try {
+        const dres = await fetch(`https://connectors.windsor.ai/quickbooks?${dqs}`, {
+          next: { revalidate: 900 }, signal: AbortSignal.timeout(20000),
+        });
+        const djson = await dres.json();
+        if (djson.error) { detailAttempts.push({ fields: fs.join(','), error: String(djson.error) }); continue; }
+        const drows = ((djson.data || []) as QBRow[]).filter(r => /rocknot/i.test(String(r.account_name || '')) || accountsSeen.length <= 1);
+        if (!drows.length) { detailAttempts.push({ fields: fs.join(','), error: 'accepted, 0 rows' }); continue; }
+        const nameKey = fs[1];
+        const amtKey = fs[2];
+        const byAccount = new Map<string, number>();
+        for (const r of drows) {
+          const name = String(r[nameKey] ?? '').trim();
+          const amt = num(r[amtKey]);
+          if (!name || !amt) continue;
+          byAccount.set(name, (byAccount.get(name) ?? 0) + amt);
+        }
+        if (byAccount.size > 0) {
+          lineItems = Array.from(byAccount.entries())
+            .map(([account, amount]) => ({ account, amount: round(amount) }))
+            .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+          break;
+        }
+        detailAttempts.push({ fields: fs.join(','), error: 'rows had no usable account/amount values' });
+      } catch (e) {
+        detailAttempts.push({ fields: fs.join(','), error: String(e) });
+      }
+    }
+
     return NextResponse.json({
       source: 'windsor_quickbooks_pnl',
       range: { from: dateFrom, to: dateTo },
@@ -124,6 +169,8 @@ export async function GET(req: NextRequest) {
       totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, round(v)])),
       monthly: Array.from(monthly.entries()).sort(([a], [b]) => a.localeCompare(b))
         .map(([month, m]) => ({ month, income: round(m.income), cogs: round(m.cogs), expenses: round(m.expenses), net: round(m.net) })),
+      lineItems,
+      detailAttempts: lineItems ? undefined : detailAttempts,
     });
   } catch (e) {
     return NextResponse.json({ source: 'error', error: String(e) }, { status: 502 });
