@@ -396,6 +396,56 @@ export async function removeDiscontinued(product: string, variant: string): Prom
   }
 }
 
+// ── Key-value settings (same private sheet, "Settings" tab) ──────────────
+// Small rotating secrets and config the app must persist across deploys
+// (e.g. the QuickBooks refresh token, which Intuit rotates on every use).
+const SETTINGS_TAB = 'Settings';
+
+async function ensureSettingsTab(sheetId: string): Promise<void> {
+  try {
+    await api(`/${sheetId}:batchUpdate`, {
+      method: 'POST',
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: SETTINGS_TAB } } }] }),
+    });
+    await api(`/${sheetId}/values/${SETTINGS_TAB}!A1?valueInputOption=RAW`, {
+      method: 'PUT',
+      body: JSON.stringify({ range: `${SETTINGS_TAB}!A1`, majorDimension: 'ROWS', values: [['Key', 'Value']] }),
+    });
+  } catch { /* tab already exists */ }
+}
+
+export async function getKV(key: string): Promise<string | null> {
+  const sheetId = await getChatSheetId(false);
+  if (!sheetId) return null;
+  try {
+    const data = await api(`/${sheetId}/values/${SETTINGS_TAB}!A2:B`) as { values?: string[][] };
+    const row = (data.values || []).find(r => (r[0] || '').trim() === key);
+    return row ? (row[1] || '').trim() || null : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setKV(key: string, value: string): Promise<void> {
+  const sheetId = await getChatSheetId(true);
+  if (!sheetId) throw new Error('Settings storage unavailable');
+  await ensureSettingsTab(sheetId);
+  const data = await api(`/${sheetId}/values/${SETTINGS_TAB}!A2:B`).catch(() => ({})) as { values?: string[][] };
+  const rows = data.values || [];
+  const idx = rows.findIndex(r => (r[0] || '').trim() === key);
+  if (idx >= 0) {
+    await api(`/${sheetId}/values/${SETTINGS_TAB}!A${idx + 2}?valueInputOption=RAW`, {
+      method: 'PUT',
+      body: JSON.stringify({ range: `${SETTINGS_TAB}!A${idx + 2}`, majorDimension: 'ROWS', values: [[key, value]] }),
+    });
+  } else {
+    await api(`/${sheetId}/values/${SETTINGS_TAB}!A1:append?valueInputOption=RAW`, {
+      method: 'POST',
+      body: JSON.stringify({ range: `${SETTINGS_TAB}!A1`, majorDimension: 'ROWS', values: [[key, value]] }),
+    });
+  }
+}
+
 // ── Goals (same private sheet, "Goals" tab — shared, not per-login) ──────
 // One row per month: Month (YYYY-MM) | Revenue Goal | Ad Spend Budget
 const GOALS_TAB = 'Goals';

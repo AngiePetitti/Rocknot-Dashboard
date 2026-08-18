@@ -20,8 +20,9 @@ interface FinResponse {
   accountsSeen?: string[];
   totals?: Totals;
   monthly?: MonthRow[];
-  lineItems?: Array<{ account: string; amount: number }> | null;
-  detailAttempts?: Array<{ fields: string; error: string }>;
+  lineItems?: Array<{ account: string; amount: number; section: string; isSummary?: boolean }> | null;
+  qbDirect?: boolean;
+  qbError?: string | null;
 }
 
 const fmt = (n: number) => `${n < 0 ? '-' : ''}$${Math.round(Math.abs(n)).toLocaleString()}`;
@@ -143,24 +144,23 @@ export default function FinancialsContent() {
           {(data?.lineItems?.length ?? 0) > 0 && (
             <Card className="mb-4" accentColor="#fde68a">
               <h2 className="text-sm font-bold text-gray-700 mb-1">📒 P&L Line Items</h2>
-              <p className="text-xs text-gray-400 mb-3">Every account, as in the QuickBooks P&L report — largest first</p>
+              <p className="text-xs text-gray-400 mb-3">Straight from QuickBooks — every account, in statement order</p>
               <div className="flex flex-col">
-                {data!.lineItems!.map(li => (
-                  <div key={li.account} className="flex items-center justify-between text-sm py-1.5 border-b border-gray-50">
-                    <span className="text-gray-600 min-w-0 break-words pr-3">{li.account}</span>
+                {data!.lineItems!.map((li, i) => (
+                  <div key={`${li.account}-${i}`} className={`flex items-center justify-between text-sm py-1.5 border-b border-gray-50 ${li.isSummary ? 'font-bold bg-gray-50 -mx-2 px-2 rounded' : ''}`}>
+                    <span className={`min-w-0 break-words pr-3 ${li.isSummary ? 'text-gray-800' : 'text-gray-600'}`}>{li.account}</span>
                     <span className={`font-semibold whitespace-nowrap ${li.amount < 0 ? 'text-red-600' : 'text-gray-800'}`}>{fmt(li.amount)}</span>
                   </div>
                 ))}
               </div>
             </Card>
           )}
-          {!data?.lineItems && (data?.detailAttempts?.length ?? 0) > 0 && (
+          {!data?.lineItems && (
             <Card className="mb-4" accentColor="#fde68a">
-              <p className="text-xs font-semibold text-gray-600 mb-1">Account-level line items aren't exposed by Windsor's QuickBooks connector yet.</p>
-              <p className="text-[11px] text-gray-400 mb-2">In Windsor's field picker, search "detail" — if any profitandlossdetail fields exist, screenshot them and Claude wires this up. Probes tried:</p>
-              <div className="text-[11px] text-gray-400 space-y-0.5">
-                {data!.detailAttempts!.map((a, i) => <p key={i}><span className="font-mono">{a.fields}</span> → {a.error}</p>)}
-              </div>
+              <p className="text-xs font-semibold text-gray-600 mb-1">Full line items need a direct QuickBooks connection (Windsor only carries summary totals).</p>
+              {data?.qbError
+                ? <p className="text-[11px] text-red-500">QuickBooks error: {data.qbError}</p>
+                : <p className="text-[11px] text-gray-400">One-time setup: open <span className="font-mono">/api/debug/qb-oauth</span> while logged in and follow the two steps — after that, this card becomes the full account-by-account P&L.</p>}
             </Card>
           )}
 

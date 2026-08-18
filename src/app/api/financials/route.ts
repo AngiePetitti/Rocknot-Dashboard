@@ -114,50 +114,57 @@ export async function GET(req: NextRequest) {
         + totals.otherIncome - totals.otherExpenses - totals.incomeTax;
     }
 
-    // ── Account-level line items (like QuickBooks' actual P&L report) ──
-    // Windsor may expose the ProfitAndLossDetail report as its own table;
-    // probe the likely field spellings and group by account when one works.
+    // ── Account-level line items — straight from QuickBooks' own P&L report
+    // (Windsor's connector carries only summary rollups; verified Aug 2026).
+    // Requires the one-time connect at /api/debug/qb-oauth.
     const round = (n: number) => Math.round(n * 100) / 100;
-    let lineItems: Array<{ account: string; amount: number }> | null = null;
-    const detailAttempts: Array<{ fields: string; error: string }> = [];
-    const DETAIL_CANDIDATES = [
-      ['date', 'profitandlossdetail__accountname', 'profitandlossdetail__amount'],
-      ['date', 'profitandlossdetail__account_name', 'profitandlossdetail__amount'],
-      ['date', 'profitandlossdetail__account', 'profitandlossdetail__amount'],
-      ['date', 'profitandlossdetail__name', 'profitandlossdetail__subtotal'],
-    ];
-    for (const fs of DETAIL_CANDIDATES) {
-      const dqs = new URLSearchParams({
-        api_key: WINDSOR_API_KEY, date_from: dateFrom, date_to: dateTo,
-        fields: ['account_name', ...fs].join(','), _renderer: 'json',
-      });
-      try {
-        const dres = await fetch(`https://connectors.windsor.ai/quickbooks?${dqs}`, {
-          next: { revalidate: 900 }, signal: AbortSignal.timeout(20000),
+    let lineItems: Array<{ account: string; amount: number; section: string; isSummary?: boolean }> | null = null;
+    let qbDirect = false;
+    let qbError: string | null = null;
+    try {
+      const { getQbAccess } = await import('@/src/lib/qbAuth');
+      const qb = await getQbAccess();
+      if (qb) {
+        const rurl = `https://quickbooks.api.intuit.com/v3/company/${qb.realmId}/reports/ProfitAndLoss?start_date=${dateFrom}&end_date=${dateTo}&accounting_method=Accrual&minorversion=73`;
+        const rres = await fetch(rurl, {
+          headers: { Authorization: `Bearer ${qb.token}`, Accept: 'application/json' },
+          next: { revalidate: 900 },
+          signal: AbortSignal.timeout(30000),
         });
-        const djson = await dres.json();
-        if (djson.error) { detailAttempts.push({ fields: fs.join(','), error: String(djson.error) }); continue; }
-        const drows = ((djson.data || []) as QBRow[]).filter(r => /rocknot/i.test(String(r.account_name || '')) || accountsSeen.length <= 1);
-        if (!drows.length) { detailAttempts.push({ fields: fs.join(','), error: 'accepted, 0 rows' }); continue; }
-        const nameKey = fs[1];
-        const amtKey = fs[2];
-        const byAccount = new Map<string, number>();
-        for (const r of drows) {
-          const name = String(r[nameKey] ?? '').trim();
-          const amt = num(r[amtKey]);
-          if (!name || !amt) continue;
-          byAccount.set(name, (byAccount.get(name) ?? 0) + amt);
+        const report = await rres.json();
+        if (report?.Rows) {
+          const items: Array<{ account: string; amount: number; section: string; isSummary?: boolean }> = [];
+          interface RRow { type?: string; group?: string; Header?: { ColData?: Array<{ value?: string }> }; Rows?: { Row?: RRow[] }; Summary?: { ColData?: Array<{ value?: string }> }; ColData?: Array<{ value?: string }> }
+          const walk = (rowsArr: RRow[], section: string) => {
+            for (const row of rowsArr) {
+              if (row.type === 'Section' || row.Rows) {
+                const title = row.Header?.ColData?.[0]?.value || row.group || section;
+                if (row.Header?.ColData?.length) {
+                  const headerAmt = Number(row.Header.ColData[1]?.value || 0);
+                  if (row.Header.ColData[0]?.value && headerAmt) {
+                    items.push({ account: String(row.Header.ColData[0].value), amount: round(headerAmt), section });
+                  }
+                }
+                if (row.Rows?.Row) walk(row.Rows.Row, title);
+                const sum = row.Summary?.ColData;
+                if (sum?.length && sum[0]?.value) {
+                  items.push({ account: String(sum[0].value), amount: round(Number(sum[1]?.value || 0)), section, isSummary: true });
+                }
+              } else if (row.ColData?.length) {
+                const name = String(row.ColData[0]?.value || '').trim();
+                const amt = Number(row.ColData[1]?.value || 0);
+                if (name) items.push({ account: name, amount: round(amt), section });
+              }
+            }
+          };
+          walk((report.Rows.Row || []) as RRow[], '');
+          if (items.length) { lineItems = items; qbDirect = true; }
+        } else if (report?.Fault) {
+          qbError = JSON.stringify(report.Fault?.Error?.[0]?.Message || report.Fault);
         }
-        if (byAccount.size > 0) {
-          lineItems = Array.from(byAccount.entries())
-            .map(([account, amount]) => ({ account, amount: round(amount) }))
-            .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
-          break;
-        }
-        detailAttempts.push({ fields: fs.join(','), error: 'rows had no usable account/amount values' });
-      } catch (e) {
-        detailAttempts.push({ fields: fs.join(','), error: String(e) });
       }
+    } catch (e) {
+      qbError = String(e);
     }
 
     return NextResponse.json({
@@ -170,7 +177,8 @@ export async function GET(req: NextRequest) {
       monthly: Array.from(monthly.entries()).sort(([a], [b]) => a.localeCompare(b))
         .map(([month, m]) => ({ month, income: round(m.income), cogs: round(m.cogs), expenses: round(m.expenses), net: round(m.net) })),
       lineItems,
-      detailAttempts: lineItems ? undefined : detailAttempts,
+      qbDirect,
+      qbError,
     });
   } catch (e) {
     return NextResponse.json({ source: 'error', error: String(e) }, { status: 502 });
