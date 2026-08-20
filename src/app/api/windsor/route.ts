@@ -343,6 +343,10 @@ async function fetchFromWindsor(endpoint: string, fields: string, params: Record
   }
 }
 
+// First Windsor API error seen by the latest fetchAllRows call — surfaced to
+// the UI so an invalid/rotated API key shows as a banner instead of silent zeros.
+let lastWindsorError: string | null = null;
+
 async function fetchAllRows(params: Record<string, string>): Promise<WindsorRow[]> {
   // Try tiktok_ads endpoint first, then tiktok, then legacy revenue field
   const tiktokResult = await fetchFromWindsor('tiktok_ads', TIKTOK_FIELDS, params)
@@ -362,6 +366,8 @@ async function fetchAllRows(params: Record<string, string>): Promise<WindsorRow[
   const shopifyRows = shopify.rows.filter(r =>
     String(r.source || '').toLowerCase().includes('shopify')
   );
+
+  lastWindsorError = shopify.error || meta.error || google.error || null;
 
   return [
     ...meta.rows.map(r => ({ ...r, source: 'facebook' })),
@@ -675,6 +681,7 @@ export async function GET(request: NextRequest) {
       revenueData: current.revenueData,
       ...(latestAvailableDate ? { dataLag: true, latestAvailableDate } : {}),
       ...(priorPeriod ? { priorPeriod, priorLabel } : {}),
+      ...(lastWindsorError ? { adsError: `Windsor API error: ${lastWindsorError} — if the API key was rotated, update WINDSOR_API_KEY in Vercel and redeploy.` } : {}),
     }, { headers: cacheHeaders(includesToday) });
 
   } catch (err) {
