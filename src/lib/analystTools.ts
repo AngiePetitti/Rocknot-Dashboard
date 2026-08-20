@@ -87,6 +87,17 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'get_financials',
+    description: "The company's P&L from QuickBooks (Rocknot LLC) for a date range: income, COGS, gross profit, operating expenses, net income and margins; monthly breakdown with a QuickBooks-vs-Shopify reconciliation gap (big gaps = bookkeeping not caught up for that month — treat those months' figures as incomplete); and, when the direct QuickBooks connection is active, every account-level line item. ADMIN-ONLY data: it returns a restriction notice for non-admin users — never speculate about financials for them.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        date_from: { type: 'string', description: 'YYYY-MM-DD (default: Jan 1 this year)' },
+        date_to: { type: 'string', description: 'YYYY-MM-DD (default: today)' },
+      },
+    },
+  },
+  {
     name: 'get_ad_creatives',
     description: 'Per-AD creative performance (individual ads, not platform totals) across Meta/TikTok/Snapchat: spend, attributed revenue, ROAS, CTR, conversions, cost per conversion, campaign and ad set. Use to find winning/losing creatives.',
     input_schema: {
@@ -222,6 +233,34 @@ True bag stock: ${bags.slice(0, 40).map(b => `${b.product} ${b.currentStock}u ($
     return `Marketing calendar:
 Live now: ${live.map(e => `${e.title} (${e.type}, thru ${e.endDate || e.date})`).join(' | ') || 'nothing'}
 Upcoming: ${upcoming.map(e => `${e.date}: ${e.title} (${e.type}${e.channel ? ', ' + e.channel : ''}${e.status ? ', ' + e.status : ''})`).join(' | ') || 'nothing scheduled'}`;
+  }
+
+  if (name === 'get_financials') {
+    const qp = new URLSearchParams();
+    if (DATE_RE.test(from)) qp.set('date_from', from);
+    if (DATE_RE.test(to)) qp.set('date_to', to);
+    const d = await get(`/api/financials?${qp}`);
+    if (!d) return 'Financials unavailable — this data is admin-only; the current user may not have access.';
+    if (d.error && !d.totals) return `Financials error: ${d.error}`;
+    const t = d.totals as Record<string, number>;
+    const monthly = (d.monthly as Array<{ month: string; income: number; shopifySales?: number; cogs: number; expenses: number; net: number }>) ?? [];
+    const items = (d.lineItems as Array<{ account: string; amount: number; section: string; isSummary?: boolean }> | null) ?? null;
+    const $ = (n: number) => `$${Math.round(n).toLocaleString()}`;
+    const monthLines = monthly.map(m => {
+      const gap = m.shopifySales ? m.income - m.shopifySales : null;
+      const gapNote = gap !== null && m.shopifySales
+        ? Math.abs(gap) / m.shopifySales > 0.15 ? ` · GAP ${$(gap)} vs Shopify ${$(m.shopifySales)} (books likely incomplete)` : ` · matches Shopify (${$(m.shopifySales)})`
+        : '';
+      return `${m.month}: income ${$(m.income)} · COGS ${$(m.cogs)} · opex ${$(m.expenses)} · net ${$(m.net)}${gapNote}`;
+    });
+    return `QuickBooks P&L (${(d.range as { from: string; to: string })?.from} → ${(d.range as { from: string; to: string })?.to}, account: ${d.accountUsed ?? 'unknown'}):
+Income ${$(t.income)} · COGS ${$(t.cogs)} · Gross profit ${$(t.grossProfit)} (${t.income ? ((t.grossProfit / t.income) * 100).toFixed(1) : '?'}%)
+Operating expenses ${$(t.expenses)} · Net income ${$(t.netIncome)} (${t.income ? ((t.netIncome / t.income) * 100).toFixed(1) : '?'}% net margin)
+Monthly (watch the GAP notes — months where QuickBooks trails Shopify aren't fully booked yet):
+${monthLines.join('\n') || 'no monthly rows'}
+${items?.length
+  ? `Line items (QuickBooks statement order):\n${items.slice(0, 80).map(li => `${li.isSummary ? '== ' : ''}${li.account}: ${$(li.amount)}`).join('\n')}`
+  : 'Account-level line items unavailable (direct QuickBooks connection not set up yet — summary totals only).'}`;
   }
 
   if (name === 'get_ad_creatives') {
