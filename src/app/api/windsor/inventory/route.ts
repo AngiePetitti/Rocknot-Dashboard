@@ -109,15 +109,18 @@ async function runShopifyQL(query: string) {
 // is 0). Returns a per-variant map plus a per-product fallback, both keyed on
 // normalized titles that match the ShopifyQL product/variant titles.
 const priceNorm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
-async function fetchVariantPrices(): Promise<{ byKey: Map<string, number>; byProduct: Map<string, number> }> {
+async function fetchVariantPrices(): Promise<{ byKey: Map<string, number>; byProduct: Map<string, number>; qtyByKey: Map<string, number> }> {
   const byKey = new Map<string, number>();
   const byProduct = new Map<string, number>();
+  // Live on-hand quantities: the ShopifyQL analytics feed lags restocks by
+  // hours, so current stock comes from the live catalog instead.
+  const qtyByKey = new Map<string, number>();
   try {
     let cursor: string | null = null;
     for (let page = 0; page < 20; page++) { // safety cap (~5000 variants)
       const query = `query($cursor: String) {
         productVariants(first: 250, after: $cursor) {
-          nodes { title price product { title } }
+          nodes { title price inventoryQuantity product { title } }
           pageInfo { hasNextPage endCursor }
         }
       }`;
@@ -131,10 +134,14 @@ async function fetchVariantPrices(): Promise<{ byKey: Map<string, number>; byPro
       const conn = json?.data?.productVariants;
       if (!conn) break;
       for (const n of conn.nodes || []) {
+        const product = n.product?.title || '';
+        const vkey = `${priceNorm(product)}||${priceNorm(n.title || '')}`;
+        if (typeof n.inventoryQuantity === 'number') {
+          qtyByKey.set(vkey, (qtyByKey.get(vkey) ?? 0) + n.inventoryQuantity);
+        }
         const price = Math.round(parseFloat(n.price || '0'));
         if (price <= 0) continue;
-        const product = n.product?.title || '';
-        byKey.set(`${priceNorm(product)}||${priceNorm(n.title || '')}`, price);
+        byKey.set(vkey, price);
         // Per-product fallback: keep the highest variant price seen.
         const pk = priceNorm(product);
         byProduct.set(pk, Math.max(byProduct.get(pk) ?? 0, price));
@@ -145,7 +152,7 @@ async function fetchVariantPrices(): Promise<{ byKey: Map<string, number>; byPro
   } catch {
     // Non-fatal — fall back to retail-value-derived price.
   }
-  return { byKey, byProduct };
+  return { byKey, byProduct, qtyByKey };
 }
 
 function statusFor(stock: number, days: number | null): InventoryItem['status'] {
@@ -225,7 +232,10 @@ export async function GET() {
       // Clamp oversold (negative) inventory to 0 — a SKU can't physically have
       // negative units on hand; negative just means it oversold past its count.
       const rawStock = Math.round(parseFloat(cell(r, 'ending_inventory_units') || '0'));
-      const currentStock = Math.max(0, rawStock);
+      // The live catalog quantity wins when we have it — the analytics feed
+      // lags restocks by hours (kept items showing OUT after a restock).
+      const liveQty = prices.qtyByKey.get(`${priceNorm(rawProduct)}||${priceNorm(variant)}`);
+      const currentStock = Math.max(0, liveQty !== undefined ? liveQty : rawStock);
       const startingStock = Math.max(0, Math.round(parseFloat(cell(r, 'starting_inventory_units') || '0')));
       const unitsSold = Math.round(parseFloat(cell(r, 'inventory_units_sold') || '0'));
       const sellThroughRate = Math.round(parseFloat(cell(r, 'sell_through_rate') || '0') * 1000) / 10;
