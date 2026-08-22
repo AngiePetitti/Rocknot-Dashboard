@@ -90,7 +90,13 @@ async function runShopifyQL(query: string) {
     cache: 'no-store',
   });
   const json = await res.json();
+  // GraphQL-level failures (throttling, auth) come back in json.errors with
+  // no data — treating them as "zero rows" made every total render as $0.
+  if (Array.isArray(json?.errors) && json.errors.length) {
+    throw new Error(json.errors.map((e: { message?: string }) => e?.message || 'GraphQL error').join('; '));
+  }
   const q = json?.data?.shopifyqlQuery;
+  if (!q) throw new Error('ShopifyQL returned no payload (throttled?)');
   if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
   const cols: { name: string }[] = q?.tableData?.columns || [];
   const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
@@ -198,6 +204,10 @@ export async function GET() {
       ),
       fetchVariantPrices(),
     ]);
+
+    if (rows.length === 0) {
+      return NextResponse.json({ source: 'error', error: 'ShopifyQL returned zero inventory rows — likely throttled; retry shortly.', items: [] });
+    }
 
     // Current listing price for a (product, variant), from the live catalog;
     // falls back to the per-product price, then to retail-value-per-unit.
