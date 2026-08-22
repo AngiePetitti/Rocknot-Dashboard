@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
-import { getGoals, saveGoals, isChatStoreConfigured, MonthGoal } from '@/src/lib/chatStore';
+import { getGoals, saveGoals, isChatStoreConfigured, MonthGoal, getKV, setKV } from '@/src/lib/chatStore';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   if (!isChatStoreConfigured()) return NextResponse.json({ configured: false, goals: [] });
   try {
-    return NextResponse.json({ configured: true, goals: await getGoals() });
+    const [goals, targetRaw] = await Promise.all([getGoals(), getKV('annual_target').catch(() => null)]);
+    return NextResponse.json({ configured: true, goals, target: targetRaw ? Number(targetRaw) || null : null });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });
   }
@@ -22,7 +23,7 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Only admins can edit goals' }, { status: 403 });
     }
   }
-  let body: { goals?: MonthGoal[] };
+  let body: { goals?: MonthGoal[]; target?: number };
   try {
     body = await req.json();
   } catch {
@@ -38,6 +39,9 @@ export async function PUT(req: NextRequest) {
   }));
   try {
     await saveGoals(goals);
+    if (typeof body.target === 'number' && body.target > 0) {
+      await setKV('annual_target', String(Math.round(body.target))).catch(() => {});
+    }
     return NextResponse.json({ ok: true, goals });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });

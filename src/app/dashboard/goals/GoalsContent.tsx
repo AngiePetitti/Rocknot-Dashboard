@@ -62,10 +62,16 @@ export default function GoalsContent() {
           const map: Record<string, MonthGoal> = {};
           for (const g of d.goals) map[g.month] = g;
           setGoals(map);
-          const yearTotal = d.goals
-            .filter((g: MonthGoal) => g.month.startsWith(String(year)))
-            .reduce((s: number, g: MonthGoal) => s + g.revenueGoal, 0);
-          if (yearTotal > 0) { setTarget(yearTotal); setTargetTouched(true); }
+          // The explicitly saved annual target wins; fall back to the sum of
+          // the saved monthly plan.
+          if (typeof d.target === 'number' && d.target > 0) {
+            setTarget(d.target); setTargetTouched(true);
+          } else {
+            const yearTotal = d.goals
+              .filter((g: MonthGoal) => g.month.startsWith(String(year)))
+              .reduce((s: number, g: MonthGoal) => s + g.revenueGoal, 0);
+            if (yearTotal > 0) { setTarget(yearTotal); setTargetTouched(true); }
+          }
         }
       })
       .catch(() => {});
@@ -156,6 +162,16 @@ export default function GoalsContent() {
     setDirty(true);
   }
 
+  // Auto-save: any edit (target, month values, pins, auto-plan) persists on
+  // its own ~1.5s after the last change — the Save button stays as an
+  // immediate manual trigger but is never required.
+  useEffect(() => {
+    if (!dirty || saving) return;
+    const t = setTimeout(() => { save(); }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, goals, target, saving]);
+
   async function save() {
     setSaving(true);
     setError(null);
@@ -163,7 +179,7 @@ export default function GoalsContent() {
       const res = await fetch('/api/goals', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ goals: Object.values(goals) }),
+        body: JSON.stringify({ goals: Object.values(goals), target }),
       });
       const d = await res.json();
       if (!res.ok || d.error) throw new Error(d.error || 'Save failed');
