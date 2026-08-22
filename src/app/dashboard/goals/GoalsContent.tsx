@@ -160,7 +160,21 @@ export default function GoalsContent() {
       return { ...prev, [k]: { ...base, [field]: value, pinned: true } };
     });
     setDirty(true);
+    // Editing a month's revenue goal re-balances the other (unpinned) months
+    // automatically once typing settles — no need to tap Auto-plan.
+    if (field === 'revenueGoal') setRebalancePending(p => p + 1);
   }
+
+  const [rebalancePending, setRebalancePending] = useState(0);
+  useEffect(() => {
+    if (!rebalancePending) return;
+    const t = setTimeout(() => {
+      setRebalancePending(0);
+      autoPlan();
+    }, 1200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rebalancePending, goals, target]);
 
   // Auto-save: any edit (target, month values, pins, auto-plan) persists on
   // its own ~1.5s after the last change — the Save button stays as an
