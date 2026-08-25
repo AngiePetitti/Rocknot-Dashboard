@@ -12,6 +12,7 @@ function esc(s: string): string {
 }
 function inline(s: string): string {
   return esc(s)
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
     .replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -81,6 +82,7 @@ export default async function BriefPage({ params }: { params: { id: string } }) 
         .brief-doc em { color: #444; }
         .brief-doc ul, .brief-doc ol { margin: 0 0 14px; padding-left: 24px; }
         .brief-doc li { margin-bottom: 5px; }
+        .brief-doc a { color: #0a58ca; text-decoration: underline; word-break: break-all; }
         .brief-doc code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; background: #f4f4f4; padding: 1px 5px; border-radius: 4px; }
         .brief-doc table { border-collapse: collapse; width: 100%; margin: 0 0 16px; font-size: 14px; }
         .brief-doc th, .brief-doc td { border: 1px solid #ddd; padding: 7px 10px; text-align: left; vertical-align: top; }

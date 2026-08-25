@@ -46,7 +46,9 @@ interface CampaignData { id: string; attributes?: { name?: string; status?: stri
 
 async function listCampaigns(channel: 'email' | 'sms'): Promise<KlaviyoCampaign[]> {
   const out: KlaviyoCampaign[] = [];
-  let url: string | null = `/api/campaigns?filter=${encodeURIComponent(`equals(messages.channel,'${channel}')`)}&sort=-created_at&page[size]=50`;
+  // NOTE: the campaigns endpoint rejects page[size]; pagination is via the
+  // cursor links only.
+  let url: string | null = `/api/campaigns?filter=${encodeURIComponent(`equals(messages.channel,'${channel}')`)}&sort=-created_at`;
   for (let page = 0; page < 3 && url; page++) {
     const json = await kfetch(url);
     for (const c of (json.data as CampaignData[]) || []) {
@@ -66,11 +68,17 @@ async function listCampaigns(channel: 'email' | 'sms'): Promise<KlaviyoCampaign[
 }
 
 async function placedOrderMetricId(): Promise<string | null> {
-  const json = await kfetch('/api/metrics?page[size]=100');
-  const metrics = (json.data as Array<{ id: string; attributes?: { name?: string } }>) || [];
-  return metrics.find(m => m.attributes?.name === 'Placed Order')?.id
-    ?? metrics.find(m => /placed order/i.test(m.attributes?.name || ''))?.id
-    ?? null;
+  let url: string | null = '/api/metrics';
+  for (let page = 0; page < 4 && url; page++) {
+    const json = await kfetch(url);
+    const metrics = (json.data as Array<{ id: string; attributes?: { name?: string } }>) || [];
+    const hit = metrics.find(m => m.attributes?.name === 'Placed Order')
+      ?? metrics.find(m => /placed order/i.test(m.attributes?.name || ''));
+    if (hit) return hit.id;
+    const next = (json.links as { next?: string } | undefined)?.next || null;
+    url = next ? next.replace('https://a.klaviyo.com', '') : null;
+  }
+  return null;
 }
 
 // Per-campaign stats for the last 30 days via the Campaign Values Report.

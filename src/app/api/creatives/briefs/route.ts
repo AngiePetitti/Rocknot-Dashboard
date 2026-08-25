@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
   const cdata = await cres.json().catch(() => null);
   const creatives = (cdata?.creatives ?? []) as Array<{
     name: string; platform: string; campaign: string; spend: number; revenue: number;
-    roas: number; ctr: number; conversions: number;
+    roas: number; ctr: number; conversions: number; adUrl?: string | null; videoUrl?: string | null;
   }>;
   if (!creatives.length) {
     return NextResponse.json({ error: 'No creative performance data available to base briefs on' }, { status: 502 });
@@ -105,10 +105,28 @@ Write ONE deep, self-contained brief in Markdown. It will be handed to a freelan
       }).finalMessage()
     ));
 
+    // Linkify every referenced ad name: name → Ads Manager, plus a watch
+    // link when the raw video is available. Longest names first so partial
+    // names never clobber longer ones.
+    const linkable = creatives.filter(c => c.adUrl).sort((a, b) => b.name.length - a.name.length);
+    const linkify = (mdIn: string): string => {
+      let out = mdIn;
+      for (const c of linkable) {
+        if (!out.includes(c.name)) continue;
+        const link = `[${c.name}](${c.adUrl})${c.videoUrl ? ` ([▶ watch](${c.videoUrl}))` : ''}`;
+        // Replace backticked and bare occurrences alike.
+        out = out.split('\u0060' + c.name + '\u0060').join(link);
+        out = out.split(c.name).join(link);
+        // Un-nest if the name was already inside our own link markup.
+        out = out.split(`[[${c.name}]`).join(`[${c.name}]`);
+      }
+      return out;
+    };
+
     const index: BriefIndexEntry[] = [];
     for (let i = 0; i < tracks.length; i++) {
       const track = tracks[i];
-      const md = results[i].content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('').trim();
+      const md = linkify(results[i].content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('').trim());
       const title = (md.match(/^#\s*(.+)$/m)?.[1] || `${track} brief`).trim();
       const summary = (md.match(/^\*(.+)\*$/m)?.[1] || md.replace(/^#.*$/m, '').trim().split('\n').find(l => l.trim()) || '').trim().slice(0, 200);
       const id = `${batch}_${track}`;
