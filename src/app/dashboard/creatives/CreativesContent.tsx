@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Timeframe } from '@/src/lib/mockData';
 import { cachedJson } from '@/src/lib/clientCache';
@@ -43,6 +43,66 @@ export default function CreativesContent() {
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>('all');
   const [selected, setSelected] = useState<CreativePerformance | null>(null);
   const [sharing, setSharing] = useState(false);
+
+  // ── Creative briefs (AI) + format overview ──
+  interface FormatInsight { finding: string; evidence: string; action: string }
+  interface VideoBrief { title: string; basedOn: string; objective: string; instructions: string[]; successMetric: string }
+  interface StaticBrief { title: string; product: string; layout: string; headline: string; supportingCopy: string; cta: string; assets: string; rationale: string }
+  interface OrlyConcept { title: string; trend: string; hookScript: string; shotList: string[]; rationale: string; successMetric: string }
+  interface BriefsPayload {
+    briefs?: { formatInsights?: FormatInsight[]; videoEditorBriefs?: VideoBrief[]; staticBriefs?: StaticBrief[]; orlyConcepts?: OrlyConcept[] } | null;
+    generatedAt?: string;
+  }
+  const [briefsData, setBriefsData] = useState<BriefsPayload | null>(null);
+  const [briefsGenerating, setBriefsGenerating] = useState(false);
+  const [briefsError, setBriefsError] = useState<string | null>(null);
+  useEffect(() => {
+    fetch('/api/creatives/briefs', { cache: 'no-store' }).then(r => r.json()).then(setBriefsData).catch(() => {});
+  }, []);
+  async function generateBriefs() {
+    setBriefsGenerating(true);
+    setBriefsError(null);
+    try {
+      const res = await fetch('/api/creatives/briefs', { method: 'POST' });
+      const d = await res.json();
+      if (!res.ok || d.error) throw new Error(d.error || 'Generation failed');
+      setBriefsData(d);
+    } catch (e) {
+      setBriefsError(e instanceof Error ? e.message : 'Generation failed');
+    } finally {
+      setBriefsGenerating(false);
+    }
+  }
+
+  // Deterministic format rollup from the loaded creatives (name conventions).
+  const formatStats = useMemo(() => {
+    const buckets = new Map<string, { spend: number; revenue: number; clicks: number; impressions: number; count: number }>();
+    const formatOf = (name: string): string => {
+      const n = name.toLowerCase();
+      const isStatic = /^static|static_|_img_|image/.test(n);
+      if (isStatic) return 'Static image';
+      if (/ugc|montage/.test(n)) return 'Video · UGC/montage';
+      if (/founder|orly|voice/.test(n)) return 'Video · founder voice';
+      if (/talking\s*head/.test(n)) return 'Video · talking head';
+      if (/demo/.test(n)) return 'Video · product demo';
+      if (/showcase/.test(n)) return 'Video · product showcase';
+      return 'Video · other';
+    };
+    for (const c of creatives) {
+      const k = formatOf(c.name);
+      const b = buckets.get(k) || { spend: 0, revenue: 0, clicks: 0, impressions: 0, count: 0 };
+      b.spend += c.spend; b.revenue += c.revenue; b.clicks += c.clicks; b.impressions += c.impressions; b.count += 1;
+      buckets.set(k, b);
+    }
+    return Array.from(buckets.entries())
+      .map(([format, b]) => ({
+        format, count: b.count, spend: b.spend,
+        roas: b.spend > 0 ? Math.round((b.revenue / b.spend) * 100) / 100 : 0,
+        ctr: b.impressions > 0 ? Math.round((b.clicks / b.impressions) * 10000) / 100 : 0,
+      }))
+      .filter(f => f.spend > 0)
+      .sort((a, b) => b.spend - a.spend);
+  }, [creatives]);
 
   // iOS/Android: fetch the video and hand it to the native share sheet, where
   // "Save Video" drops it straight into the photo album — no Downloads detour.
@@ -127,6 +187,123 @@ export default function CreativesContent() {
             </p>
           </Card>
         </div>
+      )}
+
+      {/* ── Format overview — what's working, from the live numbers ── */}
+      {status === 'live' && formatStats.length > 0 && (
+        <Card accentColor="#fde68a" className="mb-5">
+          <h2 className="text-sm font-bold text-gray-700 mb-1">🧠 What&apos;s Working — by Format</h2>
+          <p className="text-xs text-gray-400 mb-3">Rolled up from every ad&apos;s naming + numbers for this period</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[520px]">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2">Format</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Ads</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Spend</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">ROAS</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-3">CTR</th>
+                </tr>
+              </thead>
+              <tbody>
+                {formatStats.map(fs => (
+                  <tr key={fs.format} className="border-b border-gray-50">
+                    <td className="py-2 font-medium text-gray-700">{fs.format}</td>
+                    <td className="py-2 px-3 text-right text-gray-600">{fs.count}</td>
+                    <td className="py-2 px-3 text-right text-gray-600">{formatCurrency(fs.spend)}</td>
+                    <td className="py-2 px-3 text-right font-bold" style={{ color: fs.roas >= 3.5 ? '#22c55e' : fs.roas >= 2 ? '#f59e0b' : '#ef4444' }}>{formatROAS(fs.roas)}</td>
+                    <td className="py-2 pl-3 text-right text-gray-600">{fs.ctr}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {(briefsData?.briefs?.formatInsights?.length ?? 0) > 0 && (
+            <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+              {briefsData!.briefs!.formatInsights!.map((fi, i) => (
+                <div key={i} className="text-xs">
+                  <p className="font-semibold text-gray-700">💡 {fi.finding}</p>
+                  <p className="text-gray-500">{fi.evidence}</p>
+                  <p className="text-violet-600">→ {fi.action}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* ── Creative briefs for the team ── */}
+      {status === 'live' && (
+        <Card accentColor="#f9a8d4" className="mb-5">
+          <div className="flex flex-wrap items-center gap-3 mb-1">
+            <h2 className="text-sm font-bold text-gray-700">🎬 Creative Briefs — Ready to Produce</h2>
+            <button
+              onClick={generateBriefs}
+              disabled={briefsGenerating}
+              className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-full bg-pink-500 hover:bg-pink-600 disabled:opacity-60 text-white"
+            >
+              {briefsGenerating ? '✨ Cleo is writing… (~1 min)' : briefsData?.briefs ? '↻ Regenerate briefs' : '✨ Generate briefs'}
+            </button>
+          </div>
+          <p className="text-xs text-gray-400 mb-3">
+            Three tracks from the last 30 days of ad data: re-edits for the video editor (existing footage only), static specs (existing photos only), and new on-camera concepts for Orly.
+            {briefsData?.generatedAt && <> Last generated {briefsData.generatedAt.slice(0, 10)}.</>}
+          </p>
+          {briefsError && <p className="text-xs text-red-500 mb-2">{briefsError}</p>}
+
+          {briefsData?.briefs ? (
+            <div className="space-y-4">
+              {(briefsData.briefs.videoEditorBriefs?.length ?? 0) > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold text-violet-600 uppercase tracking-wide mb-2">✂️ Video Editor — re-edits of existing footage</h3>
+                  <div className="space-y-2">
+                    {briefsData.briefs.videoEditorBriefs!.map((b, i) => (
+                      <div key={i} className="border border-violet-100 bg-violet-50/40 rounded-xl px-4 py-3 text-xs">
+                        <p className="text-sm font-semibold text-gray-800">{b.title}</p>
+                        <p className="text-gray-500 mb-1">Starts from: <span className="font-mono">{b.basedOn}</span> · {b.objective}</p>
+                        <ol className="list-decimal ml-4 text-gray-600 space-y-0.5">{(b.instructions || []).map((st, j) => <li key={j}>{st}</li>)}</ol>
+                        <p className="text-gray-400 mt-1">Success: {b.successMetric}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(briefsData.briefs.staticBriefs?.length ?? 0) > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold text-emerald-600 uppercase tracking-wide mb-2">🖼 Static Ads — existing photography only</h3>
+                  <div className="space-y-2">
+                    {briefsData.briefs.staticBriefs!.map((b, i) => (
+                      <div key={i} className="border border-emerald-100 bg-emerald-50/40 rounded-xl px-4 py-3 text-xs space-y-1">
+                        <p className="text-sm font-semibold text-gray-800">{b.title} <span className="text-gray-400 font-normal">· {b.product}</span></p>
+                        <p className="text-gray-600"><b>Layout:</b> {b.layout}</p>
+                        <p className="text-gray-600"><b>Headline:</b> {b.headline}{b.supportingCopy ? ` · ${b.supportingCopy}` : ''}</p>
+                        <p className="text-gray-600"><b>CTA:</b> {b.cta} · <b>Assets:</b> {b.assets}</p>
+                        <p className="text-gray-400">{b.rationale}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(briefsData.briefs.orlyConcepts?.length ?? 0) > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold text-pink-600 uppercase tracking-wide mb-2">🎥 Orly On-Camera — new concepts to shoot</h3>
+                  <div className="space-y-2">
+                    {briefsData.briefs.orlyConcepts!.map((b, i) => (
+                      <div key={i} className="border border-pink-100 bg-pink-50/40 rounded-xl px-4 py-3 text-xs space-y-1">
+                        <p className="text-sm font-semibold text-gray-800">{b.title} <span className="text-gray-400 font-normal">· trend: {b.trend}</span></p>
+                        <p className="text-gray-700 italic">&ldquo;{b.hookScript}&rdquo;</p>
+                        <ul className="list-disc ml-4 text-gray-600 space-y-0.5">{(b.shotList || []).map((st, j) => <li key={j}>{st}</li>)}</ul>
+                        <p className="text-gray-400">{b.rationale} · Success: {b.successMetric}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            !briefsGenerating && <p className="text-sm text-gray-400 text-center py-4">No briefs yet — tap ✨ Generate briefs.</p>
+          )}
+        </Card>
       )}
 
       {/* Filters */}
