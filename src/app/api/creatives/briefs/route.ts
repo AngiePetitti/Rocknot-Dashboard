@@ -39,7 +39,16 @@ const TRACK_SPECS: Record<'video' | 'static' | 'orly', string> = {
 4. **Every word on the ad, verbatim** — headline, subline, badge text, CTA button text. No placeholders.
 5. **Typography & color direction** — per the BRAND GUIDELINES section; if guidelines are missing, instruct the designer to pull type and color exactly from rocknot.com product pages, and say so explicitly.
 6. **Do NOT** — specific mistakes to avoid.
-7. **Success criteria.**`,
+7. **Success criteria.**
+
+After the markdown sections, append a machine-readable layout mockup as a fenced code block with the language tag \u0060\u0060\u0060layout containing STRICT JSON in exactly this shape (percent heights should sum to ~100; use the REAL text and brand hex colors from the guidelines):
+{"canvas":"1080x1350","background":"#HEX","zones":[
+ {"h":14,"type":"badge","text":"...", "align":"center"},
+ {"h":16,"type":"headline","text":"...","align":"center","color":"#HEX"},
+ {"h":48,"type":"product","note":"which existing photo goes here and how it is cropped"},
+ {"h":12,"type":"subline","text":"..."},
+ {"h":10,"type":"cta","text":"..."}]}
+Zone types allowed: headline, subline, badge, product, cta, spacer.`,
   orly: `TRACK: ORLY ON-CAMERA (founder shoot). Orly is charismatic and converts on camera — the data shows founder-voice content performs. This brief is a shoot plan she can execute in one session:
 1. **The concept & the trend** — name the specific trending format (describe it precisely: structure, why it's trending, an example of the format in the wild) and why it fits the data.
 2. **Full script** — every spoken line written out, 30-45 seconds, in Orly's casual founder voice, with [action] cues between lines. Write 3 alternative first-lines (hooks) verbatim.
@@ -66,6 +75,7 @@ export async function POST(req: NextRequest) {
   const creatives = (cdata?.creatives ?? []) as Array<{
     id: string; name: string; platform: string; campaign: string; spend: number; revenue: number;
     roas: number; ctr: number; conversions: number; adUrl?: string | null; videoUrl?: string | null;
+    thumbnailUrl?: string | null;
   }>;
   if (!creatives.length) {
     return NextResponse.json({ error: 'No creative performance data available to base briefs on' }, { status: 502 });
@@ -124,10 +134,19 @@ Write ONE deep, self-contained brief in Markdown. It will be handed to a freelan
       return out;
     };
 
+    // Visual reference gallery: thumbnails of every ad the brief cites.
+    const addReferences = (mdIn: string): string => {
+      const cited = linkable.filter(c => c.thumbnailUrl && mdIn.includes(`/dashboard/creatives?tf=30d&ad=${encodeURIComponent(c.id)}`)).slice(0, 4);
+      if (!cited.length) return mdIn;
+      return mdIn + '\n\n## Reference Creatives\n' + cited.map(c =>
+        `![${c.name}](${c.thumbnailUrl})\n*[${c.name}](/dashboard/creatives?tf=30d&ad=${encodeURIComponent(c.id)}) — ${c.roas}x ROAS · ${c.ctr}% CTR*`
+      ).join('\n\n');
+    };
+
     const index: BriefIndexEntry[] = [];
     for (let i = 0; i < tracks.length; i++) {
       const track = tracks[i];
-      const md = linkify(results[i].content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('').trim());
+      const md = addReferences(linkify(results[i].content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('').trim()));
       const title = (md.match(/^#\s*(.+)$/m)?.[1] || `${track} brief`).trim();
       const summary = (md.match(/^\*(.+)\*$/m)?.[1] || md.replace(/^#.*$/m, '').trim().split('\n').find(l => l.trim()) || '').trim().slice(0, 200);
       const id = `${batch}_${track}`;

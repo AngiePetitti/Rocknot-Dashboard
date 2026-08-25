@@ -12,11 +12,45 @@ function esc(s: string): string {
 }
 function inline(s: string): string {
   return esc(s)
+    .replace(/!\[([^\]]*)\]\(((?:https?:|\/)[^)\s]+)\)/g, '<img src="$2" alt="$1" loading="lazy" />')
     .replace(/\[([^\]]+)\]\(((?:https?:|\/)[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
     .replace(/`([^`]+)`/g, '<code>$1</code>');
 }
+
+interface LayoutZone { h?: number; type?: string; text?: string; note?: string; align?: string; color?: string }
+function layoutMockup(json: string): string {
+  try {
+    const spec = JSON.parse(json) as { canvas?: string; background?: string; zones?: LayoutZone[] };
+    const zones = spec.zones || [];
+    const bg = spec.background || '#ffffff';
+    const zoneHtml = zones.map(z => {
+      const h = Math.max(4, Math.min(100, Number(z.h) || 10));
+      const align = z.align === 'left' ? 'flex-start' : z.align === 'right' ? 'flex-end' : 'center';
+      const color = z.color || '#111';
+      const t = esc(z.text || '');
+      switch (z.type) {
+        case 'headline':
+          return `<div class="mz" style="height:${h}%;justify-content:${align}"><span style="font-size:clamp(14px,4.2cqw,26px);font-weight:700;color:${color};text-align:center;line-height:1.15">${t}</span></div>`;
+        case 'subline':
+          return `<div class="mz" style="height:${h}%;justify-content:${align}"><span style="font-size:clamp(10px,2.6cqw,15px);color:${color};opacity:.85;text-align:center">${t}</span></div>`;
+        case 'badge':
+          return `<div class="mz" style="height:${h}%;justify-content:${align}"><span class="mbadge" style="color:${color}">${t}</span></div>`;
+        case 'cta':
+          return `<div class="mz" style="height:${h}%;justify-content:center"><span class="mcta">${t}</span></div>`;
+        case 'product':
+          return `<div class="mz mproduct" style="height:${h}%"><span>📷 ${esc(z.note || 'product photo')}</span></div>`;
+        default:
+          return `<div class="mz" style="height:${h}%"></div>`;
+      }
+    }).join('');
+    return `<div class="mockup-wrap"><div class="mockup" style="background:${esc(bg)}">${zoneHtml}</div><p class="mockup-caption">Layout mockup · canvas ${esc(spec.canvas || '1080\u00d71350')} (not final art — proportions and copy placement)</p></div>`;
+  } catch {
+    return `<pre>${esc(json)}</pre>`;
+  }
+}
+
 function mdToHtml(md: string): string {
   const lines = md.split('\n');
   const out: string[] = [];
@@ -30,6 +64,17 @@ function mdToHtml(md: string): string {
     const line = lines[i];
     const t = line.trim();
     if (!t) { flushPara(); closeLists(); continue; }
+    const fence = t.match(/^\u0060\u0060\u0060(\w*)$/);
+    if (fence) {
+      flushPara(); closeLists();
+      const lang = fence[1];
+      const buf: string[] = [];
+      i++;
+      while (i < lines.length && !/^\u0060\u0060\u0060\s*$/.test(lines[i].trim())) { buf.push(lines[i]); i++; }
+      const body = buf.join('\n');
+      out.push(lang === 'layout' ? layoutMockup(body) : `<pre>${esc(body)}</pre>`);
+      continue;
+    }
     if (/^\|.+\|$/.test(t)) {
       flushPara(); closeLists();
       const rows: string[][] = [];
@@ -82,6 +127,15 @@ export default async function BriefPage({ params }: { params: { id: string } }) 
         .brief-doc em { color: #444; }
         .brief-doc ul, .brief-doc ol { margin: 0 0 14px; padding-left: 24px; }
         .brief-doc li { margin-bottom: 5px; }
+        .brief-doc img { max-width: 260px; max-height: 320px; border-radius: 10px; border: 1px solid #e5e5e5; display: block; margin: 6px 0; }
+        .brief-doc pre { background: #f6f6f6; border: 1px solid #e5e5e5; border-radius: 8px; padding: 12px; font-size: 12px; overflow-x: auto; }
+        .mockup-wrap { margin: 18px 0; }
+        .mockup { width: 300px; aspect-ratio: 4/5; border: 2px solid #111; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; container-type: inline-size; box-shadow: 4px 4px 0 #11111114; }
+        .mz { display: flex; align-items: center; justify-content: center; padding: 4px 12px; }
+        .mproduct { border: 2px dashed #bbb; margin: 4px 10px; border-radius: 8px; background: repeating-linear-gradient(45deg,#fafafa,#fafafa 8px,#f1f1f1 8px,#f1f1f1 16px); font-size: 10px; color: #777; text-align: center; font-family: -apple-system, sans-serif; }
+        .mbadge { font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; border: 1.5px solid currentColor; border-radius: 999px; padding: 3px 10px; font-family: -apple-system, sans-serif; }
+        .mcta { font-size: 12px; font-weight: 700; background: #111; color: #fff; border-radius: 999px; padding: 8px 22px; font-family: -apple-system, sans-serif; }
+        .mockup-caption { font-family: -apple-system, sans-serif; font-size: 10px; color: #999; margin-top: 6px; }
         .brief-doc a { color: #0a58ca; text-decoration: underline; word-break: break-all; }
         .brief-doc code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; background: #f4f4f4; padding: 1px 5px; border-radius: 4px; }
         .brief-doc table { border-collapse: collapse; width: 100%; margin: 0 0 16px; font-size: 14px; }
