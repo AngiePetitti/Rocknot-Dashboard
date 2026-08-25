@@ -104,16 +104,32 @@ ${upcoming || 'None scheduled.'}
 
 Write ONE deep, self-contained brief in Markdown. It will be handed to a freelancer who has never spoken to us — they must be able to produce the deliverable with ZERO follow-up questions. Use ## section headings, short paragraphs, bullet lists and tables where helpful. 600-1000 words. Ground every choice in the performance data by naming the actual ads (exact names, plain text — never invent URLs or links; names get auto-linked). Start with a # title line, then a one-sentence summary line in italics, then the sections.`;
 
+  const body = await req.json().catch(() => ({}));
+  const count = Math.min(3, Math.max(1, Number(body?.count) || 1));
+
   try {
     const batch = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     const tracks: Array<'video' | 'static' | 'orly'> = ['video', 'static', 'orly'];
-    const results = await Promise.all(tracks.map(track =>
-      client.messages.stream({
-        model: 'claude-opus-4-8',
-        max_tokens: 8000,
-        messages: [{ role: 'user', content: `${shared}\n\n${TRACK_SPECS[track]}` }],
-      }).finalMessage()
-    ));
+    // Parallel across tracks; sequential within a track so each extra brief
+    // sees its predecessors and must pursue a different concept.
+    const results = await Promise.all(tracks.map(async track => {
+      const mds: string[] = [];
+      const prevTitles: string[] = [];
+      for (let n = 0; n < count; n++) {
+        const differ = prevTitles.length
+          ? `\n\nALREADY WRITTEN FOR THIS TRACK (your brief must test a genuinely DIFFERENT concept, source ad, or variable — no overlap):\n${prevTitles.map(t => `- ${t}`).join('\n')}`
+          : '';
+        const msg = await client.messages.stream({
+          model: 'claude-opus-4-8',
+          max_tokens: 8000,
+          messages: [{ role: 'user', content: `${shared}\n\n${TRACK_SPECS[track]}${differ}` }],
+        }).finalMessage();
+        const md = msg.content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('').trim();
+        mds.push(md);
+        prevTitles.push((md.match(/^#\s*(.+)$/m)?.[1] || `${track} brief ${n + 1}`).trim());
+      }
+      return mds;
+    }));
 
     // Linkify referenced ad names to the DASHBOARD's creative view (the
     // Analyze modal auto-opens via ?ad=<id> — playback, download, stats all
@@ -146,12 +162,14 @@ Write ONE deep, self-contained brief in Markdown. It will be handed to a freelan
     const index: BriefIndexEntry[] = [];
     for (let i = 0; i < tracks.length; i++) {
       const track = tracks[i];
-      const md = addReferences(linkify(results[i].content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('').trim()));
-      const title = (md.match(/^#\s*(.+)$/m)?.[1] || `${track} brief`).trim();
-      const summary = (md.match(/^\*(.+)\*$/m)?.[1] || md.replace(/^#.*$/m, '').trim().split('\n').find(l => l.trim()) || '').trim().slice(0, 200);
-      const id = `${batch}_${track}`;
-      await saveDoc(`brief_${id}`, md);
-      index.push({ id, track, title, summary });
+      for (let n = 0; n < results[i].length; n++) {
+        const md = addReferences(linkify(results[i][n]));
+        const title = (md.match(/^#\s*(.+)$/m)?.[1] || `${track} brief ${n + 1}`).trim();
+        const summary = (md.match(/^\*(.+)\*$/m)?.[1] || md.replace(/^#.*$/m, '').trim().split('\n').find(l => l.trim()) || '').trim().slice(0, 200);
+        const id = `${batch}_${track}${n ? `_${n + 1}` : ''}`;
+        await saveDoc(`brief_${id}`, md);
+        index.push({ id, track, title, summary });
+      }
     }
 
     const payload = { briefs: index, generatedAt: new Date().toISOString() };

@@ -59,6 +59,7 @@ export default function CreativesContent() {
   const [briefsGenerating, setBriefsGenerating] = useState(false);
   const [briefsError, setBriefsError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
+  const [briefCount, setBriefCount] = useState(1);
   useEffect(() => {
     fetch('/api/creatives/briefs', { cache: 'no-store' }).then(r => r.json()).then(setBriefsData).catch(() => {});
   }, []);
@@ -66,7 +67,7 @@ export default function CreativesContent() {
     setBriefsGenerating(true);
     setBriefsError(null);
     try {
-      const res = await fetch('/api/creatives/briefs', { method: 'POST' });
+      const res = await fetch('/api/creatives/briefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: briefCount }) });
       const d = await res.json();
       if (!res.ok || d.error) throw new Error(d.error || 'Generation failed');
       setBriefsData(d);
@@ -280,13 +281,26 @@ export default function CreativesContent() {
         <Card accentColor="#374151" className="mb-5">
           <div className="flex flex-wrap items-center gap-3 mb-1">
             <h2 className="text-sm font-bold text-gray-700">🎬 Creative Briefs — Ready to Produce</h2>
-            <button
-              onClick={generateBriefs}
-              disabled={briefsGenerating}
-              className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-800 hover:bg-black disabled:opacity-60 text-white"
-            >
-              {briefsGenerating ? '✍️ Writing 3 briefs… (~2 min)' : (briefsData?.briefs?.length ?? 0) > 0 ? '↻ Regenerate' : '✍️ Generate briefs'}
-            </button>
+            <div className="ml-auto flex items-center gap-2">
+              <label className="text-[11px] text-gray-400">per track</label>
+              <select
+                value={briefCount}
+                onChange={e => setBriefCount(Number(e.target.value))}
+                disabled={briefsGenerating}
+                className="text-xs font-semibold border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700"
+              >
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+                <option value={3}>3</option>
+              </select>
+              <button
+                onClick={generateBriefs}
+                disabled={briefsGenerating}
+                className="text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-800 hover:bg-black disabled:opacity-60 text-white"
+              >
+                {briefsGenerating ? `✍️ Writing ${briefCount * 3} briefs… (~${briefCount * 2} min)` : (briefsData?.briefs?.length ?? 0) > 0 ? '↻ Regenerate' : '✍️ Generate briefs'}
+              </button>
+            </div>
           </div>
           <p className="text-xs text-gray-400 mb-3">
             One deep brief per track, built from the last 30 days of ad data and your brand guidelines. Each opens as a standalone page you can send straight to a freelancer — no login needed.
