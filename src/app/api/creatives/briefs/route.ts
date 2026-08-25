@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
-import { getKV, setKV } from '@/src/lib/chatStore';
+import { saveDoc, loadDoc } from '@/src/lib/docStore';
 import { getEvents } from '@/src/lib/calendarStore';
 
 export const dynamic = 'force-dynamic';
@@ -10,29 +10,45 @@ export const maxDuration = 300;
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const CHUNK = 40000;
-async function saveLarge(name: string, value: string): Promise<void> {
-  const parts = Math.ceil(value.length / CHUNK) || 1;
-  await setKV(`${name}_parts`, String(parts));
-  for (let i = 0; i < parts; i++) await setKV(`${name}_${i}`, value.slice(i * CHUNK, (i + 1) * CHUNK));
-}
-async function loadLarge(name: string): Promise<string | null> {
-  const parts = Number(await getKV(`${name}_parts`)) || 0;
-  if (!parts) return null;
-  let out = '';
-  for (let i = 0; i < parts; i++) out += (await getKV(`${name}_${i}`)) || '';
-  return out || null;
-}
+export interface BriefIndexEntry { id: string; track: 'video' | 'static' | 'orly'; title: string; summary: string }
 
 export async function GET() {
   try {
-    const raw = await loadLarge('creative_briefs');
+    const raw = await loadDoc('creative_briefs_index');
     if (!raw) return NextResponse.json({ briefs: null });
     return NextResponse.json(JSON.parse(raw));
   } catch {
     return NextResponse.json({ briefs: null });
   }
 }
+
+const TRACK_SPECS: Record<'video' | 'static' | 'orly', string> = {
+  video: `TRACK: VIDEO EDITOR RE-EDIT. The editor can ONLY use footage that already exists in past ads — no new shooting, no product access. The brief must include, as sections:
+1. **The winning ad this starts from** — exact ad name from the data, its numbers, and specifically WHY we believe it works (hook? product? pacing?).
+2. **The hypothesis** — the one variable this edit tests, and the data gap that justifies it.
+3. **Edit script** — a timecoded plan (0:00–0:02 hook, 0:02–0:07 …) describing exactly what appears in each segment, which source footage to pull it from, and every text overlay VERBATIM (write the actual overlay text).
+4. **Variants to deliver** — exact list (e.g. 15s and 30s cuts; 9:16 and 1:1; 3 hook variants with each hook's overlay text written out).
+5. **Audio direction** — trending vs original audio, caption style, where the beat should hit.
+6. **Do NOT** — 3-5 specific things that would break what works.
+7. **Naming & delivery** — filenames following the existing convention, where to upload.
+8. **Success criteria** — the metric vs the source ad's benchmark, and how long to let it run.`,
+  static: `TRACK: STATIC AD. Uses EXISTING product/UGC photography only — absolutely no AI-generated imagery. The designer may not know the brand, so be exhaustive:
+1. **Objective & background** — what the data says (which products/formats are converting) and what this static must accomplish.
+2. **Canvas & versions** — exact sizes to deliver (1080×1080, 1080×1350, 1080×1920) and any platform placements.
+3. **Layout, described spatially** — walk through the composition zone by zone (top third / center / bottom), where the product photo sits, scale, cropping, negative space. Reference which existing photos to use by describing them (e.g. "the flat-lay of the Gali Chain Top on white from the product page").
+4. **Every word on the ad, verbatim** — headline, subline, badge text, CTA button text. No placeholders.
+5. **Typography & color direction** — per the BRAND GUIDELINES section; if guidelines are missing, instruct the designer to pull type and color exactly from rocknot.com product pages, and say so explicitly.
+6. **Do NOT** — specific mistakes to avoid.
+7. **Success criteria.**`,
+  orly: `TRACK: ORLY ON-CAMERA (founder shoot). Orly is charismatic and converts on camera — the data shows founder-voice content performs. This brief is a shoot plan she can execute in one session:
+1. **The concept & the trend** — name the specific trending format (describe it precisely: structure, why it's trending, an example of the format in the wild) and why it fits the data.
+2. **Full script** — every spoken line written out, 30-45 seconds, in Orly's casual founder voice, with [action] cues between lines. Write 3 alternative first-lines (hooks) verbatim.
+3. **Shot list** — 5-8 shots: framing (close/medium/wide), location suggestion, what happens in frame, which products appear, approx duration each.
+4. **Wardrobe & props** — specific products to wear/feature (tie to what's selling or launching).
+5. **Capture notes** — vertical 9:16, natural light vs ring light, phone is fine, leave 3s of padding, etc.
+6. **B-roll to grab while set up** — 4-6 quick clips for the editor's future use.
+7. **Success criteria** — what winning looks like vs the current best founder ad.`,
+};
 
 export async function POST(req: NextRequest) {
   if (authConfigured()) {
@@ -43,14 +59,13 @@ export async function POST(req: NextRequest) {
   }
   if (!process.env.ANTHROPIC_API_KEY) return NextResponse.json({ error: 'Anthropic not configured' }, { status: 500 });
 
-  // Per-ad performance from our own creatives API (forward the session).
   const origin = req.nextUrl.origin;
   const cookie = req.headers.get('cookie') || '';
   const cres = await fetch(`${origin}/api/windsor/creatives?tf=30d`, { headers: { cookie }, cache: 'no-store' });
   const cdata = await cres.json().catch(() => null);
   const creatives = (cdata?.creatives ?? []) as Array<{
     name: string; platform: string; campaign: string; spend: number; revenue: number;
-    roas: number; ctr: number; conversions: number; costPerConversion: number;
+    roas: number; ctr: number; conversions: number;
   }>;
   if (!creatives.length) {
     return NextResponse.json({ error: 'No creative performance data available to base briefs on' }, { status: 502 });
@@ -58,45 +73,51 @@ export async function POST(req: NextRequest) {
 
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const events = await getEvents().catch(() => []);
-  const upcoming = events.filter(e => e.date >= today).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 15)
+  const upcoming = events.filter(e => e.date >= today).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 12)
     .map(e => `${e.date}: ${e.title} (${e.type})`).join('\n');
+  const guidelines = (await loadDoc('brand_guidelines').catch(() => null)) || '';
 
   const adLines = creatives.slice(0, 40).map(c =>
     `${c.name} [${c.platform}] — $${Math.round(c.spend)} spend · ${c.roas}x ROAS · ${c.ctr}% CTR · ${c.conversions} conv`
   ).join('\n');
 
-  const prompt = `You are Cleo, Rocknot's creative strategist. Rocknot is a DTC jewelry/handbag brand (pastel, feminine, founder Orly is charismatic on camera; products: rhinestone straps, chain tops, bags, jewelry). Ad naming convention encodes the creative: Video_/Static_, product, format (Demo, Talking Head, Montage UGC, Founder Video, Product Showcase, Quote/Review), and landing page.
+  const shared = `You are Rocknot's senior creative strategist writing a production brief. Rocknot is a DTC rhinestone jewelry/handbag brand; founder Orly fronts the content; AOV ~$170. Ad names encode the creative (Video_/Static_, product, Demo/Talking Head/Montage UGC/Founder, landing page).
 
-LAST 30 DAYS OF AD-LEVEL PERFORMANCE (name · spend · ROAS · CTR · conversions):
+BRAND GUIDELINES (follow these for ALL visual/voice direction — do NOT invent brand colors or assume any palette. If this section is empty, explicitly instruct the designer to pull visual identity from rocknot.com and say the guidelines doc is pending):
+${guidelines || '(none uploaded yet)'}
+
+LAST 30 DAYS OF AD PERFORMANCE:
 ${adLines}
 
-UPCOMING LAUNCHES (briefs should support these):
+UPCOMING LAUNCHES:
 ${upcoming || 'None scheduled.'}
 
-TASK 1 — Format analysis: from the ad names + numbers, identify which creative FORMATS are winning and losing (video vs static, demo vs talking head vs UGC montage vs founder voice, product categories) and WHY, concretely referencing the data.
-
-TASK 2 — Three sets of production-ready briefs (3-4 briefs each):
-A) VIDEO EDITOR briefs — re-edits of EXISTING footage only (no new shooting): new hooks in the first 2s, length variants, b-roll re-ordering, audio/caption changes, reformatting winners for other platforms. Name which existing ad each edit starts from.
-B) STATIC briefs — simple, unambiguous image-ad specs using EXISTING product/UGC photography only (no AI-generated imagery): exact layout, headline text, product, background, CTA. Written so a designer (or a careful AI layout tool) can execute without questions.
-C) ORLY ON-CAMERA concepts — new shoots leveraging the founder: currently-trending formats (specify the trend), untested angles, each with a shot list of 3-6 shots, hook script (first line spoken), and what winning ad or gap in the data justifies it.
-
-Return ONLY valid JSON, no markdown fences:
-{"formatInsights": [{"finding": "...", "evidence": "...", "action": "..."}],
- "videoEditorBriefs": [{"title": "...", "basedOn": "existing ad name", "objective": "...", "instructions": ["step", ...], "successMetric": "..."}],
- "staticBriefs": [{"title": "...", "product": "...", "layout": "...", "headline": "...", "supportingCopy": "...", "cta": "...", "assets": "...", "rationale": "..."}],
- "orlyConcepts": [{"title": "...", "trend": "...", "hookScript": "...", "shotList": ["shot", ...], "rationale": "...", "successMetric": "..."}]}`;
+Write ONE deep, self-contained brief in Markdown. It will be handed to a freelancer who has never spoken to us — they must be able to produce the deliverable with ZERO follow-up questions. Use ## section headings, short paragraphs, bullet lists and tables where helpful. 600-1000 words. Ground every choice in the performance data by naming the actual ads. Start with a # title line, then a one-sentence summary line in italics, then the sections.`;
 
   try {
-    const msg = await client.messages.stream({
-      model: 'claude-opus-4-8',
-      max_tokens: 20000,
-      messages: [{ role: 'user', content: prompt }],
-    }).finalMessage();
-    const text = msg.content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('');
-    const jsonStr = text.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim();
-    const parsed = JSON.parse(jsonStr.slice(jsonStr.indexOf('{')));
-    const payload = { briefs: parsed, generatedAt: new Date().toISOString() };
-    await saveLarge('creative_briefs', JSON.stringify(payload));
+    const batch = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const tracks: Array<'video' | 'static' | 'orly'> = ['video', 'static', 'orly'];
+    const results = await Promise.all(tracks.map(track =>
+      client.messages.stream({
+        model: 'claude-opus-4-8',
+        max_tokens: 8000,
+        messages: [{ role: 'user', content: `${shared}\n\n${TRACK_SPECS[track]}` }],
+      }).finalMessage()
+    ));
+
+    const index: BriefIndexEntry[] = [];
+    for (let i = 0; i < tracks.length; i++) {
+      const track = tracks[i];
+      const md = results[i].content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('').trim();
+      const title = (md.match(/^#\s*(.+)$/m)?.[1] || `${track} brief`).trim();
+      const summary = (md.match(/^\*(.+)\*$/m)?.[1] || md.replace(/^#.*$/m, '').trim().split('\n').find(l => l.trim()) || '').trim().slice(0, 200);
+      const id = `${batch}_${track}`;
+      await saveDoc(`brief_${id}`, md);
+      index.push({ id, track, title, summary });
+    }
+
+    const payload = { briefs: index, generatedAt: new Date().toISOString() };
+    await saveDoc('creative_briefs_index', JSON.stringify(payload));
     return NextResponse.json(payload);
   } catch (e) {
     return NextResponse.json({ error: String(e instanceof Error ? e.message : e) }, { status: 500 });

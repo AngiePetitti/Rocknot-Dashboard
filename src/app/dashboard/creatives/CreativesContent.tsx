@@ -45,17 +45,12 @@ export default function CreativesContent() {
   const [sharing, setSharing] = useState(false);
 
   // ── Creative briefs (AI) + format overview ──
-  interface FormatInsight { finding: string; evidence: string; action: string }
-  interface VideoBrief { title: string; basedOn: string; objective: string; instructions: string[]; successMetric: string }
-  interface StaticBrief { title: string; product: string; layout: string; headline: string; supportingCopy: string; cta: string; assets: string; rationale: string }
-  interface OrlyConcept { title: string; trend: string; hookScript: string; shotList: string[]; rationale: string; successMetric: string }
-  interface BriefsPayload {
-    briefs?: { formatInsights?: FormatInsight[]; videoEditorBriefs?: VideoBrief[]; staticBriefs?: StaticBrief[]; orlyConcepts?: OrlyConcept[] } | null;
-    generatedAt?: string;
-  }
+  interface BriefEntry { id: string; track: 'video' | 'static' | 'orly'; title: string; summary: string }
+  interface BriefsPayload { briefs?: BriefEntry[] | null; generatedAt?: string }
   const [briefsData, setBriefsData] = useState<BriefsPayload | null>(null);
   const [briefsGenerating, setBriefsGenerating] = useState(false);
   const [briefsError, setBriefsError] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
   useEffect(() => {
     fetch('/api/creatives/briefs', { cache: 'no-store' }).then(r => r.json()).then(setBriefsData).catch(() => {});
   }, []);
@@ -71,6 +66,31 @@ export default function CreativesContent() {
       setBriefsError(e instanceof Error ? e.message : 'Generation failed');
     } finally {
       setBriefsGenerating(false);
+    }
+  }
+  function copyBriefLink(id: string) {
+    navigator.clipboard.writeText(`${window.location.origin}/brief/${id}`).then(() => {
+      setCopiedLink(id);
+      setTimeout(() => setCopiedLink(null), 1500);
+    });
+  }
+
+  // ── Brand guidelines (referenced by every AI generation) ──
+  const [guidelines, setGuidelines] = useState('');
+  const [guidelinesOpen, setGuidelinesOpen] = useState(false);
+  const [guidelinesSaved, setGuidelinesSaved] = useState<null | 'saving' | 'saved' | 'error'>(null);
+  useEffect(() => {
+    fetch('/api/brand', { cache: 'no-store' }).then(r => r.json()).then(d => setGuidelines(String(d?.guidelines || ''))).catch(() => {});
+  }, []);
+  async function saveGuidelines() {
+    setGuidelinesSaved('saving');
+    try {
+      const res = await fetch('/api/brand', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guidelines }) });
+      if (!res.ok) throw new Error();
+      setGuidelinesSaved('saved');
+      setTimeout(() => setGuidelinesSaved(null), 2000);
+    } catch {
+      setGuidelinesSaved('error');
     }
   }
 
@@ -218,91 +238,92 @@ export default function CreativesContent() {
               </tbody>
             </table>
           </div>
-          {(briefsData?.briefs?.formatInsights?.length ?? 0) > 0 && (
-            <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
-              {briefsData!.briefs!.formatInsights!.map((fi, i) => (
-                <div key={i} className="text-xs">
-                  <p className="font-semibold text-gray-700">💡 {fi.finding}</p>
-                  <p className="text-gray-500">{fi.evidence}</p>
-                  <p className="text-violet-600">→ {fi.action}</p>
-                </div>
-              ))}
-            </div>
-          )}
         </Card>
       )}
 
       {/* ── Creative briefs for the team ── */}
       {status === 'live' && (
-        <Card accentColor="#f9a8d4" className="mb-5">
+        <Card accentColor="#374151" className="mb-5">
           <div className="flex flex-wrap items-center gap-3 mb-1">
             <h2 className="text-sm font-bold text-gray-700">🎬 Creative Briefs — Ready to Produce</h2>
             <button
               onClick={generateBriefs}
               disabled={briefsGenerating}
-              className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-full bg-pink-500 hover:bg-pink-600 disabled:opacity-60 text-white"
+              className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-800 hover:bg-black disabled:opacity-60 text-white"
             >
-              {briefsGenerating ? '✨ Cleo is writing… (~1 min)' : briefsData?.briefs ? '↻ Regenerate briefs' : '✨ Generate briefs'}
+              {briefsGenerating ? '✍️ Writing 3 briefs… (~2 min)' : (briefsData?.briefs?.length ?? 0) > 0 ? '↻ Regenerate' : '✍️ Generate briefs'}
             </button>
           </div>
           <p className="text-xs text-gray-400 mb-3">
-            Three tracks from the last 30 days of ad data: re-edits for the video editor (existing footage only), static specs (existing photos only), and new on-camera concepts for Orly.
+            One deep brief per track, built from the last 30 days of ad data and your brand guidelines. Each opens as a standalone page you can send straight to a freelancer — no login needed.
             {briefsData?.generatedAt && <> Last generated {briefsData.generatedAt.slice(0, 10)}.</>}
           </p>
           {briefsError && <p className="text-xs text-red-500 mb-2">{briefsError}</p>}
 
-          {briefsData?.briefs ? (
-            <div className="space-y-4">
-              {(briefsData.briefs.videoEditorBriefs?.length ?? 0) > 0 && (
-                <div>
-                  <h3 className="text-xs font-bold text-violet-600 uppercase tracking-wide mb-2">✂️ Video Editor — re-edits of existing footage</h3>
-                  <div className="space-y-2">
-                    {briefsData.briefs.videoEditorBriefs!.map((b, i) => (
-                      <div key={i} className="border border-violet-100 bg-violet-50/40 rounded-xl px-4 py-3 text-xs">
-                        <p className="text-sm font-semibold text-gray-800">{b.title}</p>
-                        <p className="text-gray-500 mb-1">Starts from: <span className="font-mono">{b.basedOn}</span> · {b.objective}</p>
-                        <ol className="list-decimal ml-4 text-gray-600 space-y-0.5">{(b.instructions || []).map((st, j) => <li key={j}>{st}</li>)}</ol>
-                        <p className="text-gray-400 mt-1">Success: {b.successMetric}</p>
-                      </div>
-                    ))}
+          {(briefsData?.briefs?.length ?? 0) > 0 ? (
+            <div className="flex flex-col gap-2">
+              {briefsData!.briefs!.map(b => {
+                const meta = {
+                  video: { icon: '✂️', label: 'Video editor · re-edit of existing footage' },
+                  static: { icon: '🖼', label: 'Static ad · existing photography' },
+                  orly: { icon: '🎥', label: 'Orly on-camera · new shoot' },
+                }[b.track] || { icon: '📄', label: b.track };
+                return (
+                  <div key={b.id} className="border border-gray-200 rounded-xl px-4 py-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-0.5">{meta.icon} {meta.label}</p>
+                    <p className="text-sm font-semibold text-gray-800 break-words">{b.title}</p>
+                    {b.summary && <p className="text-xs text-gray-500 mt-0.5 break-words">{b.summary}</p>}
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <a
+                        href={`/brief/${b.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-800 text-white hover:bg-black"
+                      >
+                        Open brief ↗
+                      </a>
+                      <button
+                        onClick={() => copyBriefLink(b.id)}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600"
+                      >
+                        {copiedLink === b.id ? '✓ Link copied' : '🔗 Copy share link'}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
-              {(briefsData.briefs.staticBriefs?.length ?? 0) > 0 && (
-                <div>
-                  <h3 className="text-xs font-bold text-emerald-600 uppercase tracking-wide mb-2">🖼 Static Ads — existing photography only</h3>
-                  <div className="space-y-2">
-                    {briefsData.briefs.staticBriefs!.map((b, i) => (
-                      <div key={i} className="border border-emerald-100 bg-emerald-50/40 rounded-xl px-4 py-3 text-xs space-y-1">
-                        <p className="text-sm font-semibold text-gray-800">{b.title} <span className="text-gray-400 font-normal">· {b.product}</span></p>
-                        <p className="text-gray-600"><b>Layout:</b> {b.layout}</p>
-                        <p className="text-gray-600"><b>Headline:</b> {b.headline}{b.supportingCopy ? ` · ${b.supportingCopy}` : ''}</p>
-                        <p className="text-gray-600"><b>CTA:</b> {b.cta} · <b>Assets:</b> {b.assets}</p>
-                        <p className="text-gray-400">{b.rationale}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {(briefsData.briefs.orlyConcepts?.length ?? 0) > 0 && (
-                <div>
-                  <h3 className="text-xs font-bold text-pink-600 uppercase tracking-wide mb-2">🎥 Orly On-Camera — new concepts to shoot</h3>
-                  <div className="space-y-2">
-                    {briefsData.briefs.orlyConcepts!.map((b, i) => (
-                      <div key={i} className="border border-pink-100 bg-pink-50/40 rounded-xl px-4 py-3 text-xs space-y-1">
-                        <p className="text-sm font-semibold text-gray-800">{b.title} <span className="text-gray-400 font-normal">· trend: {b.trend}</span></p>
-                        <p className="text-gray-700 italic">&ldquo;{b.hookScript}&rdquo;</p>
-                        <ul className="list-disc ml-4 text-gray-600 space-y-0.5">{(b.shotList || []).map((st, j) => <li key={j}>{st}</li>)}</ul>
-                        <p className="text-gray-400">{b.rationale} · Success: {b.successMetric}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                );
+              })}
             </div>
           ) : (
-            !briefsGenerating && <p className="text-sm text-gray-400 text-center py-4">No briefs yet — tap ✨ Generate briefs.</p>
+            !briefsGenerating && <p className="text-sm text-gray-400 text-center py-4">No briefs yet — add your brand guidelines below, then generate.</p>
           )}
+
+          {/* Brand guidelines the AI must follow */}
+          <div className="mt-4 pt-3 border-t border-gray-100">
+            <button onClick={() => setGuidelinesOpen(o => !o)} className="text-xs font-semibold text-gray-600 hover:text-gray-800">
+              📘 Brand guidelines {guidelines ? '(uploaded ✓)' : '(none yet — add them so briefs match the real Rocknot brand)'} {guidelinesOpen ? '▾' : '▸'}
+            </button>
+            {guidelinesOpen && (
+              <div className="mt-2">
+                <p className="text-[11px] text-gray-400 mb-1.5">
+                  Paste the brand guide as text: colors (hex codes), fonts, logo rules, voice &amp; tone, photography style, do&apos;s and don&apos;ts. Copy it out of the brand PDF — every AI-generated brief and retention campaign references this verbatim.
+                </p>
+                <textarea
+                  value={guidelines}
+                  onChange={e => setGuidelines(e.target.value)}
+                  rows={10}
+                  placeholder={'e.g.\nColors: Black #111111, Crystal silver #D9D9D9 …\nFonts: …\nVoice: playful, confident, never corporate …\nPhotography: real models + flat-lays, no AI imagery …'}
+                  className="w-full text-xs border border-gray-200 rounded-xl p-3 font-mono focus:outline-none focus:ring-2 focus:ring-gray-300"
+                />
+                <button
+                  onClick={saveGuidelines}
+                  disabled={guidelinesSaved === 'saving'}
+                  className="mt-2 text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-800 text-white hover:bg-black disabled:opacity-60"
+                >
+                  {guidelinesSaved === 'saving' ? 'Saving…' : guidelinesSaved === 'saved' ? '✓ Saved' : guidelinesSaved === 'error' ? 'Save failed — retry' : 'Save guidelines'}
+                </button>
+              </div>
+            )}
+          </div>
         </Card>
       )}
 

@@ -13,6 +13,10 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   // Always-allowed: the auth handshake and the login page itself.
   if (pathname.startsWith('/api/auth') || pathname.startsWith('/login')) return NextResponse.next();
+  // Shareable creative briefs: public by unguessable id so designers can
+  // open them without a dashboard login. They contain no business metrics
+  // beyond what the brief itself states.
+  if (pathname.startsWith('/brief/')) return NextResponse.next();
 
   // Vercel Cron / internal service calls authenticate with the CRON_SECRET
   // bearer token instead of a user session (used by the Monday restock alert).
