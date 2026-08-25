@@ -107,7 +107,15 @@ Write ONE deep, self-contained brief in Markdown. It will be handed to a freelan
 At the very end, append a fenced code block tagged refs containing a strict JSON array of the exact ad names (copied verbatim from the data) that are DIRECT source or visual references for THIS brief — the ads whose footage/photos/format the producer must look at. 1-3 names, or [] if none genuinely apply. Do not pad it. Start with a # title line, then a one-sentence summary line in italics, then the sections.`;
 
   const body = await req.json().catch(() => ({}));
-  const count = Math.min(3, Math.max(1, Number(body?.count) || 1));
+  const clamp = (v: unknown, fallback: number) => Math.min(3, Math.max(0, Number.isFinite(Number(v)) ? Number(v) : fallback));
+  const counts: Record<'video' | 'static' | 'orly', number> = {
+    video: clamp(body?.video, clamp(body?.count, 1) || 1),
+    static: clamp(body?.static, clamp(body?.count, 1) || 1),
+    orly: clamp(body?.orly, clamp(body?.count, 1) || 1),
+  };
+  if (counts.video + counts.static + counts.orly === 0) {
+    return NextResponse.json({ error: 'Pick at least one brief to generate' }, { status: 400 });
+  }
 
   try {
     const batch = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -117,7 +125,7 @@ At the very end, append a fenced code block tagged refs containing a strict JSON
     const results = await Promise.all(tracks.map(async track => {
       const mds: string[] = [];
       const prevTitles: string[] = [];
-      for (let n = 0; n < count; n++) {
+      for (let n = 0; n < counts[track]; n++) {
         const differ = prevTitles.length
           ? `\n\nALREADY WRITTEN FOR THIS TRACK (your brief must test a genuinely DIFFERENT concept, source ad, or variable — no overlap):\n${prevTitles.map(t => `- ${t}`).join('\n')}`
           : '';

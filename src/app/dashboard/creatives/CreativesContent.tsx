@@ -59,7 +59,8 @@ export default function CreativesContent() {
   const [briefsGenerating, setBriefsGenerating] = useState(false);
   const [briefsError, setBriefsError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
-  const [briefCount, setBriefCount] = useState(1);
+  const [briefCounts, setBriefCounts] = useState<{ video: number; static: number; orly: number }>({ video: 1, static: 1, orly: 1 });
+  const totalBriefs = briefCounts.video + briefCounts.static + briefCounts.orly;
   useEffect(() => {
     fetch('/api/creatives/briefs', { cache: 'no-store' }).then(r => r.json()).then(setBriefsData).catch(() => {});
   }, []);
@@ -67,7 +68,7 @@ export default function CreativesContent() {
     setBriefsGenerating(true);
     setBriefsError(null);
     try {
-      const res = await fetch('/api/creatives/briefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: briefCount }) });
+      const res = await fetch('/api/creatives/briefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(briefCounts) });
       const d = await res.json();
       if (!res.ok || d.error) throw new Error(d.error || 'Generation failed');
       setBriefsData(d);
@@ -307,24 +308,29 @@ export default function CreativesContent() {
         <Card accentColor="#374151" className="mb-5">
           <div className="flex flex-wrap items-center gap-3 mb-1">
             <h2 className="text-sm font-bold text-gray-700">🎬 Creative Briefs — Ready to Produce</h2>
-            <div className="ml-auto flex items-center gap-2">
-              <label className="text-[11px] text-gray-400">per track</label>
-              <select
-                value={briefCount}
-                onChange={e => setBriefCount(Number(e.target.value))}
-                disabled={briefsGenerating}
-                className="text-xs font-semibold border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700"
-              >
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-                <option value={3}>3</option>
-              </select>
+            <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+              {([['video', '✂️ Edits'], ['static', '🖼 Statics'], ['orly', '🎥 Orly']] as Array<[keyof typeof briefCounts, string]>).map(([k, label]) => (
+                <label key={k} className="flex items-center gap-1 text-[11px] text-gray-500">
+                  {label}
+                  <select
+                    value={briefCounts[k]}
+                    onChange={e => setBriefCounts(prev => ({ ...prev, [k]: Number(e.target.value) }))}
+                    disabled={briefsGenerating}
+                    className="text-xs font-semibold border border-gray-200 rounded-lg px-1.5 py-1 bg-white text-gray-700"
+                  >
+                    <option value={0}>0</option>
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                  </select>
+                </label>
+              ))}
               <button
                 onClick={generateBriefs}
-                disabled={briefsGenerating}
-                className="text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-800 hover:bg-black disabled:opacity-60 text-white"
+                disabled={briefsGenerating || totalBriefs === 0}
+                className="text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-800 hover:bg-black disabled:opacity-50 text-white"
               >
-                {briefsGenerating ? `✍️ Writing ${briefCount * 3} briefs… (~${briefCount * 2} min)` : (briefsData?.briefs?.length ?? 0) > 0 ? '↻ Regenerate' : '✍️ Generate briefs'}
+                {briefsGenerating ? `✍️ Writing ${totalBriefs} brief${totalBriefs !== 1 ? 's' : ''}…` : (briefsData?.briefs?.length ?? 0) > 0 ? '↻ Regenerate' : '✍️ Generate briefs'}
               </button>
             </div>
           </div>
