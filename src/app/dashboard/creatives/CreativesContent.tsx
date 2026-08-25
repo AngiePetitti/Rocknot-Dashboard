@@ -130,30 +130,32 @@ export default function CreativesContent() {
   }
 
   // Deterministic format rollup from the loaded creatives (name conventions).
+  const [openFormat, setOpenFormat] = useState<string | null>(null);
   const formatStats = useMemo(() => {
-    const buckets = new Map<string, { spend: number; revenue: number; clicks: number; impressions: number; count: number }>();
+    const buckets = new Map<string, { spend: number; revenue: number; clicks: number; impressions: number; ads: CreativePerformance[] }>();
     const formatOf = (name: string): string => {
       const n = name.toLowerCase();
-      const isStatic = /^static|static_|_img_|image/.test(n);
-      if (isStatic) return 'Static image';
-      if (/ugc|montage/.test(n)) return 'Video · UGC/montage';
-      if (/founder|orly|voice/.test(n)) return 'Video · founder voice';
+      if (/^static|static_|_img_|image|\bstatic\b/.test(n)) return 'Static image';
+      if (/ugc|montage|_mu_/.test(n)) return 'Video · UGC/montage';
+      if (/founder|orly/.test(n)) return 'Video · founder';
       if (/talking\s*head/.test(n)) return 'Video · talking head';
       if (/demo/.test(n)) return 'Video · product demo';
       if (/showcase/.test(n)) return 'Video · product showcase';
-      return 'Video · other';
+      if (/voice/.test(n)) return 'Video · voiceover';
+      return 'Video · unlabeled name';
     };
     for (const c of creatives) {
       const k = formatOf(c.name);
-      const b = buckets.get(k) || { spend: 0, revenue: 0, clicks: 0, impressions: 0, count: 0 };
-      b.spend += c.spend; b.revenue += c.revenue; b.clicks += c.clicks; b.impressions += c.impressions; b.count += 1;
+      const b = buckets.get(k) || { spend: 0, revenue: 0, clicks: 0, impressions: 0, ads: [] };
+      b.spend += c.spend; b.revenue += c.revenue; b.clicks += c.clicks; b.impressions += c.impressions; b.ads.push(c);
       buckets.set(k, b);
     }
     return Array.from(buckets.entries())
       .map(([format, b]) => ({
-        format, count: b.count, spend: b.spend,
+        format, count: b.ads.length, spend: b.spend,
         roas: b.spend > 0 ? Math.round((b.revenue / b.spend) * 100) / 100 : 0,
         ctr: b.impressions > 0 ? Math.round((b.clicks / b.impressions) * 10000) / 100 : 0,
+        ads: [...b.ads].sort((a, x) => x.spend - a.spend),
       }))
       .filter(f => f.spend > 0)
       .sort((a, b) => b.spend - a.spend);
@@ -262,13 +264,37 @@ export default function CreativesContent() {
               </thead>
               <tbody>
                 {formatStats.map(fs => (
-                  <tr key={fs.format} className="border-b border-gray-50">
-                    <td className="py-2 font-medium text-gray-700">{fs.format}</td>
-                    <td className="py-2 px-3 text-right text-gray-600">{fs.count}</td>
-                    <td className="py-2 px-3 text-right text-gray-600">{formatCurrency(fs.spend)}</td>
-                    <td className="py-2 px-3 text-right font-bold" style={{ color: fs.roas >= 3.5 ? '#22c55e' : fs.roas >= 2 ? '#f59e0b' : '#ef4444' }}>{formatROAS(fs.roas)}</td>
-                    <td className="py-2 pl-3 text-right text-gray-600">{fs.ctr}%</td>
-                  </tr>
+                  <>
+                    <tr
+                      key={fs.format}
+                      onClick={() => setOpenFormat(o => o === fs.format ? null : fs.format)}
+                      className="border-b border-gray-50 cursor-pointer hover:bg-gray-50"
+                    >
+                      <td className="py-2 font-medium text-gray-700">{openFormat === fs.format ? '▾' : '▸'} {fs.format}</td>
+                      <td className="py-2 px-3 text-right text-gray-600">{fs.count}</td>
+                      <td className="py-2 px-3 text-right text-gray-600">{formatCurrency(fs.spend)}</td>
+                      <td className="py-2 px-3 text-right font-bold" style={{ color: fs.roas >= 3.5 ? '#22c55e' : fs.roas >= 2 ? '#f59e0b' : '#ef4444' }}>{formatROAS(fs.roas)}</td>
+                      <td className="py-2 pl-3 text-right text-gray-600">{fs.ctr}%</td>
+                    </tr>
+                    {openFormat === fs.format && fs.ads.slice(0, 15).map(ad => (
+                      <tr key={ad.id} className="border-b border-gray-50 bg-gray-50/60">
+                        <td className="py-1.5 pl-6 pr-2">
+                          <button onClick={() => setSelected(ad)} className="text-xs text-violet-600 hover:text-violet-800 text-left break-words">
+                            {ad.name} <span className="text-gray-400">[{ad.platform}]</span>
+                          </button>
+                        </td>
+                        <td className="py-1.5 px-3 text-right text-xs text-gray-400" />
+                        <td className="py-1.5 px-3 text-right text-xs text-gray-500">{formatCurrency(ad.spend)}</td>
+                        <td className="py-1.5 px-3 text-right text-xs font-semibold" style={{ color: ad.roas >= 3.5 ? '#22c55e' : ad.roas >= 2 ? '#f59e0b' : '#ef4444' }}>{formatROAS(ad.roas)}</td>
+                        <td className="py-1.5 pl-3 text-right text-xs text-gray-500">{ad.ctr}%</td>
+                      </tr>
+                    ))}
+                    {openFormat === fs.format && fs.ads.length > 15 && (
+                      <tr key={`${fs.format}-more`} className="bg-gray-50/60">
+                        <td colSpan={5} className="py-1.5 pl-6 text-[11px] text-gray-400">…and {fs.ads.length - 15} more (see the grid below, sorted by spend)</td>
+                      </tr>
+                    )}
+                  </>
                 ))}
               </tbody>
             </table>
