@@ -37,6 +37,19 @@ export default function RetentionContent() {
   const [genError, setGenError] = useState<string | null>(null);
   const [openBrief, setOpenBrief] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [hidden, setHidden] = useState<string[]>([]);
+  const [showHidden, setShowHidden] = useState(false);
+  useEffect(() => {
+    fetch('/api/retention/hidden', { cache: 'no-store' }).then(r => r.json()).then(d => { if (Array.isArray(d?.hidden)) setHidden(d.hidden); }).catch(() => {});
+  }, []);
+  async function hideCampaign(id: string) {
+    setHidden(prev => [...prev, id]);
+    await fetch('/api/retention/hidden', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => {});
+  }
+  async function unhideCampaign(id: string) {
+    setHidden(prev => prev.filter(h => h !== id));
+    await fetch('/api/retention/hidden', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => {});
+  }
 
   useEffect(() => {
     fetch('/api/retention', { cache: 'no-store' }).then(r => r.json()).then(setData).catch(() => setData({ source: 'error', error: 'Failed to load' }));
@@ -147,20 +160,49 @@ ${c.designBrief || '—'}`;
       )}
 
       {/* ── Scheduled / pending ── */}
-      {(data?.scheduled?.length ?? 0) > 0 && (
-        <Card accentColor="#93c5fd" className="mb-6">
-          <h2 className="text-sm font-bold text-gray-700 mb-3">🗓 Scheduled &amp; Drafts in Klaviyo</h2>
-          <div className="flex flex-col gap-1.5">
-            {data!.scheduled!.map(c => (
-              <div key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm border border-gray-100 rounded-lg px-3 py-2">
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${CHANNEL_BADGE[c.channel]}`}>{c.channel}</span>
-                <span className="font-medium text-gray-700 flex-1 min-w-0 break-words">{c.name}</span>
-                <span className="text-xs text-gray-400 whitespace-nowrap">{c.sendTime ? `sends ${c.sendTime.slice(0, 10)}` : c.status}</span>
+      {(data?.scheduled?.length ?? 0) > 0 && (() => {
+        const visible = data!.scheduled!.filter(c => !hidden.includes(c.id));
+        const hiddenItems = data!.scheduled!.filter(c => hidden.includes(c.id));
+        return (
+          <Card accentColor="#93c5fd" className="mb-6">
+            <h2 className="text-sm font-bold text-gray-700 mb-3">🗓 Scheduled &amp; Drafts in Klaviyo</h2>
+            <div className="flex flex-col gap-1.5">
+              {visible.map(c => (
+                <div key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm border border-gray-100 rounded-lg px-3 py-2">
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${CHANNEL_BADGE[c.channel]}`}>{c.channel}</span>
+                  <span className="font-medium text-gray-700 flex-1 min-w-0 break-words">{c.name}</span>
+                  <span className="text-xs text-gray-400 whitespace-nowrap">{c.sendTime ? `sends ${c.sendTime.slice(0, 10)}` : c.status}</span>
+                  <button
+                    onClick={() => hideCampaign(c.id)}
+                    title="No longer relevant — hide from this list (stays in Klaviyo)"
+                    className="text-gray-300 hover:text-red-500 px-1 font-bold"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              {visible.length === 0 && <p className="text-xs text-gray-400 py-2">All drafts hidden as no longer relevant.</p>}
+            </div>
+            {hiddenItems.length > 0 && (
+              <div className="mt-2">
+                <button onClick={() => setShowHidden(o => !o)} className="text-[11px] font-semibold text-gray-400 hover:text-gray-600">
+                  {showHidden ? '▾' : '▸'} Hidden — no longer relevant ({hiddenItems.length})
+                </button>
+                {showHidden && (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {hiddenItems.map(c => (
+                      <span key={c.id} className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 bg-gray-50 border border-gray-200 rounded-full px-2.5 py-1">
+                        {c.name}
+                        <button onClick={() => unhideCampaign(c.id)} title="Show again" className="text-gray-400 hover:text-green-600 font-bold">↺</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
-        </Card>
-      )}
+            )}
+          </Card>
+        );
+      })()}
 
       {/* ── AI campaign calendar with briefs ── */}
       <Card accentColor="#f9a8d4" className="mb-6">
