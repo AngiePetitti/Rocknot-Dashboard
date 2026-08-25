@@ -98,6 +98,11 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_retention',
+    description: 'Email & SMS (Klaviyo) performance: last-30-day revenue, open/click rates and per-campaign results for email and SMS, plus what campaigns are scheduled or drafted. Use for retention/owned-marketing questions.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'get_ad_creatives',
     description: 'Per-AD creative performance (individual ads, not platform totals) across Meta/TikTok/Snapchat: spend, attributed revenue, ROAS, CTR, conversions, cost per conversion, campaign and ad set. Use to find winning/losing creatives.',
     input_schema: {
@@ -261,6 +266,20 @@ ${monthLines.join('\n') || 'no monthly rows'}
 ${items?.length
   ? `Line items (QuickBooks statement order):\n${items.slice(0, 80).map(li => `${li.isSummary ? '== ' : ''}${li.account}: ${$(li.amount)}`).join('\n')}`
   : 'Account-level line items unavailable (direct QuickBooks connection not set up yet — summary totals only).'}`;
+  }
+
+  if (name === 'get_retention') {
+    const d = await get('/api/retention');
+    if (d?.source !== 'klaviyo_live') return `Klaviyo data unavailable: ${d?.error ?? 'not connected'}`;
+    const ov = d.overview as { email: { revenue: number; campaigns: number; recipients: number; avgOpenRate: number; avgClickRate: number }; sms: { revenue: number; campaigns: number; recipients: number; avgOpenRate: number; avgClickRate: number } };
+    const recent = (d.recent as Array<{ name: string; channel: string; sendTime: string | null; recipients?: number; openRate?: number; clickRate?: number; revenue?: number }>) ?? [];
+    const scheduled = (d.scheduled as Array<{ name: string; channel: string; sendTime: string | null; status: string }>) ?? [];
+    return `Klaviyo — last 30 days:
+Email: $${ov.email.revenue.toLocaleString()} from ${ov.email.campaigns} campaigns, ${ov.email.recipients.toLocaleString()} sends, ${ov.email.avgOpenRate}% open / ${ov.email.avgClickRate}% click
+SMS: $${ov.sms.revenue.toLocaleString()} from ${ov.sms.campaigns} campaigns, ${ov.sms.recipients.toLocaleString()} sends
+Recent campaigns (name · channel · date · sends · open% · click% · revenue):
+${recent.slice(0, 25).map(c => `${c.name} · ${c.channel} · ${c.sendTime?.slice(0, 10) ?? '?'} · ${c.recipients ?? '?'} · ${c.openRate ?? '?'}% · ${c.clickRate ?? '?'}% · $${(c.revenue ?? 0).toLocaleString()}`).join('\n') || 'none'}
+Scheduled/drafts: ${scheduled.map(c => `${c.name} (${c.channel}, ${c.sendTime?.slice(0, 10) ?? c.status})`).join(' · ') || 'none'}`;
   }
 
   if (name === 'get_ad_creatives') {
