@@ -12,7 +12,7 @@ function esc(s: string): string {
 }
 function inline(s: string): string {
   return esc(s)
-    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/\[([^\]]+)\]\(((?:https?:|\/)[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
     .replace(/`([^`]+)`/g, '<code>$1</code>');

@@ -42,6 +42,14 @@ export default function CreativesContent() {
   const [sortKey, setSortKey] = useState<SortKey>('spend');
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>('all');
   const [selected, setSelected] = useState<CreativePerformance | null>(null);
+  // Deep link from briefs: /dashboard/creatives?ad=<id> opens that ad's modal.
+  const adParam = searchParams.get('ad');
+  useEffect(() => {
+    if (!adParam || !creatives.length) return;
+    const hit = creatives.find(c => c.id === adParam);
+    if (hit) setSelected(hit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adParam, creatives]);
   const [sharing, setSharing] = useState(false);
 
   // ── Creative briefs (AI) + format overview ──

@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
   const cres = await fetch(`${origin}/api/windsor/creatives?tf=30d`, { headers: { cookie }, cache: 'no-store' });
   const cdata = await cres.json().catch(() => null);
   const creatives = (cdata?.creatives ?? []) as Array<{
-    name: string; platform: string; campaign: string; spend: number; revenue: number;
+    id: string; name: string; platform: string; campaign: string; spend: number; revenue: number;
     roas: number; ctr: number; conversions: number; adUrl?: string | null; videoUrl?: string | null;
   }>;
   if (!creatives.length) {
@@ -92,7 +92,7 @@ ${adLines}
 UPCOMING LAUNCHES:
 ${upcoming || 'None scheduled.'}
 
-Write ONE deep, self-contained brief in Markdown. It will be handed to a freelancer who has never spoken to us — they must be able to produce the deliverable with ZERO follow-up questions. Use ## section headings, short paragraphs, bullet lists and tables where helpful. 600-1000 words. Ground every choice in the performance data by naming the actual ads. Start with a # title line, then a one-sentence summary line in italics, then the sections.`;
+Write ONE deep, self-contained brief in Markdown. It will be handed to a freelancer who has never spoken to us — they must be able to produce the deliverable with ZERO follow-up questions. Use ## section headings, short paragraphs, bullet lists and tables where helpful. 600-1000 words. Ground every choice in the performance data by naming the actual ads (exact names, plain text — never invent URLs or links; names get auto-linked). Start with a # title line, then a one-sentence summary line in italics, then the sections.`;
 
   try {
     const batch = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -105,21 +105,22 @@ Write ONE deep, self-contained brief in Markdown. It will be handed to a freelan
       }).finalMessage()
     ));
 
-    // Linkify every referenced ad name: name → Ads Manager, plus a watch
-    // link when the raw video is available. Longest names first so partial
-    // names never clobber longer ones.
-    const linkable = creatives.filter(c => c.adUrl).sort((a, b) => b.name.length - a.name.length);
+    // Linkify referenced ad names to the DASHBOARD's creative view (the
+    // Analyze modal auto-opens via ?ad=<id> — playback, download, stats all
+    // there). Placeholder pass first so sibling ads whose names are prefixes
+    // of each other can never nest links inside links.
+    const linkable = creatives.sort((a, b) => b.name.length - a.name.length);
     const linkify = (mdIn: string): string => {
       let out = mdIn;
-      for (const c of linkable) {
-        if (!out.includes(c.name)) continue;
-        const link = `[${c.name}](${c.adUrl})${c.videoUrl ? ` ([▶ watch](${c.videoUrl}))` : ''}`;
-        // Replace backticked and bare occurrences alike.
-        out = out.split('\u0060' + c.name + '\u0060').join(link);
-        out = out.split(c.name).join(link);
-        // Un-nest if the name was already inside our own link markup.
-        out = out.split(`[[${c.name}]`).join(`[${c.name}]`);
-      }
+      linkable.forEach((c, i) => {
+        if (!out.includes(c.name)) return;
+        out = out.split('\u0060' + c.name + '\u0060').join(`\u27e6AD${i}\u27e7`);
+        out = out.split(c.name).join(`\u27e6AD${i}\u27e7`);
+      });
+      linkable.forEach((c, i) => {
+        const link = `[${c.name}](/dashboard/creatives?tf=30d&ad=${encodeURIComponent(c.id)})`;
+        out = out.split(`\u27e6AD${i}\u27e7`).join(link);
+      });
       return out;
     };
 
