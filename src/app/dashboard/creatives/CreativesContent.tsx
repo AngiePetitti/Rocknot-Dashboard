@@ -78,6 +78,26 @@ export default function CreativesContent() {
       setBriefsGenerating(false);
     }
   }
+  interface BriefStatus { status?: string; notes?: string }
+  const [briefStatuses, setBriefStatuses] = useState<Record<string, BriefStatus>>({});
+  const [showSkippedBriefs, setShowSkippedBriefs] = useState(false);
+  const [showCompletedBriefs, setShowCompletedBriefs] = useState(false);
+  const [notesOpenFor, setNotesOpenFor] = useState<string | null>(null);
+  const [notesDraft, setNotesDraft] = useState('');
+  useEffect(() => {
+    fetch('/api/creatives/briefs/status', { cache: 'no-store' }).then(r => r.json())
+      .then(d => { if (d?.statuses) setBriefStatuses(d.statuses); }).catch(() => {});
+  }, []);
+  async function setBriefStatus(id: string, status: string) {
+    setBriefStatuses(prev => ({ ...prev, [id]: { ...prev[id], status } }));
+    await fetch('/api/creatives/briefs/status', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, status }) }).catch(() => {});
+  }
+  async function saveBriefNotes(id: string) {
+    setBriefStatuses(prev => ({ ...prev, [id]: { ...prev[id], notes: notesDraft } }));
+    setNotesOpenFor(null);
+    await fetch('/api/creatives/briefs/status', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, notes: notesDraft }) }).catch(() => {});
+  }
+
   function copyBriefLink(id: string) {
     navigator.clipboard.writeText(`${window.location.origin}/brief/${id}`).then(() => {
       setCopiedLink(id);
@@ -340,40 +360,92 @@ export default function CreativesContent() {
           </p>
           {briefsError && <p className="text-xs text-red-500 mb-2">{briefsError}</p>}
 
-          {(briefsData?.briefs?.length ?? 0) > 0 ? (
-            <div className="flex flex-col gap-2">
-              {briefsData!.briefs!.map(b => {
-                const meta = {
-                  video: { icon: '✂️', label: 'Video editor · re-edit of existing footage' },
-                  static: { icon: '🖼', label: 'Static ad · existing photography' },
-                  orly: { icon: '🎥', label: 'Orly on-camera · new shoot' },
-                }[b.track] || { icon: '📄', label: b.track };
-                return (
-                  <div key={b.id} className="border border-gray-200 rounded-xl px-4 py-3">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-0.5">{meta.icon} {meta.label}</p>
-                    <p className="text-sm font-semibold text-gray-800 break-words">{b.title}</p>
-                    {b.summary && <p className="text-xs text-gray-500 mt-0.5 break-words">{b.summary}</p>}
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      <a
-                        href={`/brief/${b.id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-800 text-white hover:bg-black"
-                      >
-                        Open brief ↗
-                      </a>
-                      <button
-                        onClick={() => copyBriefLink(b.id)}
-                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600"
-                      >
-                        {copiedLink === b.id ? '✓ Link copied' : '🔗 Copy share link'}
-                      </button>
-                    </div>
+          {(briefsData?.briefs?.length ?? 0) > 0 ? (() => {
+            const all = briefsData!.briefs!;
+            const stOf = (id: string) => briefStatuses[id]?.status ?? 'new';
+            const active = all.filter(b => ['new', 'production'].includes(stOf(b.id)));
+            const completed = all.filter(b => stOf(b.id) === 'completed');
+            const skipped = all.filter(b => stOf(b.id) === 'skipped');
+            const TRACK_META: Record<string, { icon: string; label: string }> = {
+              video: { icon: '✂️', label: 'Video editor · re-edit of existing footage' },
+              static: { icon: '🖼', label: 'Static ad · existing photography' },
+              orly: { icon: '🎥', label: 'Orly on-camera · new shoot' },
+            };
+            const renderBrief = (b: typeof all[number]) => {
+              const meta = TRACK_META[b.track] || { icon: '📄', label: b.track };
+              const st = stOf(b.id);
+              const notes = briefStatuses[b.id]?.notes ?? '';
+              return (
+                <div key={b.id} className={`border rounded-xl px-4 py-3 ${st === 'production' ? 'border-blue-300 bg-blue-50/30' : st === 'completed' ? 'border-green-200 bg-green-50/30' : 'border-gray-200'}`}>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">{meta.icon} {meta.label}</p>
+                    {st === 'production' && <span className="text-[10px] font-bold text-blue-600 bg-blue-100 rounded-full px-2 py-0.5">IN PRODUCTION</span>}
+                    {st === 'completed' && <span className="text-[10px] font-bold text-green-700 bg-green-100 rounded-full px-2 py-0.5">✓ COMPLETED</span>}
                   </div>
-                );
-              })}
-            </div>
-          ) : (
+                  <p className="text-sm font-semibold text-gray-800 break-words mt-0.5">{b.title}</p>
+                  {b.summary && <p className="text-xs text-gray-500 mt-0.5 break-words">{b.summary}</p>}
+                  {notes && notesOpenFor !== b.id && (
+                    <p className="text-xs text-gray-600 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 mt-1.5 whitespace-pre-wrap">🧪 {notes}</p>
+                  )}
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    <a href={`/brief/${b.id}`} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-800 text-white hover:bg-black">Open brief ↗</a>
+                    <button onClick={() => copyBriefLink(b.id)} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600">
+                      {copiedLink === b.id ? '✓ Link copied' : '🔗 Copy link'}
+                    </button>
+                    {st !== 'production' && st !== 'completed' && (
+                      <button onClick={() => setBriefStatus(b.id, 'production')} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100">▶ In production</button>
+                    )}
+                    {st === 'production' && (
+                      <button onClick={() => setBriefStatus(b.id, 'completed')} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-green-700 hover:bg-green-100">✓ Mark completed</button>
+                    )}
+                    <button
+                      onClick={() => { setNotesOpenFor(notesOpenFor === b.id ? null : b.id); setNotesDraft(notes); }}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100"
+                    >
+                      🧪 {notes ? 'Edit notes' : 'Add test notes'}
+                    </button>
+                    {st === 'new' && (
+                      <button onClick={() => setBriefStatus(b.id, 'skipped')} title="Not doing this one" className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-200 text-gray-400 hover:text-gray-600">Skip ✕</button>
+                    )}
+                  </div>
+                  {notesOpenFor === b.id && (
+                    <div className="mt-2">
+                      <textarea
+                        value={notesDraft}
+                        onChange={e => setNotesDraft(e.target.value)}
+                        rows={3}
+                        placeholder="What we tested, what happened, what we learned — e.g. 'Hook variant B beat original 2.1x vs 1.4x ROAS over 5 days; keep question-hooks.'"
+                        className="w-full text-xs border border-amber-200 rounded-xl p-2.5 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                      />
+                      <button onClick={() => saveBriefNotes(b.id)} className="mt-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600">Save notes</button>
+                    </div>
+                  )}
+                </div>
+              );
+            };
+            return (
+              <div className="flex flex-col gap-2">
+                {active.map(renderBrief)}
+                {active.length === 0 && <p className="text-xs text-gray-400 py-1">No active briefs — regenerate or check completed/skipped below.</p>}
+                {completed.length > 0 && (
+                  <div>
+                    <button onClick={() => setShowCompletedBriefs(o => !o)} className="text-[11px] font-semibold text-green-700 hover:text-green-800">
+                      {showCompletedBriefs ? '▾' : '▸'} Completed ({completed.length})
+                    </button>
+                    {showCompletedBriefs && <div className="flex flex-col gap-2 mt-1.5">{completed.map(renderBrief)}</div>}
+                  </div>
+                )}
+                {skipped.length > 0 && (
+                  <div>
+                    <button onClick={() => setShowSkippedBriefs(o => !o)} className="text-[11px] font-semibold text-gray-400 hover:text-gray-600">
+                      {showSkippedBriefs ? '▾' : '▸'} Skipped ({skipped.length})
+                    </button>
+                    {showSkippedBriefs && <div className="flex flex-col gap-2 mt-1.5">{skipped.map(renderBrief)}</div>}
+                  </div>
+                )}
+              </div>
+            );
+          })() : (
             !briefsGenerating && <p className="text-sm text-gray-400 text-center py-4">No briefs yet — add your brand guidelines below, then generate.</p>
           )}
 

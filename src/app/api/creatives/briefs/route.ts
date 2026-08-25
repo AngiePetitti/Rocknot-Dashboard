@@ -203,7 +203,21 @@ At the very end, append a fenced code block tagged refs containing a strict JSON
       }
     }
 
-    const payload = { briefs: index, generatedAt: new Date().toISOString() };
+    // Preserve briefs the team is acting on: production/completed status or
+    // test notes survive regeneration; only untouched/skipped ones roll off.
+    let kept: BriefIndexEntry[] = [];
+    try {
+      const oldRaw = await loadDoc('creative_briefs_index');
+      const old = oldRaw ? (JSON.parse(oldRaw) as { briefs?: BriefIndexEntry[] }) : null;
+      const stRaw = await loadDoc('brief_statuses');
+      const statuses: Record<string, { status?: string; notes?: string }> = stRaw ? JSON.parse(stRaw) : {};
+      kept = (old?.briefs ?? []).filter(b => {
+        const st = statuses[b.id];
+        return st && (st.status === 'production' || st.status === 'completed' || (st.notes ?? '').trim());
+      }).slice(0, 30);
+    } catch { /* fresh start */ }
+
+    const payload = { briefs: [...index, ...kept], generatedAt: new Date().toISOString() };
     await saveDoc('creative_briefs_index', JSON.stringify(payload));
     return NextResponse.json(payload);
   } catch (e) {
