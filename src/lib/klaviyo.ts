@@ -11,6 +11,7 @@ export function klaviyoConfigured(): boolean {
 
 async function kfetch(path: string, init?: RequestInit): Promise<Record<string, unknown>> {
   const res = await fetch(`https://a.klaviyo.com${path}`, {
+    ...(init?.method === 'POST' ? {} : { next: { revalidate: 300 } }),
     ...init,
     headers: {
       Authorization: `Klaviyo-API-Key ${KEY}`,
@@ -123,12 +124,13 @@ export interface RetentionData {
 }
 
 export async function fetchRetentionData(): Promise<RetentionData> {
+  const metricIdPromise = placedOrderMetricId().catch(() => null);
   const [email, sms] = await Promise.all([listCampaigns('email'), listCampaigns('sms')]);
   const all = [...email, ...sms];
 
   let statsError: string | undefined;
   try {
-    const metricId = await placedOrderMetricId();
+    const metricId = await metricIdPromise;
     if (!metricId) throw new Error("No 'Placed Order' metric found in Klaviyo");
     const values = await campaignValues(metricId);
     for (const c of all) {
