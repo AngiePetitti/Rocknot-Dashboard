@@ -84,12 +84,21 @@ export default function CreativesContent() {
   }, []);
   const [uploadingGuide, setUploadingGuide] = useState<string | null>(null);
   async function uploadGuidelines(file: File) {
+    if (file.size > 4 * 1024 * 1024) {
+      setUploadingGuide(`That file is ${(file.size / 1024 / 1024).toFixed(1)}MB — the upload limit is 4MB. Export a compressed PDF (or just the pages with colors/fonts/voice) and try again.`);
+      return;
+    }
     setUploadingGuide('Reading the file with Cleo… (~30s for a PDF)');
     try {
       const fd = new FormData();
       fd.append('file', file);
       const res = await fetch('/api/brand', { method: 'POST', body: fd });
-      const d = await res.json();
+      // Platform-level rejections (413 etc.) return plain text, not JSON.
+      const raw = await res.text();
+      let d: { error?: string; guidelines?: string };
+      try { d = JSON.parse(raw); } catch {
+        throw new Error(res.status === 413 ? 'File too large for upload (4MB max)' : raw.slice(0, 120));
+      }
       if (!res.ok || d.error) throw new Error(d.error || 'Upload failed');
       setGuidelines(String(d.guidelines || ''));
       setUploadingGuide(null);
