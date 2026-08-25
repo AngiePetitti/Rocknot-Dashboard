@@ -5,6 +5,7 @@ import { authOptions, authConfigured } from '@/src/lib/auth';
 import { getKV, setKV } from '@/src/lib/chatStore';
 import { getEvents } from '@/src/lib/calendarStore';
 import { klaviyoConfigured, fetchRetentionData } from '@/src/lib/klaviyo';
+import { loadDoc } from '@/src/lib/docStore';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -69,7 +70,12 @@ Already scheduled/drafted (do NOT duplicate these): ${d.scheduled.map(c => `${c.
     } catch { /* fall back to best practices */ }
   }
 
-  const prompt = `You are Cleo, Rocknot's retention marketing strategist. Rocknot is a DTC jewelry/handbag brand (pastel, feminine, playful; founder Orly is the face of the brand; AOV ~$170).
+  const guidelines = (await loadDoc('brand_guidelines').catch(() => null)) || '';
+
+  const prompt = `You are Cleo, Rocknot's retention marketing strategist. Rocknot is a DTC rhinestone jewelry/handbag brand; founder Orly is the face of the brand; AOV ~$170.
+
+BRAND GUIDELINES (ALL copy voice and every design brief must follow these — never invent brand colors, fonts, or aesthetic descriptors that are not in this section. If it is empty, write design briefs that instruct the designer to pull visual identity from rocknot.com and note the guidelines doc is pending):
+${guidelines || '(none uploaded yet)'}
 
 Today is ${today}. Build the next 30 days of the Email/SMS campaign calendar with COMPLETE briefs a designer can execute without asking questions.
 
