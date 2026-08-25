@@ -82,6 +82,23 @@ export default function CreativesContent() {
   useEffect(() => {
     fetch('/api/brand', { cache: 'no-store' }).then(r => r.json()).then(d => setGuidelines(String(d?.guidelines || ''))).catch(() => {});
   }, []);
+  const [uploadingGuide, setUploadingGuide] = useState<string | null>(null);
+  async function uploadGuidelines(file: File) {
+    setUploadingGuide('Reading the file with Cleo… (~30s for a PDF)');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/brand', { method: 'POST', body: fd });
+      const d = await res.json();
+      if (!res.ok || d.error) throw new Error(d.error || 'Upload failed');
+      setGuidelines(String(d.guidelines || ''));
+      setUploadingGuide(null);
+      setGuidelinesSaved('saved');
+      setTimeout(() => setGuidelinesSaved(null), 2000);
+    } catch (e) {
+      setUploadingGuide(e instanceof Error ? `Failed: ${e.message}` : 'Upload failed');
+    }
+  }
   async function saveGuidelines() {
     setGuidelinesSaved('saving');
     try {
@@ -305,8 +322,18 @@ export default function CreativesContent() {
             {guidelinesOpen && (
               <div className="mt-2">
                 <p className="text-[11px] text-gray-400 mb-1.5">
-                  Paste the brand guide as text: colors (hex codes), fonts, logo rules, voice &amp; tone, photography style, do&apos;s and don&apos;ts. Copy it out of the brand PDF — every AI-generated brief and retention campaign references this verbatim.
+                  Upload the brand PDF and Cleo extracts everything (colors with hex codes, fonts, logo rules, voice, photography direction) into the editable text below — or paste it yourself. Every AI-generated brief and retention campaign references this.
                 </p>
+                <label className="flex items-center gap-2 mb-2 text-xs font-semibold text-gray-700 border border-dashed border-gray-300 rounded-xl px-3 py-2.5 cursor-pointer hover:border-gray-400 hover:bg-gray-50">
+                  📎 Upload brand guide (PDF, image, or .txt — max 4MB)
+                  <input
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.txt,.md"
+                    className="hidden"
+                    onChange={e => { const file = e.target.files?.[0]; if (file) uploadGuidelines(file); e.target.value = ''; }}
+                  />
+                </label>
+                {uploadingGuide && <p className="text-[11px] text-gray-500 mb-2">{uploadingGuide}</p>}
                 <textarea
                   value={guidelines}
                   onChange={e => setGuidelines(e.target.value)}
