@@ -142,6 +142,11 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'get_month_notes',
+    description: "The team's monthly performance log (Goals tab): free-form notes on what happened each month — launches, stockouts, promos, ad account issues. ALWAYS check this when explaining why performance rose or fell in a given month.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'get_purchase_orders',
     description: 'Inventory purchase orders logged on the dashboard: open orders with quantity, order date, who ordered, and expected arrival (ETA), plus recently received ones. Use with get_inventory to judge what restock is already inbound.',
     input_schema: { type: 'object', properties: {} },
@@ -320,6 +325,14 @@ By order count: 1 order ${m.oneOrderCount?.toLocaleString?.() ?? '?'} (LTV $${m.
     return `Monthly plan (Goals tab) — planned total $${total.toLocaleString()}:\n${goals.sort((a, b) => a.month.localeCompare(b.month)).map(g =>
       `${g.month}: revenue goal $${g.revenueGoal.toLocaleString()} · ad budget $${g.adBudget.toLocaleString()}${g.pinned ? ' (pinned/manual)' : ''}`
     ).join('\n')}`;
+  }
+
+  if (name === 'get_month_notes') {
+    const d = await get('/api/notes/months');
+    const notes = (d?.notes as Record<string, { text: string; updatedAt: string; author?: string }>) ?? {};
+    const entries = Object.entries(notes).sort(([a], [b]) => b.localeCompare(a));
+    if (!entries.length) return 'No monthly performance notes recorded yet (Goals tab → Monthly performance log).';
+    return `Monthly performance log:\n${entries.map(([m, n]) => `${m}: ${n.text}${n.author ? ` — ${n.author}` : ''}`).join('\n')}`;
   }
 
   if (name === 'get_purchase_orders') {

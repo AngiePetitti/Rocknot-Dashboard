@@ -49,6 +49,10 @@ export default function GoalsContent() {
   const [aov, setAov] = useState<number>(0);
   const [stockRetail, setStockRetail] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [monthNotes, setMonthNotes] = useState<Record<string, { text: string; updatedAt: string; author?: string }>>({});
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [noteSaving, setNoteSaving] = useState<string | null>(null);
+  const [noteOpen, setNoteOpen] = useState<Record<string, boolean>>({});
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -91,6 +95,10 @@ export default function GoalsContent() {
         if (d.source === 'windsor_live' || d.source === 'bigquery_live') setLastYear(byMonth(d.revenueData || []));
       }
     );
+    fetch('/api/notes/months', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (d?.notes) setMonthNotes(d.notes); })
+      .catch(() => {});
     cachedJson<{ source?: string; finance?: { totalRetailValue?: number } }>(
       '/api/windsor/inventory',
       d => { if (d.source === 'shopify_live') setStockRetail(d.finance?.totalRetailValue ?? null); }
@@ -203,6 +211,26 @@ export default function GoalsContent() {
       setError(e instanceof Error ? e.message : 'Save failed');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveMonthNote(k: string) {
+    const text = (noteDrafts[k] ?? monthNotes[k]?.text ?? '').trim();
+    setNoteSaving(k);
+    try {
+      const res = await fetch('/api/notes/months', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month: k, text }),
+      });
+      const d = await res.json();
+      if (!res.ok || d.error) throw new Error(d.error || 'Save failed');
+      setMonthNotes(d.notes || {});
+      setNoteDrafts(prev => { const n = { ...prev }; delete n[k]; return n; });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Note save failed');
+    } finally {
+      setNoteSaving(null);
     }
   }
 
@@ -397,6 +425,15 @@ export default function GoalsContent() {
                     <td className="py-2.5 pr-4 font-semibold text-gray-800 whitespace-nowrap">
                       {MONTH_NAMES[i].slice(0, 3)}
                       {isCurrent && <span className="ml-1.5 text-[10px] bg-blue-100 text-blue-700 rounded-full px-1.5 py-0.5 font-semibold">now</span>}
+                      {monthNotes[k]?.text && (
+                        <button
+                          onClick={() => setNoteOpen(prev => ({ ...prev, [k]: true }))}
+                          title={monthNotes[k].text}
+                          className="ml-1.5 text-xs opacity-70 hover:opacity-100"
+                        >
+                          📝
+                        </button>
+                      )}
                     </td>
                     <td className="py-2.5 pr-4 text-gray-700 whitespace-nowrap">
                       {shown !== undefined ? (
@@ -461,6 +498,78 @@ export default function GoalsContent() {
         <p className="text-[11px] text-gray-400 mt-3">
           Units Needed ≈ revenue goal ÷ current AOV ({aov > 0 ? formatCurrency(aov) : '—'}). Goals are shared — everyone sees them; admins edit.
         </p>
+      </Card>
+
+      {/* ── Monthly performance log ── */}
+      <Card accentColor="#fcd34d" className="mt-5">
+        <h2 className="text-sm font-bold text-gray-700 mb-1">📝 Monthly performance log</h2>
+        <p className="text-xs text-gray-400 mb-4">
+          Record what happened each month — launches, stockouts, promos, ad account issues, PR moments — so when
+          revenue moves up or down you always know why. Notes are shared with the whole team and Cleo reads them
+          when explaining performance.
+        </p>
+        <div className="space-y-2">
+          {Array.from({ length: 14 }, (_, i) => {
+            const d = new Date(year, curMonth - 1 - i, 1);
+            const k = monthKey(d.getFullYear(), d.getMonth() + 1);
+            const label = `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+            const saved = monthNotes[k];
+            const draft = noteDrafts[k];
+            const isOpen = noteOpen[k] ?? (i === 0 || draft !== undefined);
+            const a = actuals[k] || lastYear[k];
+            const editing = draft !== undefined;
+            return (
+              <div key={k} className={`border rounded-xl ${saved?.text ? 'border-amber-200 bg-amber-50/40' : 'border-gray-100'}`}>
+                <button
+                  onClick={() => setNoteOpen(prev => ({ ...prev, [k]: !isOpen }))}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-left"
+                >
+                  <span className="text-sm font-semibold text-gray-700">{label}</span>
+                  {a?.revenue ? <span className="text-[11px] text-gray-400">{formatCurrency(a.revenue, true)}</span> : null}
+                  {saved?.text && !isOpen && (
+                    <span className="text-xs text-gray-500 truncate flex-1">{saved.text}</span>
+                  )}
+                  <span className="ml-auto text-xs text-gray-300">{isOpen ? '▾' : '▸'}</span>
+                </button>
+                {isOpen && (
+                  <div className="px-3 pb-3">
+                    <textarea
+                      value={draft ?? saved?.text ?? ''}
+                      onChange={e => setNoteDrafts(prev => ({ ...prev, [k]: e.target.value }))}
+                      placeholder="What happened this month? Launches, stockouts, promos, creative wins, ad issues…"
+                      rows={3}
+                      className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white"
+                    />
+                    <div className="flex items-center gap-3 mt-1.5">
+                      {editing && (
+                        <button
+                          onClick={() => saveMonthNote(k)}
+                          disabled={noteSaving === k}
+                          className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg"
+                        >
+                          {noteSaving === k ? 'Saving…' : 'Save note'}
+                        </button>
+                      )}
+                      {editing && (
+                        <button
+                          onClick={() => setNoteDrafts(prev => { const n = { ...prev }; delete n[k]; return n; })}
+                          className="text-xs text-gray-400 hover:text-gray-600"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      {saved && !editing && (
+                        <span className="text-[11px] text-gray-400">
+                          Updated {new Date(saved.updatedAt).toLocaleDateString()}{saved.author ? ` by ${saved.author}` : ''}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </Card>
     </div>
   );
