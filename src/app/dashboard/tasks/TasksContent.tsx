@@ -65,17 +65,39 @@ export default function TasksContent() {
   const [nPriority, setNPriority] = useState<Priority>('medium');
   const [saving, setSaving] = useState(false);
 
+  const [teamNames, setTeamNames] = useState<string[]>([]);
+
   useEffect(() => {
     fetch('/api/tasks', { cache: 'no-store' })
       .then(r => r.json())
       .then(d => { if (Array.isArray(d?.tasks)) setTasks(d.tasks); setLoaded(true); })
       .catch(() => { setError('Could not load tasks'); setLoaded(true); });
+    fetch('/api/tasks/assignees', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d?.assignees)) setTeamNames(d.assignees); })
+      .catch(() => {});
   }, []);
 
+  // Dropdown = saved team names plus anyone already on a task.
   const assignees = useMemo(
-    () => Array.from(new Set(tasks.map(t => t.assignee).filter(Boolean) as string[])).sort(),
-    [tasks]
+    () => Array.from(new Set([...teamNames, ...(tasks.map(t => t.assignee).filter(Boolean) as string[])])).sort((a, b) => a.localeCompare(b)),
+    [tasks, teamNames]
   );
+
+  async function addTeamName(): Promise<string | null> {
+    const name = (window.prompt('New team member name:') || '').trim();
+    if (!name) return null;
+    try {
+      const res = await fetch('/api/tasks/assignees', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const d = await res.json();
+      if (Array.isArray(d?.assignees)) setTeamNames(d.assignees);
+    } catch { /* name still usable locally */ }
+    return name;
+  }
 
   const visible = useMemo(
     () => filterAssignee ? tasks.filter(t => (t.assignee || '') === filterAssignee) : tasks,
@@ -119,6 +141,8 @@ export default function TasksContent() {
   }
 
   async function updateTask(id: string, fields: Record<string, unknown>) {
+    // Optimistic so dropdowns/inputs reflect the change instantly.
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, ...fields } as Task : t));
     await api('PUT', { id, ...fields });
   }
 
@@ -167,16 +191,22 @@ export default function TasksContent() {
               rows={2}
               className="sm:col-span-2 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
             />
-            <input
+            <select
               value={nAssignee}
-              onChange={e => setNAssignee(e.target.value)}
-              placeholder="Assignee"
-              list="task-assignees"
-              className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-            />
-            <datalist id="task-assignees">
-              {assignees.map(a => <option key={a} value={a} />)}
-            </datalist>
+              onChange={async e => {
+                if (e.target.value === '__add__') {
+                  const name = await addTeamName();
+                  if (name) setNAssignee(name);
+                } else {
+                  setNAssignee(e.target.value);
+                }
+              }}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-300"
+            >
+              <option value="">Assignee: nobody yet</option>
+              {assignees.map(a => <option key={a} value={a}>{a}</option>)}
+              <option value="__add__">＋ Add new name…</option>
+            </select>
             <input
               type="date"
               value={nDue}
@@ -285,13 +315,22 @@ export default function TasksContent() {
                         <div className="mt-2 pl-4 space-y-2">
                           {t.description && <p className="text-xs text-gray-500 whitespace-pre-wrap">{t.description}</p>}
                           <div className="grid grid-cols-2 gap-2">
-                            <input
-                              defaultValue={t.assignee || ''}
-                              placeholder="Assignee"
-                              list="task-assignees"
-                              onBlur={e => { if (e.target.value !== (t.assignee || '')) updateTask(t.id, { assignee: e.target.value }); }}
-                              className="px-2 py-1 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-violet-300"
-                            />
+                            <select
+                              value={t.assignee || ''}
+                              onChange={async e => {
+                                if (e.target.value === '__add__') {
+                                  const name = await addTeamName();
+                                  if (name) updateTask(t.id, { assignee: name });
+                                } else {
+                                  updateTask(t.id, { assignee: e.target.value });
+                                }
+                              }}
+                              className="px-2 py-1 border border-gray-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-violet-300"
+                            >
+                              <option value="">Unassigned</option>
+                              {assignees.map(a => <option key={a} value={a}>{a}</option>)}
+                              <option value="__add__">＋ Add new name…</option>
+                            </select>
                             <input
                               type="date"
                               defaultValue={t.dueDate || ''}
