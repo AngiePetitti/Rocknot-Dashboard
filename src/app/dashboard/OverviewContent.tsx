@@ -614,7 +614,13 @@ export default function OverviewContent() {
           value={formatCurrency(metrics.totalRevenue)}
           subtitle={`${metrics.totalOrders} orders`}
           accentColor="#c4b5fd"
-          comparison={priorPeriod ? { current: metrics.totalRevenue, prior: priorPeriod.totalRevenue } : undefined}
+          comparison={priorPeriod ? {
+            current: metrics.totalRevenue,
+            prior: priorPeriod.totalRevenue,
+            // A partial day vs a complete one — say so instead of implying
+            // like-for-like periods.
+            label: tfRaw === 'today' ? 'vs ALL of yesterday' : tfRaw === 'yesterday' ? 'vs day before' : undefined,
+          } : undefined}
         />
         <MetricCard
           title="Total Ad Spend"

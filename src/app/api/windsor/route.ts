@@ -648,27 +648,20 @@ export async function GET(request: NextRequest) {
       const priorRows = await fetchAllRows(priorParams);
       const priorAgg = aggregateRows(priorRows);
 
-      if (!isCustom) {
-        priorPeriod = {
-          totalRevenue: Math.max(0, priorAgg.metrics.totalRevenue - current.metrics.totalRevenue),
-          totalAdSpend: Math.max(0, priorAgg.metrics.totalAdSpend - current.metrics.totalAdSpend),
-          totalOrders: Math.max(0, priorAgg.metrics.totalOrders - current.metrics.totalOrders),
-          aov: priorAgg.metrics.aov,
-          mer: priorAgg.metrics.mer,
-          metaSpend: Math.max(0, priorAgg.metrics.metaSpend - current.metrics.metaSpend),
-          googleSpend: Math.max(0, priorAgg.metrics.googleSpend - current.metrics.googleSpend),
-        };
-      } else {
-        priorPeriod = {
-          totalRevenue: priorAgg.metrics.totalRevenue,
-          totalAdSpend: priorAgg.metrics.totalAdSpend,
-          totalOrders: priorAgg.metrics.totalOrders,
-          aov: priorAgg.metrics.aov,
-          mer: priorAgg.metrics.mer,
-          metaSpend: priorAgg.metrics.metaSpend,
-          googleSpend: priorAgg.metrics.googleSpend,
-        };
-      }
+      // The prior window is a fully separate date range (buildPriorParams /
+      // the custom-range math above) — use its aggregate as-is. The old
+      // "priorAgg minus current" subtraction here dated from when prior
+      // presets overlapped the current period and badly inflated deltas
+      // (e.g. Today vs yesterday-minus-today).
+      priorPeriod = {
+        totalRevenue: priorAgg.metrics.totalRevenue,
+        totalAdSpend: priorAgg.metrics.totalAdSpend,
+        totalOrders: priorAgg.metrics.totalOrders,
+        aov: priorAgg.metrics.aov,
+        mer: priorAgg.metrics.mer,
+        metaSpend: priorAgg.metrics.metaSpend,
+        googleSpend: priorAgg.metrics.googleSpend,
+      };
     }
 
     return NextResponse.json({

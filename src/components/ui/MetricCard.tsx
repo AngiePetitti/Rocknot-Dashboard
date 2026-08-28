@@ -46,7 +46,7 @@ export default function MetricCard({
       {/* Comparison delta — shown when compare mode is on */}
       {delta !== null && (
         <span className={`text-xs font-semibold mt-1 ${delta.positive ? 'text-green-500' : 'text-red-500'}`}>
-          {delta.positive ? '▲' : '▼'} {Math.abs(delta.pct)}% vs prior period
+          {delta.positive ? '▲' : '▼'} {Math.abs(delta.pct)}% {comparison?.label || 'vs prior period'}
         </span>
       )}
 
