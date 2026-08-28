@@ -45,8 +45,9 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   return (
     <aside
       className={`
-        fixed md:static inset-y-0 left-0 z-30
-        w-60 shrink-0 bg-white border-r border-gray-100 min-h-screen flex flex-col
+        fixed md:static top-0 bottom-0 left-0 z-30
+        w-60 shrink-0 bg-white border-r border-gray-100 flex flex-col
+        h-[100dvh] md:h-auto md:min-h-screen
         transition-transform duration-200 ease-in-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
       `}
@@ -88,7 +89,8 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5">
+      {/* Scrolls internally on phones — the list is taller than the screen. */}
+      <nav className="flex-1 overflow-y-auto px-3 py-3 md:py-4 space-y-0.5 overscroll-contain">
         {visibleNav.map(item => {
           const isActive = pathname === item.href;
           return (
@@ -96,7 +98,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
               key={item.href}
               href={buildHref(item.href)}
               onClick={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              className={`flex items-center gap-3 px-3 py-2 md:py-2.5 rounded-xl text-sm font-medium transition-all ${
                 isActive
                   ? 'bg-violet-50 text-violet-700'
                   : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
