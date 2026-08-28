@@ -206,10 +206,15 @@ export default function OverviewContent() {
     setAdsError(null);
     setLiveSource('loading');
 
+    setPriorPeriod(null);
+
     const params = new URLSearchParams({ tf: tfRaw });
     if (dateFrom) params.set('date_from', dateFrom);
     if (dateTo) params.set('date_to', dateTo);
-    if (compareOn) params.set('compare', 'true');
+    // Prior-period metrics are always fetched — the revenue card shows its
+    // vs-prior delta permanently; the other cards only show theirs when the
+    // Compare toggle is on.
+    params.set('compare', 'true');
 
     // Cached copies (from earlier visits this session) render instantly and
     // are refreshed in the background — switching tabs doesn't restart loads.
@@ -317,7 +322,7 @@ export default function OverviewContent() {
 
   const callouts = useMemo(() => buildCallouts({
     metrics,
-    prior: priorPeriod,
+    prior: compareOn ? priorPeriod : null,
     inventory: invSnapshot && invSnapshot.source === 'shopify_live' ? invSnapshot : null,
     returns: returnsSnapshot && returnsSnapshot.source === 'shopify_live' ? returnsSnapshot : null,
     merGoal: MER_GOAL,
@@ -358,7 +363,7 @@ export default function OverviewContent() {
             const p = new URLSearchParams({ tf: tfRaw });
             if (dateFrom) p.set('date_from', dateFrom);
             if (dateTo) p.set('date_to', dateTo);
-            if (compareOn) p.set('compare', 'true');
+            p.set('compare', 'true');
             fetch(`/api/windsor?${p}`)
               .then(r => r.json())
               .then(data => {
@@ -616,14 +621,14 @@ export default function OverviewContent() {
           value={formatCurrency(metrics.totalAdSpend)}
           subtitle={metrics.metaSpend ? `Meta ${formatCurrency(metrics.metaSpend)} · Google ${formatCurrency(metrics.googleSpend ?? 0)}${metrics.tiktokSpend ? ` · TikTok ${formatCurrency(metrics.tiktokSpend)}` : ''}${metrics.snapchatSpend ? ` · Snap ${formatCurrency(metrics.snapchatSpend)}` : ''}` : 'All ad platforms'}
           accentColor="#f9a8d4"
-          comparison={priorPeriod ? { current: metrics.totalAdSpend, prior: priorPeriod.totalAdSpend } : undefined}
+          comparison={compareOn && priorPeriod ? { current: metrics.totalAdSpend, prior: priorPeriod.totalAdSpend } : undefined}
         />
         <MetricCard
           title="Avg Order Value"
           value={formatCurrency(metrics.aov)}
           subtitle="Per transaction"
           accentColor="#fde68a"
-          comparison={priorPeriod ? { current: metrics.aov, prior: priorPeriod.aov } : undefined}
+          comparison={compareOn && priorPeriod ? { current: metrics.aov, prior: priorPeriod.aov } : undefined}
         />
         <MetricCard
           title="Blended MER"
@@ -631,8 +636,8 @@ export default function OverviewContent() {
           subtitle="Across all platforms"
           accentColor={metrics.mer >= MER_GOAL ? '#86efac' : '#fca5a5'}
           valueColor={merColor}
-          comparison={priorPeriod ? { current: metrics.mer, prior: priorPeriod.mer } : undefined}
-          trend={!priorPeriod ? {
+          comparison={compareOn && priorPeriod ? { current: metrics.mer, prior: priorPeriod.mer } : undefined}
+          trend={!(compareOn && priorPeriod) ? {
             value: metrics.mer >= MER_GOAL ? 'Above 3.5x goal' : 'Below 3.5x goal',
             positive: metrics.mer >= MER_GOAL,
           } : undefined}
