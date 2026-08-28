@@ -116,6 +116,22 @@ export async function GET() {
     const todayOrders = todayData?.orders ?? 0;
     const avgDayRevenue = pastDays.length ? pastDays.reduce((s, d) => s + d.total, 0) / pastDays.length : 0;
 
+    // Yesterday measured through the SAME hour bucket — the honest baseline
+    // for "are we up or down today" (Shopify's own compare works this way).
+    let yesterdaySoFar: number | null = null;
+    let yesterdayTotal: number | null = null;
+    {
+      const yDate0 = dates[dates.length - 2];
+      const yData0 = yDate0 ? byDay.get(yDate0) : undefined;
+      if (yData0 && yData0.total > 0) {
+        let ySo = 0;
+        for (let h = 0; h < nowHour; h++) ySo += yData0.rev[h];
+        ySo += (yData0.rev[nowHour] || 0) * 0.5;
+        yesterdaySoFar = Math.round(ySo);
+        yesterdayTotal = Math.round(yData0.total);
+      }
+    }
+
     // Self-check: run the SAME method on yesterday frozen at this hour and
     // compare with yesterday's real close, so the card can prove (or expose)
     // its own accuracy every day.
@@ -161,6 +177,8 @@ export async function GET() {
       daysInCurve: pastDays.length,
       lowConfidence: !usable,
       backtest,
+      yesterdaySoFar,
+      yesterdayTotal,
     });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });

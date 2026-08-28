@@ -98,6 +98,7 @@ export default function OverviewContent() {
     todaySoFar: number; forecastRevenue: number; forecastOrders: number | null;
     dayFraction: number; avgDayRevenue: number; lowConfidence: boolean;
     backtest?: { projected: number; actual: number } | null;
+    yesterdaySoFar?: number | null; yesterdayTotal?: number | null;
   }>(null);
   const [forecastError, setForecastError] = useState<string | null>(null);
   useEffect(() => {
@@ -614,13 +615,23 @@ export default function OverviewContent() {
           value={formatCurrency(metrics.totalRevenue)}
           subtitle={`${metrics.totalOrders} orders`}
           accentColor="#c4b5fd"
-          comparison={priorPeriod ? {
-            current: metrics.totalRevenue,
-            prior: priorPeriod.totalRevenue,
-            // A partial day vs a complete one — say so instead of implying
-            // like-for-like periods.
-            label: tfRaw === 'today' ? 'vs ALL of yesterday' : tfRaw === 'yesterday' ? 'vs day before' : undefined,
-          } : undefined}
+          comparison={
+            // Today: time-of-day-aware — today so far vs yesterday through the
+            // SAME hour (both from Shopify hourly data), matching how Shopify's
+            // own app computes its up/down %. Full-day-vs-partial-day was
+            // misleading in the other direction.
+            tfRaw === 'today' && todayForecast?.yesterdaySoFar
+              ? { current: todayForecast.todaySoFar, prior: todayForecast.yesterdaySoFar, label: 'vs yesterday at this time' }
+              : tfRaw === 'today'
+              ? undefined
+              : priorPeriod
+              ? {
+                  current: metrics.totalRevenue,
+                  prior: priorPeriod.totalRevenue,
+                  label: tfRaw === 'yesterday' ? 'vs day before' : undefined,
+                }
+              : undefined
+          }
         />
         <MetricCard
           title="Total Ad Spend"
