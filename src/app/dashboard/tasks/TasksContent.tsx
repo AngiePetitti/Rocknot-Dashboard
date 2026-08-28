@@ -19,6 +19,7 @@ interface Task {
   updatedAt: string;
   completedAt?: string;
   order: number;
+  link?: string;
 }
 
 const COLUMNS: { key: TaskStatus; label: string; accent: string; bg: string }[] = [
@@ -309,6 +310,16 @@ export default function TasksContent() {
                           <span className="text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-100 rounded-full px-2 py-0.5">{t.assignee}</span>
                         )}
                         {due && <span className={`text-[11px] ${due.cls}`}>📅 {due.text}</span>}
+                        {t.link && (
+                          <a
+                            href={t.link}
+                            target={t.link.startsWith('/brief/') ? '_blank' : undefined}
+                            rel="noopener noreferrer"
+                            className="text-[11px] font-semibold text-violet-600 hover:text-violet-800"
+                          >
+                            Open ↗
+                          </a>
+                        )}
                       </div>
 
                       {isOpen && (

@@ -93,6 +93,41 @@ ${c.designBrief || '—'}`;
     });
   }
 
+  const [taskCreated, setTaskCreated] = useState<Record<string, boolean>>({});
+
+  // One tap: campaign brief → card on the Tasks board, due 2 days before the
+  // send so design + build time is baked in. Full copy travels in the task
+  // description.
+  async function sendCampaignToTasks(c: PlanCampaign, key: string) {
+    let due = c.date || '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(due)) {
+      const d = new Date(due + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() - 2);
+      due = d.toISOString().slice(0, 10);
+    }
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: `Build ${c.channel}: ${c.title} (sends ${c.date?.slice(5) || 'TBD'})`,
+          description: `Goal: ${c.goal || '—'} · Audience: ${c.audience || '—'}
+Subject/variants: ${(c.subjectLines || []).join(' | ') || '—'}
+Hero: ${c.heroHeadline || '—'}
+CTA: ${c.cta || '—'}
+Design: ${c.designBrief || '—'}`,
+          dueDate: due || undefined,
+          priority: 'medium',
+          link: '/dashboard/retention',
+        }),
+      });
+      if (!res.ok) throw new Error('Task create failed');
+      setTaskCreated(prev => ({ ...prev, [key]: true }));
+    } catch {
+      alert('Could not create the task — try again.');
+    }
+  }
+
   const ov = data?.overview;
 
   return (
@@ -255,9 +290,18 @@ ${c.designBrief || '—'}`;
                       {c.cta && <p><b>CTA:</b> {c.cta}</p>}
                       {c.designBrief && <p className="bg-violet-50 border border-violet-100 rounded-lg px-3 py-2 whitespace-pre-wrap"><b>🎨 Design brief:</b> {c.designBrief}</p>}
                       {c.bestPractice && <p className="text-gray-400">💡 {c.bestPractice}</p>}
-                      <button onClick={() => copyBrief(c)} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600">
-                        {copied === c.title ? '✓ Copied' : '📋 Copy full brief'}
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button onClick={() => copyBrief(c)} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600">
+                          {copied === c.title ? '✓ Copied' : '📋 Copy full brief'}
+                        </button>
+                        <button
+                          onClick={() => sendCampaignToTasks(c, key)}
+                          disabled={!!taskCreated[key]}
+                          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-violet-50 border border-violet-200 text-violet-700 hover:bg-violet-100 disabled:opacity-60"
+                        >
+                          {taskCreated[key] ? '✓ On Tasks board' : '📋 → Task'}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

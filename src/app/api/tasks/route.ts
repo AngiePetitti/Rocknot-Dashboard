@@ -25,6 +25,7 @@ export interface Task {
   updatedAt: string;
   completedAt?: string;
   order: number;          // position within its column
+  link?: string;          // e.g. /brief/<id> — rendered as an Open link on the card
 }
 
 const DOC = 'tasks';
@@ -57,6 +58,7 @@ function clean(input: Record<string, unknown>): Partial<Task> {
   if (PRIORITIES.includes(input.priority as typeof PRIORITIES[number])) out.priority = input.priority as Task['priority'];
   if (STATUSES.includes(input.status as TaskStatus)) out.status = input.status as TaskStatus;
   if (typeof input.order === 'number' && Number.isFinite(input.order)) out.order = input.order;
+  if (typeof input.link === 'string' && input.link.length <= 500 && (input.link.startsWith('/') || /^https:\/\//.test(input.link))) out.link = input.link;
   return out;
 }
 
@@ -84,6 +86,7 @@ export async function POST(req: NextRequest) {
       dueDate: fields.dueDate || undefined,
       priority: fields.priority || 'medium',
       status,
+      ...(fields.link ? { link: fields.link } : {}),
       createdAt: now,
       updatedAt: now,
       ...(auth.author ? { createdBy: auth.author } : {}),

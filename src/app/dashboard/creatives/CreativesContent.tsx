@@ -80,6 +80,30 @@ export default function CreativesContent() {
   }
   interface BriefStatus { status?: string; notes?: string }
   const [briefStatuses, setBriefStatuses] = useState<Record<string, BriefStatus>>({});
+  const [taskCreatedFor, setTaskCreatedFor] = useState<Record<string, boolean>>({});
+
+  // One tap: brief → card on the Tasks board (In Progress) + mark it in
+  // production here, so "we're making this" lives in one place.
+  async function sendBriefToTasks(b: { id: string; title: string; track: string }, trackLabel: string) {
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: `Produce: ${b.title}`,
+          description: `${trackLabel} creative brief — full spec at the link.`,
+          status: 'in_progress',
+          priority: 'medium',
+          link: `/brief/${b.id}`,
+        }),
+      });
+      if (!res.ok) throw new Error('Task create failed');
+      setTaskCreatedFor(prev => ({ ...prev, [b.id]: true }));
+      if ((briefStatuses[b.id]?.status ?? 'new') === 'new') setBriefStatus(b.id, 'production');
+    } catch {
+      alert('Could not create the task — try again.');
+    }
+  }
   const [showSkippedBriefs, setShowSkippedBriefs] = useState(false);
   const [showCompletedBriefs, setShowCompletedBriefs] = useState(false);
   const [notesOpenFor, setNotesOpenFor] = useState<string | null>(null);
@@ -392,6 +416,15 @@ export default function CreativesContent() {
                     <button onClick={() => copyBriefLink(b.id)} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600">
                       {copiedLink === b.id ? '✓ Link copied' : '🔗 Copy link'}
                     </button>
+                    {st !== 'completed' && st !== 'skipped' && (
+                      <button
+                        onClick={() => sendBriefToTasks(b, meta.label)}
+                        disabled={!!taskCreatedFor[b.id]}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-violet-50 border border-violet-200 text-violet-700 hover:bg-violet-100 disabled:opacity-60"
+                      >
+                        {taskCreatedFor[b.id] ? '✓ On Tasks board' : '📋 → Task'}
+                      </button>
+                    )}
                     {st !== 'production' && st !== 'completed' && (
                       <button onClick={() => setBriefStatus(b.id, 'production')} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100">▶ In production</button>
                     )}
