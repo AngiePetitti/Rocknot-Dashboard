@@ -116,17 +116,23 @@ export async function GET() {
     const todayOrders = todayData?.orders ?? 0;
     const avgDayRevenue = pastDays.length ? pastDays.reduce((s, d) => s + d.total, 0) / pastDays.length : 0;
 
-    // Yesterday measured through the SAME hour bucket — the honest baseline
-    // for "are we up or down today" (Shopify's own compare works this way).
+    // Yesterday measured through the current WALL-CLOCK hour in the store's
+    // timezone — the honest baseline for "are we up or down today"
+    // (Shopify's own compare works this way). Deliberately not the
+    // data-driven nowHour: ShopifyQL's hourly table can lag behind live
+    // sales, and a lagged nowHour of 0 made yesterday-so-far collapse to
+    // nothing. The date is looked up by string, not array position, so a
+    // missing today row can't shift "yesterday" a day back.
     let yesterdaySoFar: number | null = null;
     let yesterdayTotal: number | null = null;
     {
-      const yDate0 = dates[dates.length - 2];
-      const yData0 = yDate0 ? byDay.get(yDate0) : undefined;
+      const clockHour = Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hourCycle: 'h23' }).format(new Date()));
+      const yDateStr = new Date(new Date(`${today}T12:00:00Z`).getTime() - 86400000).toISOString().slice(0, 10);
+      const yData0 = byDay.get(yDateStr);
       if (yData0 && yData0.total > 0) {
         let ySo = 0;
-        for (let h = 0; h < nowHour; h++) ySo += yData0.rev[h];
-        ySo += (yData0.rev[nowHour] || 0) * 0.5;
+        for (let h = 0; h < clockHour; h++) ySo += yData0.rev[h];
+        ySo += (yData0.rev[clockHour] || 0) * 0.5;
         yesterdaySoFar = Math.round(ySo);
         yesterdayTotal = Math.round(yData0.total);
       }
