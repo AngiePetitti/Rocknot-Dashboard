@@ -616,14 +616,10 @@ export default function OverviewContent() {
           subtitle={`${metrics.totalOrders} orders`}
           accentColor="#c4b5fd"
           comparison={
-            // Today: time-of-day-aware — today's live revenue vs yesterday
-            // through the same wall-clock hour, matching how Shopify's own
-            // app computes its up/down %. Current side uses the card's own
-            // live number (Windsor) because ShopifyQL's hourly table can lag
-            // and briefly report today as $0.
-            tfRaw === 'today' && todayForecast?.yesterdaySoFar && metrics.totalRevenue > 0
-              ? { current: metrics.totalRevenue, prior: todayForecast.yesterdaySoFar, label: 'vs yesterday at this time' }
-              : tfRaw === 'today'
+            // No intraday delta on the Today view — a partial day has no
+            // trustworthy baseline (the hourly analytics table lags live
+            // sales). Complete periods compare like-for-like.
+            tfRaw === 'today'
               ? undefined
               : priorPeriod
               ? {
