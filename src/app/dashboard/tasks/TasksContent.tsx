@@ -324,7 +324,19 @@ export default function TasksContent() {
 
                       {isOpen && (
                         <div className="mt-2 pl-4 space-y-2">
-                          {t.description && <p className="text-xs text-gray-500 whitespace-pre-wrap">{t.description}</p>}
+                          <input
+                            defaultValue={t.title}
+                            placeholder="Task title"
+                            onBlur={e => { const v = e.target.value.trim(); if (v && v !== t.title) updateTask(t.id, { title: v }); }}
+                            className="w-full px-2 py-1 border border-gray-200 rounded-lg text-sm font-semibold focus:outline-none focus:ring-1 focus:ring-violet-300"
+                          />
+                          <textarea
+                            defaultValue={t.description || ''}
+                            placeholder="Details (optional)"
+                            rows={3}
+                            onBlur={e => { if (e.target.value !== (t.description || '')) updateTask(t.id, { description: e.target.value }); }}
+                            className="w-full px-2 py-1 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-violet-300"
+                          />
                           <div className="grid grid-cols-2 gap-2">
                             <select
                               value={t.assignee || ''}
