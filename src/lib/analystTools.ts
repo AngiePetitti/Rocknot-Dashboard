@@ -4,9 +4,17 @@ import type Anthropic from '@anthropic-ai/sdk';
 // The analyst queries the dashboard's own APIs. Fetches forward the caller's
 // session cookie (auth middleware) and use this deployment's origin.
 export function makeFetcher(origin: string, cookie: string) {
-  return async (path: string): Promise<Record<string, unknown> | null> => {
+  return async (path: string, init?: { method?: string; body?: Record<string, unknown> }): Promise<Record<string, unknown> | null> => {
     try {
-      const res = await fetch(`${origin}${path}`, { cache: 'no-store', headers: cookie ? { cookie } : undefined });
+      const res = await fetch(`${origin}${path}`, {
+        cache: 'no-store',
+        method: init?.method || 'GET',
+        headers: {
+          ...(cookie ? { cookie } : {}),
+          ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        ...(init?.body ? { body: JSON.stringify(init.body) } : {}),
+      });
       if (!res.ok) return null;
       return await res.json();
     } catch {
@@ -15,7 +23,7 @@ export function makeFetcher(origin: string, cookie: string) {
   };
 }
 
-export type Getter = (p: string) => Promise<Record<string, unknown> | null>;
+export type Getter = (p: string, init?: { method?: string; body?: Record<string, unknown> }) => Promise<Record<string, unknown> | null>;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 function daysBetween(a: string, b: string): number {
@@ -140,6 +148,26 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     name: 'get_goals',
     description: "The company's monthly revenue goals and ad-spend budgets (the Goals tab plan, including which months are pinned/manually set). Compare against get_metrics actuals to judge pace toward the annual target.",
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_tasks',
+    description: "The team's internal Kanban task board (Tasks tab): every task with status (todo/in_progress/done), assignee, due date and priority. Check before creating a task to avoid duplicates.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'create_task',
+    description: "Create a task on the team's Tasks board. Use when the user asks you to add/create a task or when they agree to your offer to log one. Never create duplicates — call get_tasks first if unsure.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short task title' },
+        description: { type: 'string', description: 'Details/context (optional)' },
+        assignee: { type: 'string', description: 'Team member name (optional)' },
+        due_date: { type: 'string', description: 'YYYY-MM-DD (optional)' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Default medium' },
+      },
+      required: ['title'],
+    },
   },
   {
     name: 'get_month_notes',
@@ -325,6 +353,33 @@ By order count: 1 order ${m.oneOrderCount?.toLocaleString?.() ?? '?'} (LTV $${m.
     return `Monthly plan (Goals tab) — planned total $${total.toLocaleString()}:\n${goals.sort((a, b) => a.month.localeCompare(b.month)).map(g =>
       `${g.month}: revenue goal $${g.revenueGoal.toLocaleString()} · ad budget $${g.adBudget.toLocaleString()}${g.pinned ? ' (pinned/manual)' : ''}`
     ).join('\n')}`;
+  }
+
+  if (name === 'get_tasks') {
+    const d = await get('/api/tasks');
+    const tasks = (d?.tasks as Array<{ title: string; status: string; assignee?: string; dueDate?: string; priority: string }>) ?? [];
+    if (!tasks.length) return 'The Tasks board is empty.';
+    const line = (t: typeof tasks[number]) => `- ${t.title} [${t.status}] ${t.assignee ? `@${t.assignee} ` : ''}${t.dueDate ? `due ${t.dueDate} ` : ''}(${t.priority})`;
+    return `Tasks board (${tasks.filter(t => t.status !== 'done').length} open):\n${tasks.map(line).join('\n')}`;
+  }
+
+  if (name === 'create_task') {
+    const title = String(input.title ?? '').trim();
+    if (!title) return 'Error: title is required.';
+    const due = String(input.due_date ?? '');
+    if (due && !DATE_RE.test(due)) return 'Error: due_date must be YYYY-MM-DD.';
+    const d = await get('/api/tasks', {
+      method: 'POST',
+      body: {
+        title,
+        description: String(input.description ?? ''),
+        assignee: String(input.assignee ?? ''),
+        dueDate: due,
+        priority: ['low', 'medium', 'high'].includes(String(input.priority)) ? String(input.priority) : 'medium',
+      },
+    });
+    if (!d?.ok) return 'Error: could not create the task (are you signed in with task access?).';
+    return `Created task "${title}"${input.assignee ? ` assigned to ${input.assignee}` : ''}${due ? `, due ${due}` : ''} — it's on the Tasks tab in To Do.`;
   }
 
   if (name === 'get_month_notes') {
