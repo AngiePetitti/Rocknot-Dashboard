@@ -16,6 +16,7 @@ const navItems = [
   { href: '/dashboard/attribution', label: 'Attribution', icon: '🔗' },
   { href: '/dashboard/calendar', label: 'Marketing Calendar', icon: '📅' },
   { href: '/dashboard/goals', label: 'Goals', icon: '🏁' },
+  { href: '/dashboard/tasks', label: 'Tasks', icon: '✅' },
   { href: '/dashboard/insights', label: 'AI Insights', icon: '✦' },
   // Admin-only — filtered below by role.
   { href: '/dashboard/financials', label: 'Financials', icon: '💰', adminOnly: true },
