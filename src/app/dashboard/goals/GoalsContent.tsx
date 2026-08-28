@@ -23,12 +23,18 @@ function monthKey(y: number, m: number): string {
   return `${y}-${String(m).padStart(2, '0')}`;
 }
 
-// Aggregate a daily revenueData series into per-month totals.
+// Aggregate a daily revenueData series into per-month totals. Excludes
+// today's PARTIAL day so the current month holds complete days only —
+// otherwise the month-end pace projection counts today's revenue without
+// counting today as an elapsed day and lands way above the Overview's
+// forecast for the same month.
 function byMonth(daily: { date: string; revenue: number; adSpend: number }[]): Record<string, MonthActual> {
+  const t = pstToday();
+  const todayStr = `${t.y}-${String(t.m).padStart(2, '0')}-${String(t.d).padStart(2, '0')}`;
   const out: Record<string, MonthActual> = {};
   for (const r of daily) {
     const k = (r.date || '').slice(0, 7);
-    if (!k) continue;
+    if (!k || r.date >= todayStr) continue;
     if (!out[k]) out[k] = { revenue: 0, adSpend: 0 };
     out[k].revenue += r.revenue || 0;
     out[k].adSpend += r.adSpend || 0;
