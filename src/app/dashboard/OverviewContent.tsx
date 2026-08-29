@@ -96,14 +96,6 @@ export default function OverviewContent() {
     platforms: Array<{ platform: string; dashboardSpend: number; referenceSpend: number | null; referenceSource: string; diff: number | null; diffPct: number | null; status: string }>;
   }>(null);
 
-  const [todayForecast, setTodayForecast] = useState<null | {
-    todaySoFar: number; forecastRevenue: number; forecastOrders: number | null;
-    dayFraction: number; avgDayRevenue: number; lowConfidence: boolean;
-    backtest?: { projected: number; actual: number } | null;
-    yesterdaySoFar?: number | null; yesterdayTotal?: number | null;
-  }>(null);
-  const [forecastError, setForecastError] = useState<string | null>(null);
-
   // ── Personal task reminder: each person's own open tasks, front and
   //    center when they log in ──
   const { data: session } = useSession();
@@ -136,21 +128,6 @@ export default function OverviewContent() {
   const myOverdue = myTasks.filter(t => t.dueDate && t.dueDate < new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }));
   const todayPst = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const myDueToday = myTasks.filter(t => t.dueDate === todayPst);
-  useEffect(() => {
-    if (tfRaw !== 'today') { setTodayForecast(null); setForecastError(null); return; }
-    let alive = true;
-    const load = () => fetch('/api/forecast/today', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(d => {
-        if (!alive) return;
-        if (typeof d?.forecastRevenue === 'number') setTodayForecast(d);
-        else setForecastError(String(d?.error || 'no data returned'));
-      })
-      .catch(e => { if (alive) setForecastError(String(e)); });
-    load();
-    const t = setInterval(load, 5 * 60 * 1000); // refresh every 5 min while watching
-    return () => { alive = false; clearInterval(t); };
-  }, [tfRaw]);
 
   // Profitability data (admin-only; 403 for others hides the card): QB
   // actuals for booked months in the range, plus cost rates for estimating
@@ -585,43 +562,6 @@ export default function OverviewContent() {
           </div>
         </Card>
       </div>
-
-      {/* Today's end-of-day forecast — live view only. Always renders (with an
-          honest status) so a failing forecast is visible, never just missing. */}
-      {tfRaw === 'today' && (todayForecast || forecastError) && (
-        <Card accentColor="#a5b4fc" className="mb-4">
-          {todayForecast ? (
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-              <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wider">📈 Today&apos;s Forecast</p>
-                <p className="text-2xl font-bold" style={{ color: todayForecast.lowConfidence ? '#9ca3af' : todayForecast.forecastRevenue >= todayForecast.avgDayRevenue ? '#22c55e' : '#f59e0b' }}>
-                  {formatCurrency(todayForecast.forecastRevenue)}
-                </p>
-              </div>
-              <div className="text-xs text-gray-500 leading-relaxed">
-                {todayForecast.lowConfidence ? (
-                  <>Too early in the day for a pace-based projection — showing the 7-day average day ({formatCurrency(todayForecast.avgDayRevenue)}) until enough of today is in.</>
-                ) : (
-                  <>
-                    {formatCurrency(todayForecast.todaySoFar)} so far ÷ {todayForecast.dayFraction}% (share of a typical day&apos;s revenue in by this hour).
-                    {todayForecast.forecastOrders ? <> ~{todayForecast.forecastOrders} orders expected.</> : null}
-                    <br />
-                    7-day avg full day: {formatCurrency(todayForecast.avgDayRevenue)} · tracking {todayForecast.forecastRevenue >= todayForecast.avgDayRevenue ? 'ahead of' : 'behind'} pace
-                    {todayForecast.backtest && (
-                      <>
-                        <br />
-                        Accuracy check: at this hour yesterday, this method projected {formatCurrency(todayForecast.backtest.projected)} — actual close {formatCurrency(todayForecast.backtest.actual)}
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          ) : (
-            <p className="text-xs text-gray-400">📈 Today&apos;s forecast unavailable — {forecastError}</p>
-          )}
-        </Card>
-      )}
 
       {/* Net profit — admin-only (basis endpoint 403s for others). Booked
           months show QuickBooks ACTUALS; only the unbooked remainder is
