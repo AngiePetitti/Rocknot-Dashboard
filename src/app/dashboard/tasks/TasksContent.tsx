@@ -38,6 +38,29 @@ function todayStr(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 }
 
+// Each non-empty description line is a checklist item; a "[x] " prefix marks
+// it done. The state lives in the description text itself so it syncs through
+// the same save path (and reads fine as plain text in the Sheet).
+const CHECKED_RE = /^\[x\]\s?/i;
+function parseChecklist(desc: string): { text: string; checked: boolean; lineIdx: number }[] {
+  return desc.split('\n')
+    .map((line, lineIdx) => ({ line, lineIdx }))
+    .filter(({ line }) => line.trim() !== '')
+    .map(({ line, lineIdx }) => ({
+      text: line.replace(CHECKED_RE, '').trim(),
+      checked: CHECKED_RE.test(line.trim()),
+      lineIdx,
+    }));
+}
+function toggleChecklistLine(desc: string, lineIdx: number): string {
+  const lines = desc.split('\n');
+  const line = lines[lineIdx] ?? '';
+  lines[lineIdx] = CHECKED_RE.test(line.trim())
+    ? line.trim().replace(CHECKED_RE, '')
+    : `[x] ${line.trim()}`;
+  return lines.join('\n');
+}
+
 function dueMeta(dueDate: string | undefined, status: TaskStatus): { text: string; cls: string } | null {
   if (!dueDate) return null;
   const today = todayStr();
@@ -55,6 +78,7 @@ export default function TasksContent() {
   const [adding, setAdding] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [editDescFor, setEditDescFor] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<TaskStatus | null>(null);
   const [filterAssignee, setFilterAssignee] = useState('');
 
@@ -310,6 +334,16 @@ export default function TasksContent() {
                           <span className="text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-100 rounded-full px-2 py-0.5">{t.assignee}</span>
                         )}
                         {due && <span className={`text-[11px] ${due.cls}`}>📅 {due.text}</span>}
+                        {t.description && (() => {
+                          const items = parseChecklist(t.description);
+                          if (!items.length) return null;
+                          const done = items.filter(i => i.checked).length;
+                          return (
+                            <span className={`text-[11px] font-semibold ${done === items.length ? 'text-green-600' : 'text-gray-400'}`}>
+                              ☑ {done}/{items.length}
+                            </span>
+                          );
+                        })()}
                         {t.link && (
                           <a
                             href={t.link}
@@ -330,13 +364,35 @@ export default function TasksContent() {
                             onBlur={e => { const v = e.target.value.trim(); if (v && v !== t.title) updateTask(t.id, { title: v }); }}
                             className="w-full px-2 py-1 border border-gray-200 rounded-lg text-sm font-semibold focus:outline-none focus:ring-1 focus:ring-violet-300"
                           />
-                          <textarea
-                            defaultValue={t.description || ''}
-                            placeholder="Details (optional)"
-                            rows={3}
-                            onBlur={e => { if (e.target.value !== (t.description || '')) updateTask(t.id, { description: e.target.value }); }}
-                            className="w-full px-2 py-1 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-violet-300"
-                          />
+                          {editDescFor === t.id || !t.description ? (
+                            <textarea
+                              defaultValue={t.description || ''}
+                              placeholder="Details — each line becomes a checkbox"
+                              rows={3}
+                              autoFocus={editDescFor === t.id}
+                              onBlur={e => {
+                                if (e.target.value !== (t.description || '')) updateTask(t.id, { description: e.target.value });
+                                setEditDescFor(null);
+                              }}
+                              className="w-full px-2 py-1 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-violet-300"
+                            />
+                          ) : (
+                            <div className="space-y-0.5">
+                              {parseChecklist(t.description).map(item => (
+                                <button
+                                  key={item.lineIdx}
+                                  onClick={() => updateTask(t.id, { description: toggleChecklistLine(t.description!, item.lineIdx) })}
+                                  className="flex items-start gap-2 text-left w-full group"
+                                >
+                                  <span className={`mt-0.5 w-3.5 h-3.5 shrink-0 rounded border text-[9px] font-bold flex items-center justify-center ${item.checked ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 bg-white group-hover:border-violet-400'}`}>
+                                    {item.checked ? '✓' : ''}
+                                  </span>
+                                  <span className={`text-xs ${item.checked ? 'text-gray-300 line-through' : 'text-gray-600'}`}>{item.text}</span>
+                                </button>
+                              ))}
+                              <button onClick={() => setEditDescFor(t.id)} className="text-[10px] text-gray-300 hover:text-gray-500 font-semibold">✏️ Edit list</button>
+                            </div>
+                          )}
                           <div className="grid grid-cols-2 gap-2">
                             <select
                               value={t.assignee || ''}
