@@ -1,6 +1,8 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { useSession } from 'next-auth/react';
 import { useEffect, useMemo, useState } from 'react';
 import { buildCallouts } from '@/src/lib/callouts';
 import { cachedJson } from '@/src/lib/clientCache';
@@ -101,6 +103,39 @@ export default function OverviewContent() {
     yesterdaySoFar?: number | null; yesterdayTotal?: number | null;
   }>(null);
   const [forecastError, setForecastError] = useState<string | null>(null);
+
+  // ── Personal task reminder: each person's own open tasks, front and
+  //    center when they log in ──
+  const { data: session } = useSession();
+  const [allTasks, setAllTasks] = useState<{ title: string; status: string; assignee?: string; dueDate?: string; priority: string }[]>([]);
+  useEffect(() => {
+    fetch('/api/tasks', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d?.tasks)) setAllTasks(d.tasks); })
+      .catch(() => {});
+  }, []);
+
+  const myTasks = useMemo(() => {
+    const user = session?.user;
+    if (!user) return [];
+    // Assignees are casual first names ("Angie") while logins are emails —
+    // match on the first 3 letters of the first token of each identity so
+    // "Angie" still finds "Angely" / "angie@…".
+    const idents = [user.name || '', (user.email || '').split('@')[0]]
+      .map(s => s.trim().toLowerCase().split(/[\s._-]+/)[0])
+      .filter(s => s.length >= 3)
+      .map(s => s.slice(0, 3));
+    if (!idents.length) return [];
+    const open = allTasks.filter(t => t.status !== 'done' && t.assignee);
+    return open.filter(t => {
+      const a = t.assignee!.trim().toLowerCase().split(/[\s._-]+/)[0].slice(0, 3);
+      return a.length >= 3 && idents.includes(a);
+    });
+  }, [allTasks, session]);
+
+  const myOverdue = myTasks.filter(t => t.dueDate && t.dueDate < new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }));
+  const todayPst = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const myDueToday = myTasks.filter(t => t.dueDate === todayPst);
   useEffect(() => {
     if (tfRaw !== 'today') { setTodayForecast(null); setForecastError(null); return; }
     let alive = true;
@@ -345,6 +380,37 @@ export default function OverviewContent() {
       >
         <TimeframeSelector />
       </Header>
+
+      {/* ── Loud personal task reminder ── */}
+      {myTasks.length > 0 && (
+        <Link
+          href="/dashboard/tasks"
+          className={`block rounded-2xl border-2 px-4 py-3 mb-4 shadow-sm transition-transform active:scale-[0.99] ${
+            myOverdue.length ? 'bg-red-50 border-red-300' : 'bg-amber-50 border-amber-300'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${myOverdue.length ? 'bg-red-500' : 'bg-amber-500'}`} />
+            <p className={`text-sm font-bold ${myOverdue.length ? 'text-red-700' : 'text-amber-700'}`}>
+              {myOverdue.length
+                ? `🔔 You have ${myOverdue.length} OVERDUE task${myOverdue.length > 1 ? 's' : ''}${myDueToday.length ? ` + ${myDueToday.length} due today` : ''}`
+                : myDueToday.length
+                ? `🔔 You have ${myDueToday.length} task${myDueToday.length > 1 ? 's' : ''} due TODAY`
+                : `🔔 You have ${myTasks.length} open task${myTasks.length > 1 ? 's' : ''} on the board`}
+            </p>
+            <span className={`ml-auto text-xs font-semibold ${myOverdue.length ? 'text-red-600' : 'text-amber-600'}`}>Open board →</span>
+          </div>
+          <ul className="mt-1.5 space-y-0.5 pl-4">
+            {[...myOverdue, ...myDueToday, ...myTasks.filter(t => !myOverdue.includes(t) && !myDueToday.includes(t))].slice(0, 4).map((t, i) => (
+              <li key={i} className="text-xs text-gray-600 list-disc">
+                {t.title}
+                {t.dueDate && <span className={t.dueDate < todayPst ? 'text-red-600 font-semibold' : 'text-gray-400'}> · due {t.dueDate.slice(5)}</span>}
+              </li>
+            ))}
+            {myTasks.length > 4 && <li className="text-xs text-gray-400 list-disc">+{myTasks.length - 4} more…</li>}
+          </ul>
+        </Link>
+      )}
 
       {/* Live indicator */}
       <div className="flex items-center gap-2 mb-4">
