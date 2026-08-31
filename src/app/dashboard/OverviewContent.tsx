@@ -94,6 +94,7 @@ export default function OverviewContent() {
   const [returnsSnapshot, setReturnsSnapshot] = useState<any | null>(null);
   const [revenueSource, setRevenueSource] = useState<'shopify' | 'none' | null>(null);
   const [adsError, setAdsError] = useState<string | null>(null);
+  const [shopifyLiveError, setShopifyLiveError] = useState<string | null>(null);
   const [health, setHealth] = useState<null | {
     allOk: boolean;
     platforms: Array<{ platform: string; dashboardSpend: number; referenceSpend: number | null; referenceSource: string; diff: number | null; diffPct: number | null; status: string }>;
@@ -257,6 +258,7 @@ export default function OverviewContent() {
         setShopifyDataLag(!!data.shopifyDataLag);
         setShopifyLatestDate((data.shopifyLatestDate as string) || null);
         setRevenueSource((data.revenueSource as 'shopify' | 'none') || null);
+        setShopifyLiveError((data.shopifyLiveError as string) || null);
         setLiveSource(source as typeof liveSource);
         setLastUpdated(new Date().toLocaleTimeString());
       },
@@ -501,6 +503,7 @@ export default function OverviewContent() {
           <span>ℹ️</span>
           <span>
             Shopify hasn&apos;t synced revenue for this period yet — revenue and orders will show as 0 until Shopify syncs. Platform-attributed revenue is shown in the platform table below.
+            {shopifyLiveError && <> Shopify&apos;s live query also failed: {shopifyLiveError} — tap Refresh to retry.</>}
           </span>
         </div>
       )}

@@ -521,8 +521,21 @@ export async function GET(request: NextRequest) {
     // For today/yesterday, override Shopify revenue/orders with a direct
     // ShopifyQL query — Windsor's sync delay means the /all endpoint lags
     // by up to an hour, while Shopify's own API is always live.
+    let shopifyLiveError: string | null = null;
     if (!latestAvailableDate) {
-      const shopifyLive = await fetchShopifyDaily(currentParams.date_from, currentParams.date_to).catch(() => []);
+      // Retry once — a throttled/transient ShopifyQL failure here used to
+      // silently render $0 revenue for the whole period.
+      let shopifyLive: Awaited<ReturnType<typeof fetchShopifyDaily>> = [];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          shopifyLive = await fetchShopifyDaily(currentParams.date_from, currentParams.date_to);
+          shopifyLiveError = null;
+          if (shopifyLive.length > 0) break;
+        } catch (e) {
+          shopifyLiveError = String(e instanceof Error ? e.message : e);
+        }
+        if (attempt === 0) await new Promise(r => setTimeout(r, 1200));
+      }
       if (shopifyLive.length > 0) {
         const liveRevenue = shopifyLive.reduce((s, d) => s + d.totalSales, 0);
         const liveOrders = shopifyLive.reduce((s, d) => s + d.orders, 0);
@@ -682,6 +695,7 @@ export async function GET(request: NextRequest) {
       metrics: current.metrics,
       revenueData: current.revenueData,
       ...(latestAvailableDate ? { dataLag: true, latestAvailableDate } : {}),
+      ...(shopifyLiveError && current.metrics.totalRevenue === 0 ? { shopifyLiveError } : {}),
       ...(priorPeriod ? { priorPeriod, priorLabel } : {}),
       ...(lastWindsorError ? { adsError: `Windsor API error: ${lastWindsorError} — if the API key was rotated, update WINDSOR_API_KEY in Vercel and redeploy.` } : {}),
     }, { headers: cacheHeaders(includesToday) });

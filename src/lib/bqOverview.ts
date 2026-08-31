@@ -82,6 +82,10 @@ export async function fetchShopifyDaily(from: string, to: string): Promise<Shopi
     cache: 'no-store',
   });
   const json = await res.json();
+  // Top-level GraphQL errors (throttling, auth, scope) come back OUTSIDE
+  // data.shopifyqlQuery — swallowing them silently rendered $0 revenue.
+  const topErrors = (json?.errors as Array<{ message?: string }> | undefined) || [];
+  if (topErrors.length) throw new Error(topErrors.map(e => e.message).join('; ') || 'Shopify GraphQL error');
   const q = json?.data?.shopifyqlQuery;
   if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
   const cols: { name: string }[] = q?.tableData?.columns || [];
