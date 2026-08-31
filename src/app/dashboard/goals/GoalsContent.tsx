@@ -449,7 +449,7 @@ export default function GoalsContent() {
                       ) : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="py-2.5 pr-4 whitespace-nowrap">
-                      {isAdmin && !isPast ? (
+                      {isAdmin ? (
                         <span className="inline-flex items-center gap-1">
                           <input
                             type="number"
@@ -478,7 +478,7 @@ export default function GoalsContent() {
                       ) : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="py-2.5 pr-4 whitespace-nowrap">
-                      {isAdmin && !isPast ? (
+                      {isAdmin ? (
                         <input
                           type="number"
                           value={g?.adBudget || ''}
