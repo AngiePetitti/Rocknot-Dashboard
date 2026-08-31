@@ -501,10 +501,57 @@ export default function GoalsContent() {
                 );
               })}
             </tbody>
+            {/* ── Year totals ── */}
+            {(() => {
+              const actualTotal = months.reduce((s, k, i) => {
+                const n = i + 1;
+                if (n < curMonth) return s + (actuals[k]?.revenue || 0);
+                if (n === curMonth) return s + Math.max(currentForecast?.revenue || 0, 0);
+                return s;
+              }, 0);
+              const spendTotal = months.reduce((s, k, i) => {
+                const n = i + 1;
+                if (n < curMonth) return s + (actuals[k]?.adSpend || 0);
+                if (n === curMonth) return s + Math.max(currentForecast?.adSpend || 0, 0);
+                return s;
+              }, 0);
+              const unitsTotal = aov > 0 ? Math.ceil(goalTotal / aov) : null;
+              const yearPct = goalTotal > 0 ? (plannedTotal / goalTotal) * 100 : null;
+              return (
+                <tfoot>
+                  <tr className="border-t-2 border-gray-200 bg-gray-50/60 font-semibold">
+                    <td className="py-2.5 pr-4 text-gray-800 whitespace-nowrap">TOTAL</td>
+                    <td className="py-2.5 pr-4 text-gray-800 whitespace-nowrap">
+                      {formatCurrency(actualTotal)}
+                      <span className="text-[10px] text-gray-400 font-normal ml-1">so far{currentForecast ? ' incl. proj.' : ''}</span>
+                    </td>
+                    <td className="py-2.5 pr-4 text-gray-800 whitespace-nowrap">{goalTotal > 0 ? formatCurrency(goalTotal) : '—'}</td>
+                    <td className="py-2.5 pr-4 whitespace-nowrap">
+                      {yearPct !== null ? (
+                        <span className="text-xs font-bold" style={{ color: yearPct >= 100 ? '#16a34a' : yearPct >= 90 ? '#d97706' : '#dc2626' }}>
+                          {yearPct.toFixed(0)}%
+                        </span>
+                      ) : '—'}
+                    </td>
+                    <td className="py-2.5 pr-4 text-gray-800 whitespace-nowrap">{budgetTotal > 0 ? formatCurrency(budgetTotal) : '—'}</td>
+                    <td className="py-2.5 pr-4 text-gray-600 whitespace-nowrap">{spendTotal > 0 ? formatCurrency(spendTotal) : '—'}</td>
+                    <td className="py-2.5 text-gray-600 whitespace-nowrap">{unitsTotal ? `~${unitsTotal.toLocaleString()}` : '—'}</td>
+                  </tr>
+                </tfoot>
+              );
+            })()}
           </table>
         </div>
+        {goalTotal > 0 && Math.abs(goalTotal + months.reduce((s, k, i) => (i + 1 < curMonth && !goals[k]?.revenueGoal ? s + (actuals[k]?.revenue || 0) : s), 0) - target) > target * 0.01 && (
+          <p className="text-[11px] text-amber-600 mt-2">
+            ⚠ Monthly goals{months.some((k, i) => i + 1 < curMonth && !goals[k]?.revenueGoal) ? ' + past actuals (months with no goal set)' : ''} sum to{' '}
+            {formatCurrency(goalTotal + months.reduce((s, k, i) => (i + 1 < curMonth && !goals[k]?.revenueGoal ? s + (actuals[k]?.revenue || 0) : s), 0))} vs the {formatCurrency(target)} annual target —
+            tap ✨ Auto-plan to re-balance.
+          </p>
+        )}
         <p className="text-[11px] text-gray-400 mt-3">
-          Units Needed ≈ revenue goal ÷ current AOV ({aov > 0 ? formatCurrency(aov) : '—'}). Goals are shared — everyone sees them; admins edit.
+          Units Needed ≈ revenue goal ÷ current AOV ({aov > 0 ? formatCurrency(aov) : '—'}). TOTAL&apos;s &quot;vs Goal&quot; compares the
+          projected year (actuals + forecast + remaining goals) against the summed monthly goals. Goals are shared — everyone sees them; admins edit.
         </p>
       </Card>
 
