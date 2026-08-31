@@ -28,7 +28,9 @@ function monthKey(y: number, m: number): string {
 // otherwise the month-end pace projection counts today's revenue without
 // counting today as an elapsed day and lands way above the Overview's
 // forecast for the same month.
-function byMonth(daily: { date: string; revenue: number; adSpend: number }[]): Record<string, MonthActual> {
+// Goals track NET sales (the $5M target is net) — falls back to total sales
+// for days where net isn't reported.
+function byMonth(daily: { date: string; revenue: number; netSales?: number; adSpend: number }[]): Record<string, MonthActual> {
   const t = pstToday();
   const todayStr = `${t.y}-${String(t.m).padStart(2, '0')}-${String(t.d).padStart(2, '0')}`;
   const out: Record<string, MonthActual> = {};
@@ -36,7 +38,7 @@ function byMonth(daily: { date: string; revenue: number; adSpend: number }[]): R
     const k = (r.date || '').slice(0, 7);
     if (!k || r.date >= todayStr) continue;
     if (!out[k]) out[k] = { revenue: 0, adSpend: 0 };
-    out[k].revenue += r.revenue || 0;
+    out[k].revenue += (r.netSales || r.revenue) || 0;
     out[k].adSpend += r.adSpend || 0;
   }
   return out;
@@ -86,7 +88,7 @@ export default function GoalsContent() {
       })
       .catch(() => {});
 
-    cachedJson<{ source?: string; metrics?: { aov?: number }; revenueData?: { date: string; revenue: number; adSpend: number }[] }>(
+    cachedJson<{ source?: string; metrics?: { aov?: number }; revenueData?: { date: string; revenue: number; netSales?: number; adSpend: number }[] }>(
       `/api/windsor?tf=ytd`,
       d => {
         if (d.source === 'windsor_live' || d.source === 'bigquery_live') {
@@ -95,7 +97,7 @@ export default function GoalsContent() {
         }
       }
     );
-    cachedJson<{ source?: string; revenueData?: { date: string; revenue: number; adSpend: number }[] }>(
+    cachedJson<{ source?: string; revenueData?: { date: string; revenue: number; netSales?: number; adSpend: number }[] }>(
       `/api/windsor?tf=custom&date_from=${year - 1}-01-01&date_to=${year - 1}-12-31`,
       d => {
         if (d.source === 'windsor_live' || d.source === 'bigquery_live') setLastYear(byMonth(d.revenueData || []));
@@ -296,7 +298,7 @@ export default function GoalsContent() {
 
   return (
     <div>
-      <Header title="Goals" subtitle={`${year} revenue plan · ad budgets · inventory needs`}>
+      <Header title="Goals" subtitle={`${year} revenue plan (net sales) · ad budgets · inventory needs`}>
         {isAdmin && (
           <button
             onClick={save}
@@ -405,7 +407,7 @@ export default function GoalsContent() {
       <Card accentColor="#93c5fd">
         <h2 className="text-sm font-bold text-gray-700 mb-1">Month-by-month plan</h2>
         <p className="text-xs text-gray-400 mb-4">
-          Past months show actuals. {MONTH_NAMES[curMonth - 1]} compares its month-end forecast to goal. Future months are the plan{isAdmin ? ' — tap a number to edit, then Save' : ''}.
+          All figures are <b>net sales</b> (after discounts &amp; returns, excl. taxes/shipping) — same basis as the annual target. Past months show actuals. {MONTH_NAMES[curMonth - 1]} compares its month-end forecast to goal. Future months are the plan{isAdmin ? ' — tap a number to edit, then Save' : ''}.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[640px]">

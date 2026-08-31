@@ -29,7 +29,7 @@ export interface OverviewResult {
     pctReturning: number;
     conversionRate: number;
   };
-  revenueData: Array<{ date: string; revenue: number; orders: number; adSpend: number; newCustomers: number; totalCustomers: number }>;
+  revenueData: Array<{ date: string; revenue: number; netSales?: number; orders: number; adSpend: number; newCustomers: number; totalCustomers: number }>;
   revenueSource: 'shopify' | 'none';
 }
 
@@ -448,7 +448,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
 
     const cd = custDailyByDate[date];
     return {
-      date, revenue: Math.round(revenue), orders, adSpend: Math.round(adSpend),
+      date, revenue: Math.round(revenue), netSales: Math.round(s ? s.netSales : 0), orders, adSpend: Math.round(adSpend),
       newCustomers: cd?.newCustomers ?? 0,
       totalCustomers: cd?.totalCustomers ?? 0,
     };
