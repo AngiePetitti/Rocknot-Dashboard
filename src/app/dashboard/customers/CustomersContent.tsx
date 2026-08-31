@@ -47,6 +47,34 @@ export default function CustomersContent() {
   const [customerMetrics, setCustomerMetrics] = useState<CustomerMetrics>(EMPTY_METRICS);
   const [cohortData, setCohortData] = useState<CohortData[]>([]);
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
+  const [payback, setPayback] = useState<{ month: string; size: number; cac: number | null; revPerCustomer: number[]; ltvToDate: number }[]>([]);
+  const [paybackError, setPaybackError] = useState<string | null>(null);
+
+  // Contribution margin before ad spend, from the booked P&L months
+  // (COGS + non-ad overhead). Falls back to 0.70 if the basis endpoint is
+  // unavailable (non-admins).
+  const [contrib, setContrib] = useState(0.7);
+
+  useEffect(() => {
+    cachedJson<{ source?: string; cohorts?: typeof payback; error?: string }>(
+      '/api/windsor/payback',
+      d => {
+        if (d.source === 'bigquery_live' && Array.isArray(d.cohorts)) setPayback(d.cohorts);
+        else setPaybackError(d.error || 'unavailable');
+      },
+      () => setPaybackError('request failed')
+    );
+    fetch('/api/financials/basis?tf=30d')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        const cogs = Number(d?.cogsPct), opex = Number(d?.nonAdOpexPct);
+        if (Number.isFinite(cogs) && Number.isFinite(opex) && cogs + opex > 0 && cogs + opex < 90) {
+          setContrib(Math.round((1 - (cogs + opex) / 100) * 100) / 100);
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     setStatus('loading');
@@ -227,6 +255,70 @@ export default function CustomersContent() {
         <p className="text-xs text-gray-400 mt-4">
           — = data not yet available for that month
         </p>
+      </Card>
+
+      {/* ── Payback & LTV ── */}
+      <Card accentColor="#86efac" className="mt-6">
+        <h2 className="text-sm font-bold text-gray-700 mb-1">💸 Payback &amp; LTV by acquisition month</h2>
+        <p className="text-xs text-gray-400 mb-4">
+          Every customer, grouped by first-purchase month. CAC = that month&apos;s total ad spend ÷ new customers.
+          Payback = when the cohort&apos;s cumulative net sales × {Math.round(contrib * 100)}% contribution margin
+          (from your booked P&amp;L) covers CAC. LTV grows as cohorts age — young cohorts aren&apos;t done yet.
+        </p>
+        {paybackError && <p className="text-xs text-red-500 mb-2">Payback data unavailable — {paybackError}</p>}
+        {payback.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  {['Cohort', 'New Customers', 'CAC', '1st-Month Rev / Cust.', 'LTV to Date / Cust.', 'Contribution vs CAC', 'Paid Back'].map(h => (
+                    <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4 whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[...payback].reverse().map(c => {
+                  const label = new Date(c.month + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+                  const m0 = c.revPerCustomer[0] ?? 0;
+                  const multiple = c.cac ? (c.ltvToDate * contrib) / c.cac : null;
+                  // First month offset where cumulative contribution covers CAC.
+                  let paidBack: string = '—';
+                  if (c.cac) {
+                    const idx = c.revPerCustomer.findIndex(r => r * contrib >= c.cac!);
+                    paidBack = idx === 0 ? '1st order' : idx > 0 ? `month ${idx + 1}` : 'not yet';
+                  }
+                  return (
+                    <tr key={c.month} className="border-b border-gray-50">
+                      <td className="py-2 pr-4 font-semibold text-gray-800 whitespace-nowrap">{label}</td>
+                      <td className="py-2 pr-4 text-gray-600 whitespace-nowrap">{c.size.toLocaleString()}</td>
+                      <td className="py-2 pr-4 text-gray-600 whitespace-nowrap">{c.cac ? formatCurrency(c.cac) : '—'}</td>
+                      <td className="py-2 pr-4 text-gray-600 whitespace-nowrap">{formatCurrency(m0)}</td>
+                      <td className="py-2 pr-4 font-semibold text-gray-800 whitespace-nowrap">{formatCurrency(c.ltvToDate)}</td>
+                      <td className="py-2 pr-4 whitespace-nowrap">
+                        {multiple !== null ? (
+                          <span className="text-xs font-bold" style={{ color: multiple >= 1 ? '#16a34a' : '#dc2626' }}>
+                            {multiple.toFixed(1)}x
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="py-2 whitespace-nowrap">
+                        <span className={`text-xs font-bold ${paidBack === '1st order' ? 'text-green-600' : paidBack === 'not yet' ? 'text-red-600' : 'text-amber-600'}`}>
+                          {paidBack}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {payback.length > 0 && (
+          <p className="text-[11px] text-gray-400 mt-3">
+            Revenue is net sales. The current month&apos;s cohort and CAC are partial. &quot;Contribution vs CAC&quot; above 1.0x means
+            the cohort has already returned more profit-before-ads than it cost to acquire.
+          </p>
+        )}
       </Card>
     </div>
   );

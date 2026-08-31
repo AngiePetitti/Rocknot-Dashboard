@@ -135,6 +135,96 @@ export async function getCustomerMetrics(dateFrom: string, dateTo: string): Prom
   };
 }
 
+// ── Payback & LTV: full-base cohort economics ──
+// For each first-purchase month (last 12): how many new customers, what the
+// ads cost to acquire them (blended CAC = that month's total ad spend ÷ new
+// customers), and how much net-sales revenue the cohort has produced per
+// customer at each month of age. The UI turns this into payback multiples.
+export interface PaybackCohort {
+  month: string;          // YYYY-MM-01
+  size: number;           // new customers acquired
+  cac: number | null;     // blended: month ad spend / size
+  revPerCustomer: number[]; // cumulative net sales per customer by month offset (0..)
+  ltvToDate: number;      // = last entry
+}
+
+export async function getPaybackLtv(): Promise<PaybackCohort[]> {
+  const ds = getDataset();
+
+  const cohortSql = `
+    WITH order_revenue AS (${dedupedOrdersCte(ds)}),
+    orders AS (
+      SELECT order_customer_id AS cid, order_date AS d, net_sales AS rev
+      FROM order_revenue WHERE order_customer_id IS NOT NULL
+    ),
+    first_order AS (
+      SELECT cid, MIN(d) AS first_date FROM orders GROUP BY cid
+    ),
+    cohorts AS (
+      SELECT cid, DATE_TRUNC(first_date, MONTH) AS cm
+      FROM first_order
+      WHERE first_date >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 12 MONTH)
+    ),
+    sizes AS (SELECT cm, COUNT(*) AS size FROM cohorts GROUP BY cm)
+    SELECT FORMAT_DATE('%Y-%m-%d', c.cm) AS cohort_month,
+           DATE_DIFF(DATE_TRUNC(o.d, MONTH), c.cm, MONTH) AS month_offset,
+           SUM(o.rev) AS revenue,
+           ANY_VALUE(s.size) AS size
+    FROM orders o
+    JOIN cohorts c USING (cid)
+    JOIN sizes s ON s.cm = c.cm
+    GROUP BY cohort_month, month_offset
+    ORDER BY cohort_month, month_offset
+  `;
+
+  // Monthly blended ad spend across all four platforms (snap guarded — the
+  // table may not exist before the connector was added).
+  const spendFor = (table: string, extra = '') => `
+    SELECT FORMAT_DATE('%Y-%m-01', DATE(date)) AS m, SUM(CAST(spend AS FLOAT64)) AS spend
+    FROM \`${ds}.${table}\`
+    WHERE DATE(date) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 12 MONTH) ${extra}
+    GROUP BY m`;
+
+  const [cohortRows, meta, google, tiktok, snap] = await Promise.all([
+    runQuery<{ cohort_month: string; month_offset: number; revenue: number; size: number }>(cohortSql),
+    runQuery<{ m: string; spend: number }>(spendFor('facebook_ads', "AND LOWER(account_name) = 'rocknot'")).catch(() => []),
+    runQuery<{ m: string; spend: number }>(spendFor('google_ads')).catch(() => []),
+    runQuery<{ m: string; spend: number }>(spendFor('tiktok_ads')).catch(() => []),
+    runQuery<{ m: string; spend: number }>(spendFor('snapchat_ads')).catch(() => []),
+  ]);
+
+  const spendByMonth: Record<string, number> = {};
+  for (const list of [meta, google, tiktok, snap]) {
+    for (const r of list) spendByMonth[r.m] = (spendByMonth[r.m] || 0) + Number(r.spend || 0);
+  }
+
+  const byCohort: Record<string, { size: number; monthly: Record<number, number> }> = {};
+  for (const r of cohortRows) {
+    const m = r.cohort_month;
+    if (!byCohort[m]) byCohort[m] = { size: Number(r.size), monthly: {} };
+    byCohort[m].monthly[Number(r.month_offset)] = Number(r.revenue || 0);
+  }
+
+  return Object.keys(byCohort).sort().map(month => {
+    const c = byCohort[month];
+    const maxOff = Math.max(0, ...Object.keys(c.monthly).map(Number));
+    const rev: number[] = [];
+    let cum = 0;
+    for (let off = 0; off <= maxOff; off++) {
+      cum += c.monthly[off] || 0;
+      rev.push(Math.round((cum / (c.size || 1)) * 100) / 100);
+    }
+    const spend = spendByMonth[month];
+    return {
+      month,
+      size: c.size,
+      cac: spend && c.size > 0 ? Math.round((spend / c.size) * 100) / 100 : null,
+      revPerCustomer: rev,
+      ltvToDate: rev[rev.length - 1] ?? 0,
+    };
+  });
+}
+
 export async function getCohortData(dateFrom: string, dateTo: string): Promise<CohortData[]> {
   const ds = getDataset();
   const params = { date_from: dateFrom, date_to: dateTo };
