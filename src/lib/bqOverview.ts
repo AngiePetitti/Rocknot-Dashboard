@@ -69,6 +69,22 @@ const SHOPIFY_DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshop
 
 export async function fetchShopifyDaily(from: string, to: string): Promise<ShopifyDay[]> {
   if (!SHOPIFY_TOKEN) return [];
+  // Shopify throttles GraphQL hard, and one page load fires several ShopifyQL
+  // queries (overview + prior compare + returns + customer split). Retry with
+  // backoff instead of letting one THROTTLED response zero out revenue.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * attempt));
+    try {
+      return await fetchShopifyDailyOnce(from, to);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
+
+async function fetchShopifyDailyOnce(from: string, to: string): Promise<ShopifyDay[]> {
   const ql = `FROM sales SHOW orders, net_sales, total_sales TIMESERIES day SINCE ${from} UNTIL ${to}`;
   const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
