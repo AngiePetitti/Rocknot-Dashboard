@@ -48,10 +48,11 @@ function writeSession(key: string, entry: Entry): void {
 export function cachedJson<T>(
   url: string,
   apply: (data: T, fromCache: boolean) => void,
-  onError?: () => void
+  onError?: () => void,
+  maxAgeMs: number = MAX_AGE_MS
 ): boolean {
   const entry = memory.get(url) ?? readSession(url);
-  const fresh = entry !== undefined && Date.now() - entry.t < MAX_AGE_MS;
+  const fresh = entry !== undefined && Date.now() - entry.t < maxAgeMs;
   if (fresh) apply(entry!.data as T, true);
 
   fetch(url, { cache: 'no-store' })

@@ -269,7 +269,12 @@ export default function OverviewContent() {
         setDataLag(false);
         setLiveSource('error');
         setLastUpdated(new Date().toLocaleTimeString());
-      }
+      },
+      // Live views move fast — a cached copy more than ~45s old reads as
+      // "wrong numbers flashing" when the fresh response swaps in, so only
+      // insta-render genuinely recent snapshots there. Historical timeframes
+      // keep the 5-minute window (their numbers barely move).
+      tfRaw === 'today' || tfRaw === 'mtd' ? 45_000 : undefined
     );
   }, [tfRaw, dateFrom, dateTo, compareOn]);
 
