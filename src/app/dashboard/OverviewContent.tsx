@@ -17,9 +17,9 @@ import RevenueChart from '@/src/components/charts/RevenueChart';
 import CACChart from '@/src/components/charts/CACChart';
 import SpendDonut from '@/src/components/charts/SpendDonut';
 
-// MER runs on NET sales (post-discount/returns, excl. taxes+shipping) — the
-// goal is rebased from the old 3.5x-on-total-sales to the equivalent ~3.3x.
-const MER_GOAL = 3.3;
+// MER runs on NET sales (post-discount/returns, excl. taxes+shipping); the
+// goal stays 3.5x on that basis — Angie's call, a deliberately higher bar.
+const MER_GOAL = 3.5;
 const TARGET_CAC = 100; // target New Customer CAC — flagged when exceeded
 
 const EMPTY_METRICS: LiveMetrics = {

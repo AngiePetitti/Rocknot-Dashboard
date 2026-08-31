@@ -10,7 +10,7 @@ import Card from '@/src/components/ui/Card';
 interface MonthGoal { month: string; revenueGoal: number; adBudget: number; pinned?: boolean }
 interface MonthActual { revenue: number; adSpend: number }
 
-const TARGET_MER = 3.3; // net-sales MER target; ad budgets are derived from this when auto-planning
+const TARGET_MER = 3.5; // net-sales MER target; ad budgets are derived from this when auto-planning
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
