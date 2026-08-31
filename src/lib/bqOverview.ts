@@ -5,6 +5,7 @@ export interface OverviewResult {
   adsError?: string;
   metrics: {
     totalRevenue: number;
+    netSales?: number;
     totalOrders: number;
     totalAdSpend: number;
     aov: number;
@@ -471,8 +472,11 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       totalRevenue: Math.round(totalRevenue),
       totalOrders,
       totalAdSpend: Math.round(totalAdSpend * 100) / 100,
+      netSales: Math.round(totalNetSales),
       aov: totalOrders > 0 ? Math.round((totalNetSales / totalOrders) * 100) / 100 : 0,
-      mer: netAdSpend > 0 ? Math.round((totalRevenue / netAdSpend) * 100) / 100 : 0,
+      // True MER: NET sales (after discounts/returns, excl. taxes+shipping)
+      // over net ad spend — total sales flattered the ratio by ~6%.
+      mer: netAdSpend > 0 ? Math.round((totalNetSales / netAdSpend) * 100) / 100 : 0,
       adCreditApplied: Math.round(adCreditApplied * 100) / 100,
       netAdSpend: Math.round(netAdSpend * 100) / 100,
       returns: 0,

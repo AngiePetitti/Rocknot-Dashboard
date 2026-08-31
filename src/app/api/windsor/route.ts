@@ -110,6 +110,7 @@ interface WindsorRow {
 
 interface AggregatedMetrics {
   totalRevenue: number;
+  netSales?: number;
   totalOrders: number;
   totalAdSpend: number;
   aov: number;
@@ -136,6 +137,7 @@ interface AggregatedMetrics {
 interface DayBucket {
   date: string;
   shopifyRevenue: number;
+  shopifyNetSales: number;
   metaRevenue: number;
   googleRevenue: number;
   tiktokRevenue: number;
@@ -151,7 +153,7 @@ interface DayBucket {
 }
 
 function emptyBucket(date: string): DayBucket {
-  return { date, shopifyRevenue: 0, metaRevenue: 0, googleRevenue: 0, tiktokRevenue: 0, snapchatRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, snapchatSpend: 0, newCustomers: 0, returningCustomers: 0 };
+  return { date, shopifyRevenue: 0, shopifyNetSales: 0, metaRevenue: 0, googleRevenue: 0, tiktokRevenue: 0, snapchatRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, snapchatSpend: 0, newCustomers: 0, returningCustomers: 0 };
 }
 
 function aggregateRows(rows: WindsorRow[]) {
@@ -177,6 +179,9 @@ function aggregateRows(rows: WindsorRow[]) {
       }
       const rev = Number(row.order_total_price || row.order_current_total_price || row.order_subtotal_price || row.order_gross_sales || row.order_net_sales || row.revenue || 0);
       byDate[date].shopifyRevenue += rev;
+      // Net sales (post-discount/returns, pre-tax/shipping) for true MER;
+      // subtotal is the closest proxy when Windsor omits net_sales.
+      byDate[date].shopifyNetSales += Number(row.order_net_sales || row.order_subtotal_price || 0) || rev;
       byDate[date].orders += Math.round(Number(row.order_count || 0));
     } else {
       if (src.includes('facebook') || src.includes('meta')) {
@@ -234,12 +239,15 @@ function aggregateRows(rows: WindsorRow[]) {
   const totalNewCust    = dailyData.reduce((s, d) => s + d.newCustomers, 0);
   const totalRetCust    = dailyData.reduce((s, d) => s + d.returningCustomers, 0);
 
+  const totalNetSales = dailyData.reduce((s, d) => s + d.shopifyNetSales, 0) || totalRevenue;
   const metrics: AggregatedMetrics = {
     totalRevenue: Math.round(totalRevenue),
+    netSales: Math.round(totalNetSales),
     totalOrders,
     totalAdSpend: Math.round(totalAdSpend),
     aov: totalOrders > 0 ? Math.round((totalRevenue / totalOrders) * 100) / 100 : 0,
-    mer: totalAdSpend > 0 ? Math.round((totalRevenue / totalAdSpend) * 100) / 100 : 0,
+    // True MER: net sales over ad spend.
+    mer: totalAdSpend > 0 ? Math.round((totalNetSales / totalAdSpend) * 100) / 100 : 0,
     returns: 0,
     metaSpend: Math.round(totalMetaSpend),
     googleSpend: Math.round(totalGoogleSpend),
@@ -521,10 +529,11 @@ export async function GET(request: NextRequest) {
         const liveNetSales = shopifyLive.reduce((s, d) => s + d.netSales, 0);
         if (liveRevenue > 0 || liveOrders > 0) {
           current.metrics.totalRevenue = Math.round(liveRevenue);
+          current.metrics.netSales = Math.round(liveNetSales || liveRevenue);
           current.metrics.totalOrders = liveOrders;
           current.metrics.aov = liveOrders > 0 ? Math.round((liveNetSales / liveOrders) * 100) / 100 : 0;
           current.metrics.mer = current.metrics.totalAdSpend > 0
-            ? Math.round((liveRevenue / current.metrics.totalAdSpend) * 100) / 100 : 0;
+            ? Math.round(((liveNetSales || liveRevenue) / current.metrics.totalAdSpend) * 100) / 100 : 0;
           if (current.revenueData.length > 0) {
             current.revenueData[0].revenue = Math.round(liveRevenue);
             current.revenueData[0].orders = liveOrders;
@@ -546,7 +555,7 @@ export async function GET(request: NextRequest) {
         current.metrics.totalAdSpend = Math.round((current.metrics.totalAdSpend + spendDelta) * 100) / 100;
         if (metaLive.revenue > 0) current.metrics.metaRevenue = Math.round(metaLive.revenue);
         current.metrics.mer = current.metrics.totalAdSpend > 0
-          ? Math.round((current.metrics.totalRevenue / current.metrics.totalAdSpend) * 100) / 100 : 0;
+          ? Math.round(((current.metrics.netSales ?? current.metrics.totalRevenue) / current.metrics.totalAdSpend) * 100) / 100 : 0;
         if (current.revenueData.length > 0) {
           current.revenueData[0].adSpend = Math.round(current.metrics.totalAdSpend);
         }
@@ -563,7 +572,7 @@ export async function GET(request: NextRequest) {
         current.metrics.totalAdSpend = Math.round((current.metrics.totalAdSpend + spendDelta) * 100) / 100;
         if (snapLive.revenue > 0) current.metrics.snapchatRevenue = Math.round(snapLive.revenue);
         current.metrics.mer = current.metrics.totalAdSpend > 0
-          ? Math.round((current.metrics.totalRevenue / current.metrics.totalAdSpend) * 100) / 100 : 0;
+          ? Math.round(((current.metrics.netSales ?? current.metrics.totalRevenue) / current.metrics.totalAdSpend) * 100) / 100 : 0;
         if (current.revenueData.length > 0) {
           current.revenueData[0].adSpend = Math.round(current.metrics.totalAdSpend);
         }
@@ -596,7 +605,7 @@ export async function GET(request: NextRequest) {
         current.metrics.adCreditApplied = Math.round(applied * 100) / 100;
         current.metrics.netAdSpend = Math.max(0, Math.round((current.metrics.totalAdSpend - applied) * 100) / 100);
         current.metrics.mer = current.metrics.netAdSpend > 0
-          ? Math.round((current.metrics.totalRevenue / current.metrics.netAdSpend) * 100) / 100 : 0;
+          ? Math.round(((current.metrics.netSales ?? current.metrics.totalRevenue) / current.metrics.netAdSpend) * 100) / 100 : 0;
       }
     }
 

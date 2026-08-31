@@ -17,7 +17,9 @@ import RevenueChart from '@/src/components/charts/RevenueChart';
 import CACChart from '@/src/components/charts/CACChart';
 import SpendDonut from '@/src/components/charts/SpendDonut';
 
-const MER_GOAL = 3.5;
+// MER runs on NET sales (post-discount/returns, excl. taxes+shipping) — the
+// goal is rebased from the old 3.5x-on-total-sales to the equivalent ~3.3x.
+const MER_GOAL = 3.3;
 const TARGET_CAC = 100; // target New Customer CAC — flagged when exceeded
 
 const EMPTY_METRICS: LiveMetrics = {
@@ -31,6 +33,7 @@ const EMPTY_METRICS: LiveMetrics = {
 
 interface LiveMetrics {
   totalRevenue: number;
+  netSales?: number;
   totalOrders: number;
   totalAdSpend: number;
   aov: number;
@@ -530,10 +533,13 @@ export default function OverviewContent() {
               </div>
             </div>
             <p className="text-sm text-gray-400 mt-1">
-              Total Revenue ÷ {metrics.adCreditApplied ? 'Net Ad Spend' : 'Total Ad Spend'} ={' '}
+              Net Sales ÷ {metrics.adCreditApplied ? 'Net Ad Spend' : 'Total Ad Spend'} ={' '}
               <span className="font-semibold text-gray-600">
-                {formatCurrency(metrics.totalRevenue)} ÷ {formatCurrency(metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend)}
+                {formatCurrency(metrics.netSales ?? metrics.totalRevenue)} ÷ {formatCurrency(metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend)}
               </span>
+            </p>
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              Net sales = after discounts &amp; returns, excl. taxes/shipping (total sales {formatCurrency(metrics.totalRevenue)})
             </p>
             {(metrics.adCreditApplied ?? 0) > 0 && (
               <p className="text-[11px] text-emerald-600 mt-0.5">
@@ -658,7 +664,7 @@ export default function OverviewContent() {
           valueColor={merColor}
           comparison={compareOn && priorPeriod ? { current: metrics.mer, prior: priorPeriod.mer } : undefined}
           trend={!(compareOn && priorPeriod) ? {
-            value: metrics.mer >= MER_GOAL ? 'Above 3.5x goal' : 'Below 3.5x goal',
+            value: metrics.mer >= MER_GOAL ? `Above ${MER_GOAL}x goal` : `Below ${MER_GOAL}x goal`,
             positive: metrics.mer >= MER_GOAL,
           } : undefined}
         />
