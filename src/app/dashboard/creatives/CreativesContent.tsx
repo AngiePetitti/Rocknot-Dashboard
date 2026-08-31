@@ -81,6 +81,7 @@ export default function CreativesContent() {
   interface BriefStatus { status?: string; notes?: string }
   const [briefStatuses, setBriefStatuses] = useState<Record<string, BriefStatus>>({});
   const [taskCreatedFor, setTaskCreatedFor] = useState<Record<string, boolean>>({});
+  const [sharedLinkCopied, setSharedLinkCopied] = useState(false);
 
   // One tap: brief → card on the Tasks board (In Progress) + mark it in
   // production here, so "we're making this" lives in one place.
@@ -824,6 +825,24 @@ export default function CreativesContent() {
 
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-4">
                 <p className="text-[11px] text-gray-400">Period: {TIMEFRAME_LABELS[tf] || tf}</p>
+                <button
+                  onClick={async () => {
+                    const url = `${window.location.origin}/dashboard/creatives?tf=${tf}&ad=${encodeURIComponent(selected.id)}`;
+                    // Phone: native share sheet (text the link, AirDrop, Slack…).
+                    // Desktop: copy to clipboard.
+                    if (navigator.share) {
+                      try { await navigator.share({ title: selected.name, url }); return; } catch { /* cancelled — fall through to copy */ }
+                    }
+                    try {
+                      await navigator.clipboard.writeText(url);
+                      setSharedLinkCopied(true);
+                      setTimeout(() => setSharedLinkCopied(false), 1500);
+                    } catch { window.prompt('Copy this link:', url); }
+                  }}
+                  className="text-xs font-semibold text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100 rounded-lg px-3 py-2 transition-colors"
+                >
+                  {sharedLinkCopied ? '✓ Link copied' : '🔗 Share with team'}
+                </button>
                 {selected.videoUrl && (
                   <button
                     onClick={() => saveToPhotos(selected)}
