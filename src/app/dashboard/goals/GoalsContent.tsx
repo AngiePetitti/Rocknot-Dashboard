@@ -403,6 +403,30 @@ export default function GoalsContent() {
         </Card>
       )}
 
+      {/* ── This month at a glance ── */}
+      {currentForecast && goals[monthKey(year, curMonth)]?.revenueGoal ? (() => {
+        const g = goals[monthKey(year, curMonth)]!.revenueGoal;
+        const proj = currentForecast.revenue;
+        const delta = proj - g;
+        const mtd = actuals[monthKey(year, curMonth)]?.revenue || 0;
+        return (
+          <Card accentColor={delta >= 0 ? '#86efac' : '#fca5a5'} className="mb-5">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+              <div>
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">{MONTH_NAMES[curMonth - 1]} vs goal</p>
+                <p className="text-2xl font-bold" style={{ color: delta >= 0 ? '#16a34a' : '#dc2626' }}>
+                  {delta >= 0 ? '+' : '−'}{formatCurrency(Math.abs(delta), true)} {delta >= 0 ? 'ahead' : 'behind'}
+                </p>
+              </div>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                {formatCurrency(mtd)} banked so far · projecting <b>{formatCurrency(proj)}</b> by month-end
+                vs the <b>{formatCurrency(g)}</b> goal ({g > 0 ? ((proj / g) * 100).toFixed(0) : 0}%).
+              </p>
+            </div>
+          </Card>
+        );
+      })() : null}
+
       {/* ── Monthly plan table ── */}
       <Card accentColor="#93c5fd">
         <h2 className="text-sm font-bold text-gray-700 mb-1">Month-by-month plan</h2>
@@ -413,7 +437,7 @@ export default function GoalsContent() {
           <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-gray-100">
-                {['Month', 'Actual / Forecast', 'Revenue Goal', 'vs Goal', 'Ad Budget', 'Actual Spend', 'Units Needed'].map(h => (
+                {['Month', 'Actual / Forecast', 'Revenue Goal', 'vs Goal', '± vs Goal', 'Ad Budget', 'Actual Spend', 'Units Needed'].map(h => (
                   <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -478,6 +502,14 @@ export default function GoalsContent() {
                       ) : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="py-2.5 pr-4 whitespace-nowrap">
+                      {g?.revenueGoal && shown !== undefined ? (
+                        <span className="text-xs font-bold" style={{ color: shown >= g.revenueGoal ? '#16a34a' : '#dc2626' }}>
+                          {shown >= g.revenueGoal ? '+' : '−'}{formatCurrency(Math.abs(shown - g.revenueGoal), true)}
+                          {isCurrent && <span className="text-[10px] text-gray-400 font-normal ml-1">proj.</span>}
+                        </span>
+                      ) : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="py-2.5 pr-4 whitespace-nowrap">
                       {isAdmin ? (
                         <input
                           type="number"
@@ -517,6 +549,10 @@ export default function GoalsContent() {
               }, 0);
               const unitsTotal = aov > 0 ? Math.ceil(goalTotal / aov) : null;
               const yearPct = goalTotal > 0 ? (plannedTotal / goalTotal) * 100 : null;
+              // Over/under so far: elapsed months (incl. current at forecast)
+              // vs the goals set for those same months.
+              const goalsElapsed = months.reduce((s, k, i) => (i + 1 <= curMonth ? s + (goals[k]?.revenueGoal || 0) : s), 0);
+              const deltaSoFar = goalsElapsed > 0 ? actualTotal - goalsElapsed : null;
               return (
                 <tfoot>
                   <tr className="border-t-2 border-gray-200 bg-gray-50/60 font-semibold">
@@ -530,6 +566,14 @@ export default function GoalsContent() {
                       {yearPct !== null ? (
                         <span className="text-xs font-bold" style={{ color: yearPct >= 100 ? '#16a34a' : yearPct >= 90 ? '#d97706' : '#dc2626' }}>
                           {yearPct.toFixed(0)}%
+                        </span>
+                      ) : '—'}
+                    </td>
+                    <td className="py-2.5 pr-4 whitespace-nowrap">
+                      {deltaSoFar !== null ? (
+                        <span className="text-xs font-bold" style={{ color: deltaSoFar >= 0 ? '#16a34a' : '#dc2626' }}>
+                          {deltaSoFar >= 0 ? '+' : '−'}{formatCurrency(Math.abs(deltaSoFar), true)}
+                          <span className="text-[10px] text-gray-400 font-normal ml-1">so far</span>
                         </span>
                       ) : '—'}
                     </td>
