@@ -129,6 +129,35 @@ export default function OverviewContent() {
     });
   }, [allTasks, session]);
 
+  // ── Launch readiness: any launch/sale within 7 days with unchecked
+  //    playbook items past their lead time gets a loud banner ──
+  const [launchAlerts, setLaunchAlerts] = useState<{ id: string; title: string; date: string; days: number; done: number; total: number; overdue: number }[]>([]);
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/calendar', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
+      fetch('/api/launch/checklist', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
+    ]).then(([cal, play]) => {
+      const events = (cal?.events || cal || []) as { id: string; title: string; date: string; type: string }[];
+      const template = (play?.template || []) as { label: string; daysBefore: number }[];
+      const byEvent = (play?.byEvent || {}) as Record<string, Record<string, { done: boolean }>>;
+      if (!Array.isArray(events) || !template.length) return;
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      const alerts = events
+        .filter(e => (e.type === 'launch' || e.type === 'sale'))
+        .map(e => {
+          const days = Math.round((Date.parse(e.date) - Date.parse(today)) / 86400000);
+          const checks = byEvent[e.id] || {};
+          const done = template.filter(t => checks[t.label]?.done).length;
+          const overdue = template.filter(t => !checks[t.label]?.done && days <= t.daysBefore).length;
+          return { id: e.id, title: e.title, date: e.date, days, done, total: template.length, overdue };
+        })
+        .filter(a => a.days >= -1 && a.days <= 7 && a.overdue > 0)
+        .sort((a, b) => a.days - b.days)
+        .slice(0, 3);
+      setLaunchAlerts(alerts);
+    }).catch(() => {});
+  }, []);
+
   const myOverdue = myTasks.filter(t => t.dueDate && t.dueDate < new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }));
   const todayPst = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const myDueToday = myTasks.filter(t => t.dueDate === todayPst);
@@ -367,6 +396,24 @@ export default function OverviewContent() {
       >
         <TimeframeSelector />
       </Header>
+
+      {/* ── Launch readiness alarms ── */}
+      {launchAlerts.map(a => (
+        <Link
+          key={a.id}
+          href="/dashboard/calendar"
+          className="block rounded-2xl border-2 border-pink-300 bg-pink-50 px-4 py-3 mb-4 shadow-sm transition-transform active:scale-[0.99]"
+        >
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full animate-pulse bg-pink-500" />
+            <p className="text-sm font-bold text-pink-700">
+              🚀 {a.title} {a.days === 0 ? 'launches TODAY' : a.days < 0 ? 'launched yesterday' : `launches in ${a.days}d`} —{' '}
+              {a.overdue} checklist item{a.overdue > 1 ? 's' : ''} due now
+            </p>
+            <span className="ml-auto text-xs font-semibold text-pink-600">☑ {a.done}/{a.total} · Open checklist →</span>
+          </div>
+        </Link>
+      ))}
 
       {/* ── Loud personal task reminder ── */}
       {myTasks.length > 0 && (

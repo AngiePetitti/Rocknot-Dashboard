@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
+import LaunchChecklists from '@/src/components/LaunchChecklists';
+import { useSession } from 'next-auth/react';
 import type { MarketingEvent } from '@/src/app/api/calendar/route';
 
 const TYPE_LABELS: Record<MarketingEvent['type'], string> = {
@@ -89,6 +91,8 @@ interface FormState {
 const EMPTY_FORM: FormState = { title: '', date: '', endDate: '', type: 'launch', channels: [], status: 'planned', description: '' };
 
 export default function CalendarContent() {
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === 'admin';
   const [events, setEvents] = useState<MarketingEvent[]>([]);
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [{ year, month }, setView] = useState(todayObj());
@@ -795,6 +799,9 @@ export default function CalendarContent() {
           </Card>
         )}
       </div>
+
+      {/* ── Launch playbook checklists ── */}
+      <LaunchChecklists events={events} isAdmin={isAdmin} />
 
       {/* ── Event Modal ── */}
       {showModal && (
