@@ -178,7 +178,7 @@ export default function InventoryContent() {
     [openReorders]
   );
 
-  async function markOrdered(item: { id: string; product: string; variant: string; reorderQty: number }) {
+  async function markOrdered(item: { id: string; product: string; variant: string; reorderQty: number; remainingQty?: number }) {
     setSavingOrder(true);
     try {
       const res = await fetch('/api/reorders', {
@@ -187,7 +187,7 @@ export default function InventoryContent() {
         body: JSON.stringify({
           product: item.product,
           variant: item.variant,
-          qty: Number(orderQty) || item.reorderQty,
+          qty: Number(orderQty) || item.remainingQty || item.reorderQty,
           orderedDate: orderDate,
           eta: orderEta,
         }),
@@ -196,6 +196,25 @@ export default function InventoryContent() {
     } finally {
       setSavingOrder(false);
     }
+  }
+
+  const [editReorderId, setEditReorderId] = useState<string | null>(null);
+  const [editQty, setEditQty] = useState('');
+  const [editEta, setEditEta] = useState('');
+
+  async function saveReorderEdit(id: string) {
+    const qty = Math.round(Number(editQty) || 0);
+    if (qty <= 0) return;
+    setReorders(prev => prev.map(r => r.id === id ? { ...r, qty, eta: editEta || r.eta } : r));
+    setEditReorderId(null);
+    try {
+      await fetch('/api/reorders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'edit', qty, ...(editEta ? { eta: editEta } : {}) }),
+      });
+    } catch { /* optimistic state stands; next load reconciles */ }
+    loadReorders();
   }
 
   async function reorderAction(id: string, action: 'received' | 'delete') {
@@ -214,7 +233,7 @@ export default function InventoryContent() {
   }
 
   function copyOrderList() {
-    const lines = toOrderList.map(i => `${i.product}${i.variant ? ` – ${i.variant}` : ''}: order ${i.reorderQty}`);
+    const lines = toOrderList.map(i => `${i.product}${i.variant ? ` – ${i.variant}` : ''}: order ${i.remainingQty}${i.incomingQty > 0 ? ` (${i.incomingQty} already incoming)` : ''}`);
     const text = `Rocknot restock order — ${new Date().toLocaleDateString()}\n${lines.join('\n')}`;
     try { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ }
   }
@@ -317,10 +336,31 @@ export default function InventoryContent() {
     [moveOrDiscount, discontinuedKeys]
   );
 
+  // Units already on an open PO, per product+variant — a partial order nets
+  // DOWN the recommended quantity instead of removing the item entirely.
+  const incomingByKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of openReorders) {
+      const k = `${r.product}|${r.variant}`.toLowerCase();
+      m.set(k, (m.get(k) || 0) + r.qty);
+    }
+    return m;
+  }, [openReorders]);
+
   const toOrderList = useMemo(
-    () => restockNow.filter(i => !onOrderKeys.has(`${i.product}|${i.variant}`.toLowerCase())
-      && !discontinuedKeys.has(`${i.product}|${i.variant}`.toLowerCase())),
-    [restockNow, onOrderKeys, discontinuedKeys]
+    () => restockNow
+      .filter(i => !discontinuedKeys.has(`${i.product}|${i.variant}`.toLowerCase()))
+      .map(i => {
+        const incoming = incomingByKey.get(`${i.product}|${i.variant}`.toLowerCase()) || 0;
+        return { ...i, incomingQty: incoming, remainingQty: Math.max(0, i.reorderQty - incoming) };
+      })
+      // Fully covered by what's already inbound → off the list; partially
+      // covered stays with the net quantity still needed.
+      .filter(i => i.remainingQty > 0)
+      // Alphabetical by product then variant so sizes of the same item sit
+      // together — much easier to work down when placing one PO per product.
+      .sort((a, b) => a.product.localeCompare(b.product) || a.variant.localeCompare(b.variant, undefined, { numeric: true })),
+    [restockNow, incomingByKey, discontinuedKeys]
   );
 
   return (
@@ -378,8 +418,13 @@ export default function InventoryContent() {
                     {item.status === 'out_of_stock' ? 'OUT' : `${item.daysRemaining}d left`} · ~{Math.round(item.dailyVelocity * 7)}/wk
                   </span>
                   <span className="text-xs font-bold text-orange-700 whitespace-nowrap bg-orange-100 rounded-full px-2 py-0.5">
-                    Order {item.reorderQty.toLocaleString()}
+                    Order {item.remainingQty.toLocaleString()}{item.incomingQty > 0 ? ' more' : ''}
                   </span>
+                  {item.incomingQty > 0 && (
+                    <span className="text-[11px] font-semibold text-blue-600 whitespace-nowrap bg-blue-50 border border-blue-100 rounded-full px-2 py-0.5">
+                      🚚 {item.incomingQty.toLocaleString()} incoming
+                    </span>
+                  )}
                   <button
                     onClick={() => setOrderFormId(orderFormId === item.id ? null : item.id)}
                     className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-green-50 border border-green-200 text-green-700 whitespace-nowrap"
@@ -473,29 +518,69 @@ export default function InventoryContent() {
           <div className="flex flex-col gap-1.5">
             {openReorders.map(r => {
               const badge = etaBadge(r.eta);
+              const editing = editReorderId === r.id;
               return (
-                <div key={r.id} className="flex items-center gap-2 bg-white border border-blue-200 rounded-lg px-3 py-2">
-                  <span className="text-xs font-semibold text-gray-800 flex-1 min-w-0 truncate">
-                    {r.product}{r.variant ? ` · ${r.variant}` : ''}
-                  </span>
-                  <span className="text-[11px] text-gray-500 whitespace-nowrap hidden sm:inline">
-                    ×{r.qty.toLocaleString()} · ordered {r.orderedDate.slice(5)}{r.orderedBy ? ` by ${r.orderedBy}` : ''}
-                  </span>
-                  <span className="text-[11px] text-gray-500 whitespace-nowrap sm:hidden">×{r.qty.toLocaleString()}</span>
-                  <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 whitespace-nowrap ${badge.cls}`}>{badge.label}</span>
-                  <button
-                    onClick={() => reorderAction(r.id, 'received')}
-                    className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-green-50 border border-green-200 text-green-700 whitespace-nowrap"
-                  >
-                    Received ✓
-                  </button>
-                  <button
-                    onClick={() => reorderAction(r.id, 'delete')}
-                    aria-label="Remove order"
-                    className="text-gray-300 hover:text-red-500 px-1"
-                  >
-                    ✕
-                  </button>
+                <div key={r.id} className="bg-white border border-blue-200 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-gray-800 flex-1 min-w-0 truncate">
+                      {r.product}{r.variant ? ` · ${r.variant}` : ''}
+                    </span>
+                    <span className="text-[11px] text-gray-500 whitespace-nowrap hidden sm:inline">
+                      ×{r.qty.toLocaleString()} · ordered {r.orderedDate.slice(5)}{r.orderedBy ? ` by ${r.orderedBy}` : ''}
+                    </span>
+                    <span className="text-[11px] text-gray-500 whitespace-nowrap sm:hidden">×{r.qty.toLocaleString()}</span>
+                    <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 whitespace-nowrap ${badge.cls}`}>{badge.label}</span>
+                    <button
+                      onClick={() => {
+                        if (editing) { setEditReorderId(null); return; }
+                        setEditReorderId(r.id); setEditQty(String(r.qty)); setEditEta(r.eta || '');
+                      }}
+                      title="Edit quantity / arrival date"
+                      className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-600 whitespace-nowrap"
+                    >
+                      {editing ? 'Cancel' : '✏️ Edit'}
+                    </button>
+                    <button
+                      onClick={() => reorderAction(r.id, 'received')}
+                      className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-green-50 border border-green-200 text-green-700 whitespace-nowrap"
+                    >
+                      Received ✓
+                    </button>
+                    <button
+                      onClick={() => reorderAction(r.id, 'delete')}
+                      aria-label="Remove order"
+                      className="text-gray-300 hover:text-red-500 px-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {editing && (
+                    <form
+                      onSubmit={e => { e.preventDefault(); saveReorderEdit(r.id); }}
+                      className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-blue-100"
+                    >
+                      <label className="text-[11px] text-gray-500">Qty
+                        <input
+                          type="number"
+                          min={1}
+                          value={editQty}
+                          onChange={e => setEditQty(e.target.value)}
+                          className="w-20 ml-1.5 px-2 py-1 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
+                        />
+                      </label>
+                      <label className="text-[11px] text-gray-500">Arrives
+                        <input
+                          type="date"
+                          value={editEta}
+                          onChange={e => setEditEta(e.target.value)}
+                          className="ml-1.5 px-2 py-1 border border-gray-200 rounded-lg text-xs text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-300"
+                        />
+                      </label>
+                      <button type="submit" className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+                        Save
+                      </button>
+                    </form>
+                  )}
                 </div>
               );
             })}

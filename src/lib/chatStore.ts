@@ -303,7 +303,7 @@ export async function addReorder(r: Omit<Reorder, 'id' | 'status'>): Promise<Reo
   return reorder;
 }
 
-export async function updateReorder(id: string, patch: { status?: 'open' | 'received'; receivedDate?: string; qty?: number }): Promise<void> {
+export async function updateReorder(id: string, patch: { status?: 'open' | 'received'; receivedDate?: string; qty?: number; eta?: string }): Promise<void> {
   const sheetId = await getChatSheetId(false);
   if (!sheetId) throw new Error('Reorder storage unavailable');
   const data = await api(`/${sheetId}/values/${REORDERS_TAB}!A2:I`) as { values?: string[][] };
@@ -315,6 +315,7 @@ export async function updateReorder(id: string, patch: { status?: 'open' | 'rece
   if (patch.status) row[6] = patch.status;
   if (patch.receivedDate !== undefined) row[7] = patch.receivedDate;
   while (row.length < 9) row.push('');
+  if (patch.eta !== undefined) row[8] = patch.eta;
   await api(`/${sheetId}/values/${REORDERS_TAB}!A${idx + 2}?valueInputOption=RAW`, {
     method: 'PUT',
     body: JSON.stringify({ range: `${REORDERS_TAB}!A${idx + 2}`, majorDimension: 'ROWS', values: [row.slice(0, 9)] }),

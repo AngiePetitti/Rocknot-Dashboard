@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  let body: { id?: string; action?: string };
+  let body: { id?: string; action?: string; qty?: number; eta?: string };
   try {
     body = await req.json();
   } catch {
@@ -57,6 +57,25 @@ export async function PATCH(req: NextRequest) {
       await updateReorder(body.id, { status: 'received', receivedDate: today });
     } else if (body.action === 'delete') {
       await deleteReorder(body.id);
+    } else if (body.action === 'edit') {
+      // Update quantity and/or ETA on an open order (packing-slip corrections,
+      // revised arrival dates).
+      const patch: { qty?: number; eta?: string } = {};
+      if (body.qty !== undefined) {
+        const qty = Math.round(Number(body.qty) || 0);
+        if (qty <= 0) return NextResponse.json({ error: 'Quantity must be positive' }, { status: 400 });
+        patch.qty = qty;
+      }
+      if (body.eta !== undefined) {
+        if (body.eta !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(body.eta)) {
+          return NextResponse.json({ error: 'eta must be YYYY-MM-DD' }, { status: 400 });
+        }
+        patch.eta = body.eta;
+      }
+      if (patch.qty === undefined && patch.eta === undefined) {
+        return NextResponse.json({ error: 'Nothing to edit' }, { status: 400 });
+      }
+      await updateReorder(body.id, patch);
     } else {
       return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
     }
