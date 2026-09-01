@@ -44,19 +44,32 @@ export async function GET(req: NextRequest) {
   const items = [...((inv.bags as InvItem[]) ?? []), ...((inv.items as InvItem[]) ?? [])];
   const reorders = await getReorders().catch(() => []);
   const discontinued = await getDiscontinued().catch(() => []);
-  const onOrder = new Set(
-    reorders.filter(r => r.status === 'open').map(r => `${r.product}|${r.variant}`.toLowerCase())
-  );
-  const skipped = new Set(discontinued.map(d => `${d.product}|${d.variant}`.toLowerCase()));
+  // Fuzzy product+variant key — hand-logged PO names never byte-match
+  // Shopify's strings (quotes, hyphens, "Default Title"). Same rule as the
+  // Inventory tab.
+  const normKey = (product: string, variant: string) => {
+    const clean = (s: string) => s.toLowerCase().replace(/default title/g, '').replace(/[^a-z0-9]/g, '');
+    return `${clean(product)}|${clean(variant)}`;
+  };
+  const incomingByKey = new Map<string, number>();
+  for (const r of reorders.filter(r => r.status === 'open')) {
+    const k = normKey(r.product, r.variant);
+    incomingByKey.set(k, (incomingByKey.get(k) || 0) + r.qty);
+  }
+  const skipped = new Set(discontinued.map(d => normKey(d.product, d.variant)));
 
-  // Same rule as the Inventory tab's "restock now": real movers that are out
-  // or nearly out — minus anything already on order or marked seasonal /
-  // not coming back.
+  // Same rule as the Inventory tab's order banner: real movers that are out
+  // or nearly out, minus seasonal skips — with the recommended quantity
+  // netted DOWN by units already on an open PO (fully covered items drop).
   const toOrder = items
     .filter(i => i.dailyVelocity >= 0.25 && (i.status === 'out_of_stock' || i.status === 'critical'))
-    .filter(i => !onOrder.has(`${i.product}|${i.variant}`.toLowerCase()))
-    .filter(i => !skipped.has(`${i.product}|${i.variant}`.toLowerCase()))
-    .sort((a, b) => b.dailyVelocity - a.dailyVelocity);
+    .filter(i => !skipped.has(normKey(i.product, i.variant)))
+    .map(i => {
+      const incoming = incomingByKey.get(normKey(i.product, i.variant)) || 0;
+      return { ...i, incomingQty: incoming, reorderQty: Math.max(0, i.reorderQty - incoming) };
+    })
+    .filter(i => i.reorderQty > 0)
+    .sort((a, b) => a.product.localeCompare(b.product) || a.variant.localeCompare(b.variant, undefined, { numeric: true }));
 
   const openOrders = reorders.filter(r => r.status === 'open');
   const today = new Date().toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'long', month: 'long', day: 'numeric' });

@@ -40,6 +40,14 @@ function fmtMoney(n: number): string {
   return `$${n.toLocaleString()}`;
 }
 
+// Fuzzy product+variant key: hand-logged PO names (emails, packing slips)
+// never byte-match Shopify's strings — curly vs straight quotes, hyphens,
+// "Default Title" variants. Compare on letters+digits only.
+function normKey(product: string, variant: string): string {
+  const clean = (s: string) => s.toLowerCase().replace(/default title/g, '').replace(/[^a-z0-9]/g, '');
+  return `${clean(product)}|${clean(variant)}`;
+}
+
 const STATUS_CONFIG = {
   out_of_stock: { label: 'Out of Stock', bg: '#fee2e2', text: '#dc2626', dot: '#ef4444' },
   critical:     { label: 'Critical',     bg: '#ffedd5', text: '#ea580c', dot: '#f97316' },
@@ -120,7 +128,7 @@ export default function InventoryContent() {
   }
   useEffect(() => { loadDiscontinued(); }, []);
   const discontinuedKeys = useMemo(
-    () => new Set(discontinued.map(d => `${d.product}|${d.variant}`.toLowerCase())),
+    () => new Set(discontinued.map(d => normKey(d.product, d.variant))),
     [discontinued]
   );
   async function skipItem(item: { product: string; variant: string }) {
@@ -174,7 +182,7 @@ export default function InventoryContent() {
     return { label: `arrives ${eta.slice(5)}`, cls: 'bg-blue-100 text-blue-700' };
   }
   const onOrderKeys = useMemo(
-    () => new Set(openReorders.map(r => `${r.product}|${r.variant}`.toLowerCase())),
+    () => new Set(openReorders.map(r => normKey(r.product, r.variant))),
     [openReorders]
   );
 
@@ -332,7 +340,7 @@ export default function InventoryContent() {
   // Skipped seasonal items leave the slow/dead list instantly (server drops
   // them from the totals on the next load).
   const visibleMove = useMemo(
-    () => moveOrDiscount.filter(i => !discontinuedKeys.has(`${i.product}|${i.variant}`.toLowerCase())),
+    () => moveOrDiscount.filter(i => !discontinuedKeys.has(normKey(i.product, i.variant))),
     [moveOrDiscount, discontinuedKeys]
   );
 
@@ -341,7 +349,7 @@ export default function InventoryContent() {
   const incomingByKey = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of openReorders) {
-      const k = `${r.product}|${r.variant}`.toLowerCase();
+      const k = normKey(r.product, r.variant);
       m.set(k, (m.get(k) || 0) + r.qty);
     }
     return m;
@@ -349,9 +357,9 @@ export default function InventoryContent() {
 
   const toOrderList = useMemo(
     () => restockNow
-      .filter(i => !discontinuedKeys.has(`${i.product}|${i.variant}`.toLowerCase()))
+      .filter(i => !discontinuedKeys.has(normKey(i.product, i.variant)))
       .map(i => {
-        const incoming = incomingByKey.get(`${i.product}|${i.variant}`.toLowerCase()) || 0;
+        const incoming = incomingByKey.get(normKey(i.product, i.variant)) || 0;
         return { ...i, incomingQty: incoming, remainingQty: Math.max(0, i.reorderQty - incoming) };
       })
       // Fully covered by what's already inbound → off the list; partially
