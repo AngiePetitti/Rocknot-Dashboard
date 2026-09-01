@@ -349,9 +349,33 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       })()
     : null;
 
+  // Daily revenue from BigQuery's synced Shopify orders — the resilient
+  // fallback when ShopifyQL is throttled/down (which zeroed whole timeframes).
+  // ShopifyQL stays preferred because it matches Shopify's Analytics reports
+  // to the cent; the BQ order sums run a hair different and lag Windsor's
+  // last sync for the most recent hours.
+  const bqShopifySql = `
+    WITH order_revenue AS (${dedupedOrdersCte(ds)})
+    SELECT FORMAT_DATE('%Y-%m-%d', order_date) AS date,
+           COUNT(*) AS orders,
+           SUM(total_price) AS total_sales,
+           SUM(net_sales) AS net_sales
+    FROM order_revenue
+    WHERE order_date BETWEEN @date_from AND @date_to
+    GROUP BY date
+  `;
+
   let adsQueryError: string | undefined;
-  const [shopifyDays, adsRows, custRows, custDaily, conversionRate, snapRows] = await Promise.all([
-    fetchShopifyDaily(dateFrom, dateTo).catch(() => [] as ShopifyDay[]),
+  const [shopifyDaysQl, shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows] = await Promise.all([
+    fetchShopifyDaily(dateFrom, dateTo).catch(() => null),
+    runQuery<{ date: string; orders: number; total_sales: number | null; net_sales: number | null }>(bqShopifySql, params)
+      .then(rows => rows.map(r => ({
+        date: r.date,
+        orders: Number(r.orders || 0),
+        totalSales: Number(r.total_sales || 0),
+        netSales: Number(r.net_sales || 0),
+      })))
+      .catch(() => null),
     runQuery<AdsRow>(adsSql, params)
       .catch(() => runQuery<AdsRow>(adsSqlLegacyTiktok, params))
       .catch((err: unknown) => { adsQueryError = String(err); return [] as AdsRow[]; }),
@@ -361,6 +385,11 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     runQuery<{ date: string; spend: number | null; revenue: number | null }>(snapSql, params)
       .catch(() => [] as Array<{ date: string; spend: number | null; revenue: number | null }>),
   ]);
+
+  const shopifyDays: ShopifyDay[] =
+    (shopifyDaysQl && shopifyDaysQl.length > 0 ? shopifyDaysQl : null)
+    ?? (shopifyDaysBq && shopifyDaysBq.length > 0 ? shopifyDaysBq : null)
+    ?? [];
 
   const snapByDate: Record<string, { spend: number; revenue: number }> = {};
   for (const r of snapRows) snapByDate[r.date] = { spend: Number(r.spend || 0), revenue: Number(r.revenue || 0) };
