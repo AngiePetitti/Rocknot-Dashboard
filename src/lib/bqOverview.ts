@@ -72,16 +72,14 @@ export async function fetchShopifyDaily(from: string, to: string): Promise<Shopi
   // Shopify throttles GraphQL hard, and one page load fires several ShopifyQL
   // queries (overview + prior compare + returns + customer split). Retry with
   // backoff instead of letting one THROTTLED response zero out revenue.
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * attempt));
-    try {
-      return await fetchShopifyDailyOnce(from, to);
-    } catch (e) {
-      lastErr = e;
-    }
+  // Two attempts max with a short pause — deep retry stacks made the live
+  // view hang for a minute when Shopify was down.
+  try {
+    return await fetchShopifyDailyOnce(from, to);
+  } catch {
+    await new Promise(r => setTimeout(r, 800));
+    return await fetchShopifyDailyOnce(from, to);
   }
-  throw lastErr;
 }
 
 async function fetchShopifyDailyOnce(from: string, to: string): Promise<ShopifyDay[]> {
@@ -96,6 +94,7 @@ async function fetchShopifyDailyOnce(from: string, to: string): Promise<ShopifyD
       }}`,
     }),
     cache: 'no-store',
+    signal: AbortSignal.timeout(8000),
   });
   const json = await res.json();
   // Top-level GraphQL errors (throttling, auth, scope) come back OUTSIDE

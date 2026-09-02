@@ -523,18 +523,13 @@ export async function GET(request: NextRequest) {
     // by up to an hour, while Shopify's own API is always live.
     let shopifyLiveError: string | null = null;
     if (!latestAvailableDate) {
-      // Retry once — a throttled/transient ShopifyQL failure here used to
-      // silently render $0 revenue for the whole period.
+      // fetchShopifyDaily retries internally — no outer loop (stacked
+      // retries made the live view hang past the function timeout).
       let shopifyLive: Awaited<ReturnType<typeof fetchShopifyDaily>> = [];
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          shopifyLive = await fetchShopifyDaily(currentParams.date_from, currentParams.date_to);
-          shopifyLiveError = null;
-          if (shopifyLive.length > 0) break;
-        } catch (e) {
-          shopifyLiveError = String(e instanceof Error ? e.message : e);
-        }
-        if (attempt === 0) await new Promise(r => setTimeout(r, 1200));
+      try {
+        shopifyLive = await fetchShopifyDaily(currentParams.date_from, currentParams.date_to);
+      } catch (e) {
+        shopifyLiveError = String(e instanceof Error ? e.message : e);
       }
       if (shopifyLive.length > 0) {
         const liveRevenue = shopifyLive.reduce((s, d) => s + d.totalSales, 0);

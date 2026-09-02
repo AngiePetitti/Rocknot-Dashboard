@@ -257,10 +257,11 @@ export default function OverviewContent() {
     const params = new URLSearchParams({ tf: tfRaw });
     if (dateFrom) params.set('date_from', dateFrom);
     if (dateTo) params.set('date_to', dateTo);
-    // Prior-period metrics are always fetched — the revenue card shows its
-    // vs-prior delta permanently; the other cards only show theirs when the
-    // Compare toggle is on.
-    params.set('compare', 'true');
+    // Prior-period metrics power the revenue card's always-on delta on
+    // complete timeframes. Today shows no delta, so skip the extra prior
+    // fetch there unless the Compare toggle is on — it nearly doubled the
+    // live view's load time.
+    if (compareOn || tfRaw !== 'today') params.set('compare', 'true');
 
     // Cached copies (from earlier visits this session) render instantly and
     // are refreshed in the background — switching tabs doesn't restart loads.
@@ -464,7 +465,7 @@ export default function OverviewContent() {
             const p = new URLSearchParams({ tf: tfRaw });
             if (dateFrom) p.set('date_from', dateFrom);
             if (dateTo) p.set('date_to', dateTo);
-            p.set('compare', 'true');
+            if (compareOn || tfRaw !== 'today') p.set('compare', 'true');
             fetch(`/api/windsor?${p}`)
               .then(r => r.json())
               .then(data => {
