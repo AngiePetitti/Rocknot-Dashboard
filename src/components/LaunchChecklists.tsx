@@ -37,13 +37,26 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
       .catch(() => setLoaded(true));
   }, []);
 
+  // Placeholder-dated events ("date TBD", parked on the 1st) get no
+  // countdown pressure — lead times are meaningless without a real date.
+  const isTbd = (e: MarketingEvent) => /tbd|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || '');
+
   // Launches & sales from 21 days out through 3 days past (post-launch
   // last-chance items can still be pending on launch day).
   const upcoming = useMemo(() => {
     return events
-      .filter(e => (e.type === 'launch' || e.type === 'sale') && daysUntil(e.date) >= -3 && daysUntil(e.date) <= 21)
+      .filter(e => (e.type === 'launch' || e.type === 'sale') && !isTbd(e) && daysUntil(e.date) >= -3 && daysUntil(e.date) <= 21)
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [events]);
+
+  // Undated launches wait in a compact holding list — checklist available,
+  // nothing ever turns red until a real date is set on the event.
+  const awaitingDate = useMemo(() => {
+    return events
+      .filter(e => (e.type === 'launch' || e.type === 'sale') && isTbd(e) && daysUntil(e.date) >= -14)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [events]);
+  const [showAwaiting, setShowAwaiting] = useState(false);
 
   async function toggle(eventId: string, label: string, done: boolean) {
     setByEvent(prev => ({
@@ -116,16 +129,13 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
         </div>
       )}
 
-      {upcoming.length === 0 ? (
-        <p className="text-xs text-gray-400 py-2">No launches or sales on the calendar in the next 3 weeks. Add one above and its checklist appears here.</p>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {upcoming.map(ev => {
+      {(() => {
+        const renderEvent = (ev: MarketingEvent, tbd: boolean) => {
             const days = daysUntil(ev.date);
             const checks = byEvent[ev.id] || {};
             const done = template.filter(t => checks[t.label]?.done).length;
-            const overdue = template.filter(t => !checks[t.label]?.done && days <= t.daysBefore).length;
-            const isOpen = openEvent === ev.id || (openEvent === null && upcoming[0]?.id === ev.id && days <= 7);
+            const overdue = tbd ? 0 : template.filter(t => !checks[t.label]?.done && days <= t.daysBefore).length;
+            const isOpen = openEvent === ev.id || (!tbd && openEvent === null && upcoming[0]?.id === ev.id && days <= 7);
             const allDone = done === template.length;
             return (
               <div key={ev.id} className={`border rounded-xl ${allDone ? 'border-green-200 bg-green-50/30' : overdue ? 'border-red-200 bg-red-50/30' : 'border-gray-200'}`}>
@@ -135,7 +145,7 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
                 >
                   <span className="text-sm font-semibold text-gray-800">{ev.title}</span>
                   <span className="text-[11px] text-gray-400 whitespace-nowrap">
-                    {ev.date.slice(5)} · {days > 0 ? `in ${days}d` : days === 0 ? 'TODAY' : `${-days}d ago`}
+                    {tbd ? '📅 date TBD' : `${ev.date.slice(5)} · ${days > 0 ? `in ${days}d` : days === 0 ? 'TODAY' : `${-days}d ago`}`}
                   </span>
                   <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 ${allDone ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                     ☑ {done}/{template.length}
@@ -151,7 +161,7 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
                   <div className="px-3 pb-3 space-y-1">
                     {[...template].sort((a, b) => b.daysBefore - a.daysBefore).map(t => {
                       const c = checks[t.label];
-                      const isDue = !c?.done && days <= t.daysBefore;
+                      const isDue = !tbd && !c?.done && days <= t.daysBefore;
                       return (
                         <button
                           key={t.label}
@@ -174,9 +184,32 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
                 )}
               </div>
             );
-          })}
-        </div>
-      )}
+        };
+
+        return (
+          <>
+            {upcoming.length === 0 && awaitingDate.length === 0 && (
+              <p className="text-xs text-gray-400 py-2">No launches or sales on the calendar in the next 3 weeks. Add one above and its checklist appears here.</p>
+            )}
+            {upcoming.length > 0 && (
+              <div className="flex flex-col gap-2">{upcoming.map(ev => renderEvent(ev, false))}</div>
+            )}
+            {awaitingDate.length > 0 && (
+              <div className={upcoming.length > 0 ? 'mt-3 pt-2 border-t border-gray-100' : ''}>
+                <button
+                  onClick={() => setShowAwaiting(o => !o)}
+                  className="text-[11px] font-semibold text-gray-400 hover:text-gray-600"
+                >
+                  {showAwaiting ? '▾' : '▸'} Waiting on a launch date ({awaitingDate.length}) — no countdown until the event gets a real date
+                </button>
+                {showAwaiting && (
+                  <div className="flex flex-col gap-2 mt-2">{awaitingDate.map(ev => renderEvent(ev, true))}</div>
+                )}
+              </div>
+            )}
+          </>
+        );
+      })()}
     </Card>
   );
 }

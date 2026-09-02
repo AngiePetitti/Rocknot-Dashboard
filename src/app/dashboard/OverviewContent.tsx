@@ -137,7 +137,9 @@ export default function OverviewContent() {
       fetch('/api/calendar', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
       fetch('/api/launch/checklist', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
     ]).then(([cal, play]) => {
-      const events = (cal?.events || cal || []) as { id: string; title: string; date: string; type: string }[];
+      const events = ((cal?.events || cal || []) as { id: string; title: string; date: string; type: string; description?: string }[])
+        // Placeholder-dated launches carry no real countdown — never alarm on them.
+        .filter(e => !/tbd|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || ''));
       const template = (play?.template || []) as { label: string; daysBefore: number }[];
       const byEvent = (play?.byEvent || {}) as Record<string, Record<string, { done: boolean }>>;
       if (!Array.isArray(events) || !template.length) return;
