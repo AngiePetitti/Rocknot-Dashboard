@@ -529,14 +529,16 @@ export default function InventoryContent() {
               const editing = editReorderId === r.id;
               return (
                 <div key={r.id} className="bg-white border border-blue-200 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-gray-800 flex-1 min-w-0 truncate">
+                  {/* Mobile: full product name wraps on its own line; badges and
+                      buttons flow underneath instead of crushing the name. */}
+                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-1.5">
+                    <span className="text-xs font-semibold text-gray-800 w-full sm:w-auto sm:flex-1 min-w-0 break-words sm:truncate">
                       {r.product}{r.variant ? ` · ${r.variant}` : ''}
                     </span>
                     <span className="text-[11px] text-gray-500 whitespace-nowrap hidden sm:inline">
                       ×{r.qty.toLocaleString()} · ordered {r.orderedDate.slice(5)}{r.orderedBy ? ` by ${r.orderedBy}` : ''}
                     </span>
-                    <span className="text-[11px] text-gray-500 whitespace-nowrap sm:hidden">×{r.qty.toLocaleString()}</span>
+                    <span className="text-[11px] text-gray-500 whitespace-nowrap sm:hidden">×{r.qty.toLocaleString()} · {r.orderedDate.slice(5)}</span>
                     <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 whitespace-nowrap ${badge.cls}`}>{badge.label}</span>
                     <button
                       onClick={() => {
@@ -598,9 +600,9 @@ export default function InventoryContent() {
               <p className="text-[11px] font-bold text-blue-400 uppercase tracking-wide mb-1.5">Received</p>
               <div className="flex flex-col gap-1">
                 {receivedReorders.map(r => (
-                  <div key={r.id} className="flex items-center gap-2 text-[11px] text-gray-500 px-1">
-                    <span className="flex-1 min-w-0 truncate">✓ {r.product}{r.variant ? ` · ${r.variant}` : ''}</span>
-                    <span className="whitespace-nowrap">×{r.qty.toLocaleString()} · ordered {r.orderedDate.slice(5)} → received {(r.receivedDate || '').slice(5)}</span>
+                  <div key={r.id} className="flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-500 px-1">
+                    <span className="w-full sm:w-auto sm:flex-1 min-w-0 break-words sm:truncate">✓ {r.product}{r.variant ? ` · ${r.variant}` : ''}</span>
+                    <span className="whitespace-nowrap">×{r.qty.toLocaleString()} · {r.orderedDate.slice(5)} → received {(r.receivedDate || '').slice(5)}</span>
                   </div>
                 ))}
               </div>
