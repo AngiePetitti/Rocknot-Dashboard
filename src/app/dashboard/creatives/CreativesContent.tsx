@@ -874,6 +874,13 @@ export default function CreativesContent() {
                   </a>
                 )}
               </div>
+              {!selected.videoUrl && selected.platform === 'Meta' && selected.previewUrl && (
+                <p className="text-[11px] text-gray-400 mt-2">
+                  ⬇ No download for this one — Meta locks the video file for ads built from Instagram posts
+                  (the preview above is an embed, not a file). Grab the original from the IG post or your
+                  content library, or via Ads Manager.
+                </p>
+              )}
             </div>
           </div>
         </div>
