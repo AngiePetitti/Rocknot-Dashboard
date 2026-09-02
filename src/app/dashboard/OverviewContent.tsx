@@ -3,7 +3,7 @@
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildCallouts } from '@/src/lib/callouts';
 import { cachedJson } from '@/src/lib/clientCache';
 import type { MarketingEvent } from '@/src/app/api/calendar/route';
@@ -241,7 +241,16 @@ export default function OverviewContent() {
     return platforms.length > 0 ? platforms : null;
   }
 
+  // Guards against out-of-order responses: switching timeframes fast used to
+  // let the PREVIOUS timeframe's slower response land last and overwrite the
+  // new one (Today showing 30-day totals). Each request records its key; a
+  // response only applies if its key is still the active one.
+  const activeReqKey = useRef('');
+
   useEffect(() => {
+    const reqKey = `${tfRaw}|${dateFrom}|${dateTo}|${compareOn}`;
+    activeReqKey.current = reqKey;
+
     setMetrics(EMPTY_METRICS);
     setRevenueData([]);
     setPriorPeriod(null);
@@ -253,8 +262,6 @@ export default function OverviewContent() {
     setRevenueSource(null);
     setAdsError(null);
     setLiveSource('loading');
-
-    setPriorPeriod(null);
 
     const params = new URLSearchParams({ tf: tfRaw });
     if (dateFrom) params.set('date_from', dateFrom);
@@ -270,6 +277,7 @@ export default function OverviewContent() {
     cachedJson<Record<string, unknown> & { source?: string }>(
       `/api/windsor?${params}`,
       data => {
+        if (activeReqKey.current !== reqKey) return; // stale response — a newer timeframe is active
         const source = data.source || 'unknown';
         if (source !== 'windsor_live' && source !== 'bigquery_live') {
           setMetrics(EMPTY_METRICS);
@@ -295,6 +303,7 @@ export default function OverviewContent() {
         setLastUpdated(new Date().toLocaleTimeString());
       },
       () => {
+        if (activeReqKey.current !== reqKey) return; // stale error from an abandoned timeframe
         setMetrics(EMPTY_METRICS);
         setRevenueData([]);
         setLivePlatformSpend(null);
