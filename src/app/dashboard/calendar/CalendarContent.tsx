@@ -86,9 +86,18 @@ interface FormState {
   channels: string[];
   status: Status;
   description: string;
+  dateTbd: boolean;
 }
 
-const EMPTY_FORM: FormState = { title: '', date: '', endDate: '', type: 'launch', channels: [], status: 'planned', description: '' };
+const EMPTY_FORM: FormState = { title: '', date: '', endDate: '', type: 'launch', channels: [], status: 'planned', description: '', dateTbd: false };
+
+// The TBD convention lives in the description text (which also syncs to the
+// Sheet) — the toggle just writes/strips it so nobody has to remember the
+// magic words.
+const TBD_RE = /\s*\(?date tbd\)?\s*/gi;
+function descIsTbd(desc: string): boolean {
+  return /tbd|placeholder|to be confirmed|not confirmed|no confirmation/i.test(desc || '');
+}
 
 export default function CalendarContent() {
   const { data: session } = useSession();
@@ -259,6 +268,7 @@ export default function CalendarContent() {
     setForm({
       title: ev.title, date: ev.date, endDate: ev.endDate || '', type: ev.type,
       channels: parseChannels(ev.channel), status: ev.status || 'planned', description: ev.description || '',
+      dateTbd: descIsTbd(ev.description || ''),
     });
     setShowModal(true);
   }
@@ -268,10 +278,14 @@ export default function CalendarContent() {
     setSaving(true);
     setSaveError(null);
     try {
+      // Apply the TBD toggle to the description: add the marker when on,
+      // strip it when off (so setting the real date clears TBD everywhere).
+      let desc = (form.description || '').replace(TBD_RE, ' ').replace(/\s+/g, ' ').trim();
+      if (form.dateTbd) desc = desc ? `${desc} — date TBD` : 'date TBD';
       const body = {
         title: form.title, date: form.date, endDate: form.endDate || undefined, type: form.type,
         channel: form.channels.join(', ') || undefined, status: form.status,
-        description: form.description || undefined, color: TYPE_COLORS[form.type],
+        description: desc || undefined, color: TYPE_COLORS[form.type],
       };
       const url = editEvent ? `/api/calendar/${editEvent.id}` : '/api/calendar';
       const r = await fetch(url, { method: editEvent ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -866,6 +880,18 @@ export default function CalendarContent() {
                       onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
                       className="w-full px-3 py-2.5 text-sm text-gray-800 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400"
                     />
+                    {(form.type === 'launch' || form.type === 'sale') && (
+                      <button
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, dateTbd: !f.dateTbd }))}
+                        className={`mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold rounded-lg px-2 py-1 border transition-colors ${form.dateTbd ? 'bg-amber-50 border-amber-300 text-amber-700' : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600'}`}
+                      >
+                        <span className={`w-3.5 h-3.5 rounded border text-[9px] font-bold flex items-center justify-center ${form.dateTbd ? 'bg-amber-500 border-amber-500 text-white' : 'border-gray-300'}`}>
+                          {form.dateTbd ? '✓' : ''}
+                        </span>
+                        Date is TBD — park it here, no launch countdown yet
+                      </button>
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">End Date</label>
