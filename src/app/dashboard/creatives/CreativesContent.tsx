@@ -828,9 +828,12 @@ export default function CreativesContent() {
                 <button
                   onClick={async () => {
                     const url = `${window.location.origin}/dashboard/creatives?tf=${tf}&ad=${encodeURIComponent(selected.id)}`;
-                    // Phone: native share sheet (text the link, AirDrop, Slack…).
-                    // Desktop: copy to clipboard.
-                    if (navigator.share) {
+                    // Phone: native share sheet (text, AirDrop, Slack app…).
+                    // Desktop: straight to clipboard — macOS also has
+                    // navigator.share, but a share sheet is the wrong tool
+                    // when you just want to paste a URL into Slack.
+                    const isTouch = window.matchMedia('(pointer: coarse)').matches;
+                    if (isTouch && navigator.share) {
                       try { await navigator.share({ title: selected.name, url }); return; } catch { /* cancelled — fall through to copy */ }
                     }
                     try {
@@ -841,7 +844,7 @@ export default function CreativesContent() {
                   }}
                   className="text-xs font-semibold text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100 rounded-lg px-3 py-2 transition-colors"
                 >
-                  {sharedLinkCopied ? '✓ Link copied' : '🔗 Share with team'}
+                  {sharedLinkCopied ? '✓ Link copied — paste in Slack' : '🔗 Copy link'}
                 </button>
                 {selected.videoUrl && (
                   <button
