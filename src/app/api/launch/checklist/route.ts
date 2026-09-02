@@ -16,7 +16,7 @@ interface Store { template: TemplateItem[]; byEvent: Record<string, EventChecks>
 
 const DOC = 'launch_playbook';
 
-export const DEFAULT_TEMPLATE: TemplateItem[] = [
+const DEFAULT_TEMPLATE: TemplateItem[] = [
   { label: 'Inventory received & counted', daysBefore: 7 },
   { label: 'Tease email scheduled in Klaviyo', daysBefore: 7 },
   { label: 'Launch-day email built & scheduled', daysBefore: 3 },
