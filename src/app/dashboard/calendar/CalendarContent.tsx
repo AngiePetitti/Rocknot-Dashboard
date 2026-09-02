@@ -381,6 +381,10 @@ export default function CalendarContent() {
         </div>
       )}
 
+      {/* ── Launch playbook checklists — top of page so imminent launches
+          are impossible to miss, especially on mobile ── */}
+      <LaunchChecklists events={events} isAdmin={isAdmin} />
+
       {/* ── Next Up ── */}
       {upcomingEvents.length > 0 && (
         <div className="mb-4">
@@ -799,9 +803,6 @@ export default function CalendarContent() {
           </Card>
         )}
       </div>
-
-      {/* ── Launch playbook checklists ── */}
-      <LaunchChecklists events={events} isAdmin={isAdmin} />
 
       {/* ── Event Modal ── */}
       {showModal && (

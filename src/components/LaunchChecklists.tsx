@@ -80,7 +80,7 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
   if (!loaded || !template.length) return null;
 
   return (
-    <Card accentColor="#f9a8d4" className="mt-5">
+    <Card accentColor="#f9a8d4" className="mb-4">
       <div className="flex items-center gap-2 mb-1">
         <h2 className="text-sm font-bold text-gray-700 flex-1">🚀 Launch checklists</h2>
         {isAdmin && (
