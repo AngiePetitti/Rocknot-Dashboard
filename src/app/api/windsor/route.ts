@@ -499,6 +499,37 @@ export async function GET(request: NextRequest) {
     }
 
     const isShortTf = tf === 'today' || tf === 'yesterday';
+
+    // ── Kick every independent upstream call off NOW, in parallel.
+    // These used to run sequentially after the Windsor aggregate, stacking
+    // 20-40s of wall time onto the live view; they only get AWAITED at the
+    // point their result is applied.
+    const shopifyLivePromise = fetchShopifyDaily(currentParams.date_from, currentParams.date_to)
+      .then(rows => ({ rows, err: null as string | null }))
+      .catch((e: unknown) => ({ rows: [] as Awaited<ReturnType<typeof fetchShopifyDaily>>, err: String(e instanceof Error ? e.message : e) }));
+    const metaLivePromise = tf === 'today' ? fetchMetaToday().catch(() => null) : Promise.resolve(null);
+    const snapLivePromise = tf === 'today' ? fetchSnapToday().catch(() => null) : Promise.resolve(null);
+    const shopifySplitPromise = fetchShopifyCustomerSplit(currentParams.date_from, currentParams.date_to).catch(() => null);
+    const creditSpendBeforePromise = (async () => {
+      const { AD_CREDITS } = await import('@/src/lib/adCredits');
+      const out: Record<string, number> = {};
+      for (const credit of AD_CREDITS) {
+        if (credit.platform !== 'snapchat' || currentParams.date_to < credit.from) continue;
+        if (currentParams.date_from > credit.from && isBigQueryConfigured()) {
+          try {
+            const { runQuery, getDataset } = await import('@/src/lib/bigquery');
+            const rows = await runQuery<{ spend: number | null }>(
+              `SELECT SUM(CAST(spend AS FLOAT64)) AS spend FROM \`${getDataset()}.snapchat_ads\`
+               WHERE DATE(date) >= @cf AND DATE(date) < @df`,
+              { cf: credit.from, df: currentParams.date_from }
+            );
+            out[credit.from] = Number(rows?.[0]?.spend || 0);
+          } catch { /* table missing — assume nothing consumed */ }
+        }
+      }
+      return out;
+    })();
+
     const [initialRows, customerSplit] = await Promise.all([
       fetchAllRows(currentParams),
       fetchCustomerSplit(currentParams),
@@ -523,14 +554,8 @@ export async function GET(request: NextRequest) {
     // by up to an hour, while Shopify's own API is always live.
     let shopifyLiveError: string | null = null;
     if (!latestAvailableDate) {
-      // fetchShopifyDaily retries internally — no outer loop (stacked
-      // retries made the live view hang past the function timeout).
-      let shopifyLive: Awaited<ReturnType<typeof fetchShopifyDaily>> = [];
-      try {
-        shopifyLive = await fetchShopifyDaily(currentParams.date_from, currentParams.date_to);
-      } catch (e) {
-        shopifyLiveError = String(e instanceof Error ? e.message : e);
-      }
+      const { rows: shopifyLive, err } = await shopifyLivePromise;
+      shopifyLiveError = err;
       if (shopifyLive.length > 0) {
         const liveRevenue = shopifyLive.reduce((s, d) => s + d.totalSales, 0);
         const liveOrders = shopifyLive.reduce((s, d) => s + d.orders, 0);
@@ -556,7 +581,7 @@ export async function GET(request: NextRequest) {
     // intraday sync lags by up to an hour, so the Overview otherwise shows a
     // lower Meta number than Ads Manager. (Same overlay Ad Performance uses.)
     if (tf === 'today' && !latestAvailableDate) {
-      const metaLive = await fetchMetaToday().catch(() => null);
+      const metaLive = await metaLivePromise;
       if (metaLive && metaLive.spend >= current.metrics.metaSpend) {
         const spendDelta = metaLive.spend - current.metrics.metaSpend;
         current.metrics.metaSpend = Math.round(metaLive.spend * 100) / 100;
@@ -573,7 +598,7 @@ export async function GET(request: NextRequest) {
     // Same live overlay for Snapchat — Windsor's snapchat connector lags
     // intraday by hours, which materially understates today's spend/MER.
     if (tf === 'today' && !latestAvailableDate) {
-      const snapLive = await fetchSnapToday().catch(() => null);
+      const snapLive = await snapLivePromise;
       if (snapLive && snapLive.spend >= current.metrics.snapchatSpend) {
         const spendDelta = snapLive.spend - current.metrics.snapchatSpend;
         current.metrics.snapchatSpend = Math.round(snapLive.spend * 100) / 100;
@@ -592,21 +617,11 @@ export async function GET(request: NextRequest) {
     // summed from BigQuery when available; otherwise assumed zero (fresh credit).
     {
       const { AD_CREDITS, creditAppliedInRange } = await import('@/src/lib/adCredits');
+      const spendBeforeMap = await creditSpendBeforePromise;
       let applied = 0;
       for (const credit of AD_CREDITS) {
         if (credit.platform !== 'snapchat' || currentParams.date_to < credit.from) continue;
-        let spendBefore = 0;
-        if (currentParams.date_from > credit.from && isBigQueryConfigured()) {
-          try {
-            const { runQuery, getDataset } = await import('@/src/lib/bigquery');
-            const rows = await runQuery<{ spend: number | null }>(
-              `SELECT SUM(CAST(spend AS FLOAT64)) AS spend FROM \`${getDataset()}.snapchat_ads\`
-               WHERE DATE(date) >= @cf AND DATE(date) < @df`,
-              { cf: credit.from, df: currentParams.date_from }
-            );
-            spendBefore = Number(rows?.[0]?.spend || 0);
-          } catch { /* table missing — assume nothing consumed */ }
-        }
+        const spendBefore = spendBeforeMap[credit.from] ?? 0;
         applied += creditAppliedInRange(credit, spendBefore, current.metrics.snapchatSpend ?? 0, currentParams.date_to);
       }
       if (applied > 0) {
@@ -633,7 +648,7 @@ export async function GET(request: NextRequest) {
     // Override with live Shopify customer split — must run AFTER the Windsor
     // splitDays overlay above, otherwise Windsor's stale data overwrites it.
     if (!latestAvailableDate) {
-      const shopifySplit = await fetchShopifyCustomerSplit(currentParams.date_from, currentParams.date_to).catch(() => null);
+      const shopifySplit = await shopifySplitPromise;
       if (shopifySplit) {
         const splitTotal = shopifySplit.newCustomers + shopifySplit.returningCustomers;
         current.metrics.newCustomers = shopifySplit.newCustomers;
