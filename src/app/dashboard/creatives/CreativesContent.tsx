@@ -268,6 +268,26 @@ export default function CreativesContent() {
         <TimeframeSelector />
       </Header>
 
+      {/* ── Content folders — pinned so nobody hunts for the Drive links ── */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <a
+          href="https://drive.google.com/drive/folders/1DfcJWwZPVDG9vIbPNZr5qjCBDfR_C9TL"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl px-3 py-2 transition-colors"
+        >
+          📁 Rocknot Marketing Folder ↗
+        </a>
+        <a
+          href="https://drive.google.com/drive/folders/1LGEZyg5zqCCLLWgpI4lfYUjsoLAC6ia4"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl px-3 py-2 transition-colors"
+        >
+          🎨 Internal Design Folder ↗
+        </a>
+      </div>
+
       {/* Summary */}
       {status === 'live' && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
