@@ -357,11 +357,15 @@ export default function GoalsContent() {
         // The year the plan describes: past months at actuals (goal months at
         // their goal), current month at its goal, future months at goals.
         const planYear = goalTotal + months.reduce((s, k, i) => (i + 1 < curMonth && !goals[k]?.revenueGoal ? s + (actuals[k]?.revenue || 0) : s), 0);
-        const projDelta = plannedTotal - target;
+        // TRUE forecast = actuals + this month's live pace + trend-based
+        // estimates for future months (last year's seasonality × this year's
+        // growth). Goals deliberately do NOT feed this number — the plan is
+        // aspiration, the forecast is evidence.
+        const projDelta = trendTotal - target;
         const pctBanked = target > 0 ? Math.min(100, (ytdActual / target) * 100) : 0;
-        const pctProjected = target > 0 ? Math.min(100, (plannedTotal / target) * 100) : 0;
+        const pctProjected = target > 0 ? Math.min(100, (trendTotal / target) * 100) : 0;
         return (
-          <Card accentColor={plannedTotal >= target ? '#86efac' : '#fca5a5'} className="mb-5">
+          <Card accentColor={trendTotal >= target ? '#86efac' : '#fca5a5'} className="mb-5">
             <h2 className="text-sm font-bold text-gray-700 mb-3">📊 The year vs the {formatCurrency(target, true)} target</h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
               <div>
@@ -370,17 +374,20 @@ export default function GoalsContent() {
                 <p className="text-xs text-gray-400">{pctBanked.toFixed(0)}% of target · net sales incl. this month</p>
               </div>
               <div>
-                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Projected year-end</p>
-                <p className="text-2xl font-bold" style={{ color: plannedTotal >= target ? '#16a34a' : '#dc2626' }}>{formatCurrency(plannedTotal, true)}</p>
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">True forecast · year-end</p>
+                <p className="text-2xl font-bold" style={{ color: trendTotal >= target ? '#16a34a' : '#dc2626' }}>{formatCurrency(trendTotal, true)}</p>
                 <p className="text-xs font-semibold" style={{ color: projDelta >= 0 ? '#16a34a' : '#dc2626' }}>
                   {projDelta >= 0 ? '+' : '−'}{formatCurrency(Math.abs(projDelta), true)} vs target
-                  <span className="text-gray-400 font-normal"> · actuals + forecast + remaining goals</span>
+                  <span className="text-gray-400 font-normal"> · actuals + current pace + seasonality; goals NOT counted</span>
                 </p>
               </div>
               <div>
-                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">The plan on paper</p>
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">The plan for the year</p>
                 <p className="text-2xl font-bold text-gray-800">{formatCurrency(planYear, true)}</p>
-                <p className="text-xs text-gray-400">what the year totals if every remaining goal is hit exactly</p>
+                <p className="text-xs text-gray-400">
+                  what the year totals if every remaining goal is hit
+                  {planYear - trendTotal > 0 && <> · needs <b className="text-amber-600">+{formatCurrency(planYear - trendTotal, true)}</b> beyond the forecast</>}
+                </p>
               </div>
             </div>
             {/* Progress: banked (solid) + projected (light) against the target */}
