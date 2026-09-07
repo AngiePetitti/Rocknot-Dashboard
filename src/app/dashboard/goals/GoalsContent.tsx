@@ -352,6 +352,49 @@ export default function GoalsContent() {
         </div>
       </Card>
 
+      {/* ── Year vs target — the one card that answers "are we hitting $5M" ── */}
+      {(() => {
+        // The year the plan describes: past months at actuals (goal months at
+        // their goal), current month at its goal, future months at goals.
+        const planYear = goalTotal + months.reduce((s, k, i) => (i + 1 < curMonth && !goals[k]?.revenueGoal ? s + (actuals[k]?.revenue || 0) : s), 0);
+        const projDelta = plannedTotal - target;
+        const pctBanked = target > 0 ? Math.min(100, (ytdActual / target) * 100) : 0;
+        const pctProjected = target > 0 ? Math.min(100, (plannedTotal / target) * 100) : 0;
+        return (
+          <Card accentColor={plannedTotal >= target ? '#86efac' : '#fca5a5'} className="mb-5">
+            <h2 className="text-sm font-bold text-gray-700 mb-3">📊 The year vs the {formatCurrency(target, true)} target</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
+              <div>
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Banked so far</p>
+                <p className="text-2xl font-bold text-gray-800">{formatCurrency(ytdActual, true)}</p>
+                <p className="text-xs text-gray-400">{pctBanked.toFixed(0)}% of target · net sales incl. this month</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Projected year-end</p>
+                <p className="text-2xl font-bold" style={{ color: plannedTotal >= target ? '#16a34a' : '#dc2626' }}>{formatCurrency(plannedTotal, true)}</p>
+                <p className="text-xs font-semibold" style={{ color: projDelta >= 0 ? '#16a34a' : '#dc2626' }}>
+                  {projDelta >= 0 ? '+' : '−'}{formatCurrency(Math.abs(projDelta), true)} vs target
+                  <span className="text-gray-400 font-normal"> · actuals + forecast + remaining goals</span>
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">The plan on paper</p>
+                <p className="text-2xl font-bold text-gray-800">{formatCurrency(planYear, true)}</p>
+                <p className="text-xs text-gray-400">what the year totals if every remaining goal is hit exactly</p>
+              </div>
+            </div>
+            {/* Progress: banked (solid) + projected (light) against the target */}
+            <div className="relative h-3 bg-gray-100 rounded-full overflow-hidden">
+              <div className="absolute inset-y-0 left-0 rounded-full bg-violet-200" style={{ width: `${pctProjected}%` }} />
+              <div className="absolute inset-y-0 left-0 rounded-full bg-violet-600" style={{ width: `${pctBanked}%` }} />
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1.5">
+              <span className="text-violet-600 font-semibold">■ banked</span> · <span className="text-violet-300 font-semibold">■ projected</span> · bar = % of {formatCurrency(target, true)}
+            </p>
+          </Card>
+        );
+      })()}
+
       {/* ── Rollup cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
         <div className="bg-white border border-gray-100 rounded-2xl px-4 py-3">
