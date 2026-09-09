@@ -232,12 +232,15 @@ export default function TasksContent() {
               {assignees.map(a => <option key={a} value={a}>{a}</option>)}
               <option value="__add__">＋ Add new name…</option>
             </select>
-            <input
-              type="date"
-              value={nDue}
-              onChange={e => setNDue(e.target.value)}
-              className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-violet-300"
-            />
+            <label className="relative flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 bg-white cursor-pointer">
+              📅 {nDue ? new Date(nDue + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Due date (optional)'}
+              <input
+                type="date"
+                value={nDue}
+                onChange={e => setNDue(e.target.value)}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+            </label>
             <div className="flex items-center gap-2 sm:col-span-2">
               {(['high', 'medium', 'low'] as Priority[]).map(p => (
                 <button
@@ -410,12 +413,18 @@ export default function TasksContent() {
                               {assignees.map(a => <option key={a} value={a}>{a}</option>)}
                               <option value="__add__">＋ Add new name…</option>
                             </select>
-                            <input
-                              type="date"
-                              defaultValue={t.dueDate || ''}
-                              onBlur={e => { if (e.target.value !== (t.dueDate || '')) updateTask(t.id, { dueDate: e.target.value }); }}
-                              className="px-2 py-1 border border-gray-200 rounded-lg text-xs text-gray-600 focus:outline-none focus:ring-1 focus:ring-violet-300"
-                            />
+                            {/* iOS shows an empty date input as a blank gray
+                                pill — wrap it in a visible label and float the
+                                native picker invisibly on top. */}
+                            <label className="relative flex items-center justify-center gap-1 px-2 py-1 border border-gray-200 rounded-lg text-xs text-gray-600 bg-white cursor-pointer">
+                              📅 {t.dueDate ? new Date(t.dueDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Set due date'}
+                              <input
+                                type="date"
+                                value={t.dueDate || ''}
+                                onChange={e => updateTask(t.id, { dueDate: e.target.value })}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                              />
+                            </label>
                           </div>
                           <div className="flex items-center gap-1.5">
                             {(['high', 'medium', 'low'] as Priority[]).map(p => (

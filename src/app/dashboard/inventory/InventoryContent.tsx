@@ -578,12 +578,13 @@ export default function InventoryContent() {
                           className="w-20 ml-1.5 px-2 py-1 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
                         />
                       </label>
-                      <label className="text-[11px] text-gray-500">Arrives
+                      <label className="relative flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-lg text-xs text-gray-600 bg-white cursor-pointer">
+                        📅 {editEta ? new Date(editEta + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Arrival date'}
                         <input
                           type="date"
                           value={editEta}
                           onChange={e => setEditEta(e.target.value)}
-                          className="ml-1.5 px-2 py-1 border border-gray-200 rounded-lg text-xs text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-300"
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                         />
                       </label>
                       <button type="submit" className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
