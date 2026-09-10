@@ -712,7 +712,7 @@ export default function OverviewContent() {
         <MetricCard
           title="Total Ad Spend"
           value={formatCurrency(metrics.totalAdSpend)}
-          subtitle={metrics.metaSpend ? `Meta ${formatCurrency(metrics.metaSpend)} · Google ${formatCurrency(metrics.googleSpend ?? 0)}${metrics.tiktokSpend ? ` · TikTok ${formatCurrency(metrics.tiktokSpend)}` : ''}${metrics.snapchatSpend ? ` · Snap ${formatCurrency(metrics.snapchatSpend)}` : ''}` : 'All ad platforms'}
+          subtitle={`${(metrics.netSales ?? metrics.totalRevenue) > 0 ? `${((metrics.totalAdSpend / (metrics.netSales ?? metrics.totalRevenue)) * 100).toFixed(1)}% of net sales goes to marketing · ` : ''}${metrics.metaSpend ? `Meta ${formatCurrency(metrics.metaSpend)} · Google ${formatCurrency(metrics.googleSpend ?? 0)}${metrics.tiktokSpend ? ` · TikTok ${formatCurrency(metrics.tiktokSpend)}` : ''}${metrics.snapchatSpend ? ` · Snap ${formatCurrency(metrics.snapchatSpend)}` : ''}` : 'All ad platforms'}`}
           accentColor="#f9a8d4"
           comparison={compareOn && priorPeriod ? { current: metrics.totalAdSpend, prior: priorPeriod.totalAdSpend } : undefined}
         />
@@ -776,32 +776,75 @@ export default function OverviewContent() {
               />
             </>
           )}
-          <MetricCard
-            title="Meta Spend"
-            value={formatCurrency(metrics.metaSpend ?? 0)}
-            subtitle={`${metrics.metaSpend && metrics.totalAdSpend ? ((metrics.metaSpend / metrics.totalAdSpend) * 100).toFixed(0) : 0}% of total spend`}
-            accentColor="#c7d2fe"
-          />
-          <MetricCard
-            title="Google Spend"
-            value={formatCurrency(metrics.googleSpend ?? 0)}
-            subtitle={`${metrics.googleSpend && metrics.totalAdSpend ? ((metrics.googleSpend / metrics.totalAdSpend) * 100).toFixed(0) : 0}% of total spend`}
-            accentColor="#fef08a"
-          />
-          <MetricCard
-            title="TikTok Spend"
-            value={formatCurrency(metrics.tiktokSpend ?? 0)}
-            subtitle={`${metrics.tiktokSpend && metrics.totalAdSpend ? ((metrics.tiktokSpend / metrics.totalAdSpend) * 100).toFixed(0) : 0}% of total spend`}
-            accentColor="#fbcfe8"
-          />
-          {(metrics.snapchatSpend ?? 0) > 0 && (
-            <MetricCard
-              title="Snapchat Spend"
-              value={formatCurrency(metrics.snapchatSpend ?? 0)}
-              subtitle={`${metrics.snapchatSpend && metrics.totalAdSpend ? ((metrics.snapchatSpend / metrics.totalAdSpend) * 100).toFixed(0) : 0}% of total spend`}
-              accentColor="#fde047"
-            />
-          )}
+          {(() => {
+            // Per-platform margin after COGS + that platform's spend, on its
+            // attributed revenue: rev × (1 − COGS%) − spend. COGS% comes from
+            // the booked P&L months (admin-only basis endpoint) — the margin
+            // line simply hides when it isn't available.
+            const cogs = profitBasis?.cogsPct;
+            const platSub = (spend: number, revenue: number) => {
+              let s = `${spend && metrics.totalAdSpend ? ((spend / metrics.totalAdSpend) * 100).toFixed(0) : 0}% of total spend`;
+              if (cogs !== null && cogs !== undefined && revenue > 0 && spend > 0) {
+                const margin = revenue * (1 - cogs / 100) - spend;
+                const pct = (margin / revenue) * 100;
+                s += ` · margin ${margin >= 0 ? '' : '−'}${formatCurrency(Math.abs(margin), true)} (${pct.toFixed(0)}%) after COGS & spend`;
+              }
+              return s;
+            };
+            return (
+              <>
+                <MetricCard
+                  title="Meta Spend"
+                  value={formatCurrency(metrics.metaSpend ?? 0)}
+                  subtitle={platSub(metrics.metaSpend ?? 0, metrics.metaRevenue ?? 0)}
+                  accentColor="#c7d2fe"
+                />
+                <MetricCard
+                  title="Google Spend"
+                  value={formatCurrency(metrics.googleSpend ?? 0)}
+                  subtitle={platSub(metrics.googleSpend ?? 0, metrics.googleRevenue ?? 0)}
+                  accentColor="#fef08a"
+                />
+                <MetricCard
+                  title="TikTok Spend"
+                  value={formatCurrency(metrics.tiktokSpend ?? 0)}
+                  subtitle={platSub(metrics.tiktokSpend ?? 0, metrics.tiktokRevenue ?? 0)}
+                  accentColor="#fbcfe8"
+                />
+                {(metrics.snapchatSpend ?? 0) > 0 && (
+                  <MetricCard
+                    title="Snapchat Spend"
+                    value={formatCurrency(metrics.snapchatSpend ?? 0)}
+                    subtitle={platSub(metrics.snapchatSpend ?? 0, metrics.snapchatRevenue ?? 0)}
+                    accentColor="#fde047"
+                  />
+                )}
+                {profitBasis?.cogsPct !== null && profitBasis?.cogsPct !== undefined && (metrics.netSales ?? metrics.totalRevenue) > 0 && (() => {
+                  const net = metrics.netSales ?? metrics.totalRevenue;
+                  const cogsDollars = net * (profitBasis.cogsPct! / 100);
+                  const adSpend = metrics.netAdSpend ?? metrics.totalAdSpend;
+                  const contrib = net - cogsDollars - adSpend;
+                  return (
+                    <>
+                      <MetricCard
+                        title="COGS (est.)"
+                        value={formatCurrency(cogsDollars)}
+                        subtitle={`${profitBasis.cogsPct}% of net sales · rate from booked P&L months`}
+                        accentColor="#fdba74"
+                      />
+                      <MetricCard
+                        title="Contribution Margin"
+                        value={formatCurrency(contrib)}
+                        subtitle={`${net > 0 ? ((contrib / net) * 100).toFixed(1) : 0}% of net sales · after COGS + ad spend, before overhead`}
+                        accentColor={contrib >= 0 ? '#86efac' : '#fca5a5'}
+                        valueColor={contrib >= 0 ? '#16a34a' : '#dc2626'}
+                      />
+                    </>
+                  );
+                })()}
+              </>
+            );
+          })()}
           <MetricCard
             title="Website Conversion Rate"
             value={metrics.conversionRate ? `${metrics.conversionRate.toFixed(1)}%` : '—'}
