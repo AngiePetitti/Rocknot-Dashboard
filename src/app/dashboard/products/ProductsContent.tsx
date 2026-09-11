@@ -2,7 +2,7 @@
 
 import { cachedJson } from '@/src/lib/clientCache';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { formatCurrency, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
@@ -66,6 +66,8 @@ export default function ProductsContent() {
   const [totalUnits, setTotalUnits] = useState<number>(0);
   const [totalGrossProfit, setTotalGrossProfit] = useState<number>(0);
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
+  const [variants, setVariants] = useState<{ product: string; variant: string; revenue: number; unitsSold: number }[]>([]);
+  const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
 
   useEffect(() => {
     setStatus('loading');
@@ -78,6 +80,7 @@ export default function ProductsContent() {
       (data: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
         if (data.source === 'shopify_live') {
           setProducts(data.products || []);
+          setVariants(data.variants || []);
           setTotalRevenue(data.totalRevenue ?? 0);
           setTotalUnits(data.totalUnits ?? 0);
           setTotalGrossProfit(data.totalGrossProfit ?? 0);
@@ -234,8 +237,17 @@ export default function ProductsContent() {
               </tr>
             </thead>
             <tbody>
-              {sortedProducts.map((product, i) => (
-                <tr key={product.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+              {sortedProducts.map((product, i) => {
+                const prodVariants = variants
+                  .filter(v => v.product === product.name && v.variant)
+                  .sort((a, b) => b.revenue - a.revenue);
+                const isOpen = expandedProduct === product.name;
+                return (
+                <React.Fragment key={product.id}>
+                <tr
+                  onClick={() => prodVariants.length > 0 && setExpandedProduct(isOpen ? null : product.name)}
+                  className={`border-b border-gray-50 hover:bg-gray-50 transition-colors ${prodVariants.length > 0 ? 'cursor-pointer' : ''}`}
+                >
                   <td className="py-1 pr-4">
                     <span
                       className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white"
@@ -244,7 +256,12 @@ export default function ProductsContent() {
                       {i + 1}
                     </span>
                   </td>
-                  <td className="py-1 pr-4 font-medium text-gray-800">{product.name}</td>
+                  <td className="py-1 pr-4 font-medium text-gray-800">
+                    {product.name}
+                    {prodVariants.length > 0 && (
+                      <span className="ml-1.5 text-[10px] text-violet-500 font-semibold">{isOpen ? '▾' : '▸'} {prodVariants.length} variant{prodVariants.length > 1 ? 's' : ''}</span>
+                    )}
+                  </td>
                   <td className="py-1 pr-4">
                     <span className="text-xs font-medium px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full">
                       {product.category}
@@ -279,11 +296,47 @@ export default function ProductsContent() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                {isOpen && prodVariants.map(v => (
+                  <tr key={`${product.id}-${v.variant}`} className="border-b border-gray-50 bg-violet-50/30">
+                    <td className="py-1 pr-4" />
+                    <td className="py-1 pr-4 pl-6 text-xs text-gray-600" colSpan={2}>↳ {v.variant}</td>
+                    <td className="py-1 px-4 text-right text-xs text-gray-600">{v.unitsSold.toLocaleString()}</td>
+                    <td className="py-1 px-4 text-right text-xs font-semibold text-gray-700">{formatCurrency(v.revenue)}</td>
+                    <td className="py-1 px-4" colSpan={2} />
+                    <td className="py-1 pl-4 text-right text-xs text-gray-500">
+                      {product.revenue > 0 ? `${((v.revenue / product.revenue) * 100).toFixed(0)}% of product` : ''}
+                    </td>
+                  </tr>
+                ))}
+                </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
+        <p className="text-[11px] text-gray-400 mt-3">Tap a product to break it down by variant (size / color).</p>
       </Card>
+
+      {/* ── Top variants store-wide ── */}
+      {variants.filter(v => v.variant).length > 0 && (
+        <Card accentColor="#c4b5fd" className="mt-6">
+          <h2 className="text-sm font-bold text-gray-700 mb-1">🏆 Top Variants</h2>
+          <p className="text-xs text-gray-400 mb-3">The exact sizes &amp; colors winning across the whole store — {TIMEFRAME_LABELS[tfRaw] || tfRaw}</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
+            {variants.filter(v => v.variant).slice(0, 14).map((v, i) => (
+              <div key={`${v.product}-${v.variant}`} className="flex items-center gap-2 text-xs">
+                <span className="w-5 text-right font-bold text-gray-400">{i + 1}.</span>
+                <span className="flex-1 min-w-0 text-gray-700 break-words">
+                  <span className="font-medium">{v.product}</span>
+                  <span className="text-violet-600 font-semibold"> · {v.variant}</span>
+                </span>
+                <span className="text-gray-400 whitespace-nowrap">{v.unitsSold.toLocaleString()}u</span>
+                <span className="font-semibold text-gray-800 whitespace-nowrap w-16 text-right">{formatCurrency(v.revenue, true)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

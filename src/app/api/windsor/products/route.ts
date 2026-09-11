@@ -119,13 +119,17 @@ export async function GET(request: NextRequest) {
     // Per-product breakdown (top 50) plus a store-wide aggregate so the
     // "Total Revenue" card and "% of total" reflect ALL products, not just
     // the top 50 shown in the table.
-    const [result, totalsResult] = await Promise.all([
+    const [result, totalsResult, variantsResult] = await Promise.all([
       runShopifyQL(
         `FROM sales SHOW net_sales, orders, cost_of_goods_sold, gross_profit GROUP BY product_title, product_type SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 50`
       ),
       runShopifyQL(
         `FROM sales SHOW net_sales, orders, gross_profit SINCE ${from} UNTIL ${to}`
       ),
+      // Variant-level (size/color) performance for the drill-down.
+      runShopifyQL(
+        `FROM sales SHOW net_sales, orders GROUP BY product_title, product_variant_title SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 300`
+      ).catch(() => null),
     ]);
 
     if (typeof result?.parseErrors === 'string' && result.parseErrors) {
@@ -190,8 +194,28 @@ export async function GET(request: NextRequest) {
       p.percentOfTotal = totalRevenue > 0 ? Math.round((p.revenue / totalRevenue) * 1000) / 10 : 0;
     }
 
+    // Variant rows: keyed to their parent product for the table drill-down,
+    // plus a store-wide top list ("which size/color is winning overall").
+    const vCols = variantsResult?.tableData?.columns || [];
+    const vRows: Array<Record<string, string> | string[]> = variantsResult?.tableData?.rows || [];
+    const vCell = (r: Record<string, string> | string[], name: string): string => {
+      if (Array.isArray(r)) {
+        const i = vCols.findIndex((c: { name: string }) => c.name === name);
+        return i >= 0 ? (r[i] ?? '') : '';
+      }
+      return r[name] ?? '';
+    };
+    const variants = vRows
+      .map(r => ({
+        product: vCell(r, 'product_title') || '',
+        variant: (vCell(r, 'product_variant_title') || '').replace(/^Default Title$/i, ''),
+        revenue: Math.round(parseFloat(vCell(r, 'net_sales') || '0')),
+        unitsSold: Math.round(parseFloat(vCell(r, 'orders') || '0')),
+      }))
+      .filter(v => v.product && v.revenue > 0);
+
     return NextResponse.json(
-      { source: 'shopify_live', products, totalRevenue, totalUnits, totalGrossProfit },
+      { source: 'shopify_live', products, variants, totalRevenue, totalUnits, totalGrossProfit },
       { headers: cacheHeaders(tfRaw === 'today') }
     );
   } catch (err) {
