@@ -242,11 +242,17 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   // until the next sync overwrites them.
   if (patchPromise) {
     const [metaPatch, snapPatch, tiktokPatch, googlePatch] = await patchPromise;
+    // A day Windsor hasn't synced AT ALL has no BigQuery row — creating the
+    // bucket (instead of skipping) is what keeps a late sync from silently
+    // dropping a whole day of spend from every platform.
+    const inRange = (d: string) => d >= dateFrom && d <= dateTo;
     // Google patched from Windsor REST — the same source the reconcile check
     // uses as its reference, so the two agree by construction.
     for (const day of googlePatch ?? []) {
+      if (!inRange(day.date)) continue;
+      ensureDate(day.date);
       const b = byDate[day.date];
-      if (b && day.spend > b.google) {
+      if (day.spend > b.google) {
         const delta = day.spend - b.google;
         b.google = Math.round(day.spend);
         if (googlePlatform) {
@@ -256,8 +262,10 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       }
     }
     for (const day of tiktokPatch ?? []) {
+      if (!inRange(day.date)) continue;
+      ensureDate(day.date);
       const b = byDate[day.date];
-      if (b && day.spend > b.tiktok) {
+      if (day.spend > b.tiktok) {
         const delta = day.spend - b.tiktok;
         b.tiktok = Math.round(day.spend);
         if (tiktokPlatform) {
@@ -268,8 +276,10 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       }
     }
     for (const day of metaPatch ?? []) {
+      if (!inRange(day.date)) continue;
+      ensureDate(day.date);
       const b = byDate[day.date];
-      if (b && day.spend > b.meta) {
+      if (day.spend > b.meta) {
         const delta = day.spend - b.meta;
         b.meta = Math.round(day.spend);
         if (metaPlatform) {
@@ -279,8 +289,10 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       }
     }
     for (const day of snapPatch ?? []) {
+      if (!inRange(day.date)) continue;
+      ensureDate(day.date);
       const b = byDate[day.date];
-      if (b && day.spend > b.snapchat) {
+      if (day.spend > b.snapchat) {
         const delta = day.spend - b.snapchat;
         b.snapchat = Math.round(day.spend);
         if (snapPlatform) {
