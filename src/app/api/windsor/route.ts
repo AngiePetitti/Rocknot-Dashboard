@@ -508,7 +508,29 @@ export async function GET(request: NextRequest) {
       .then(rows => ({ rows, err: null as string | null }))
       .catch((e: unknown) => ({ rows: [] as Awaited<ReturnType<typeof fetchShopifyDaily>>, err: String(e instanceof Error ? e.message : e) }));
     const metaLivePromise = tf === 'today' ? fetchMetaToday().catch(() => null) : Promise.resolve(null);
-    const snapLivePromise = tf === 'today' ? fetchSnapToday().catch(() => null) : Promise.resolve(null);
+    // Snap: direct Marketing API when SNAP_* creds are set; otherwise
+    // Windsor's per-platform live endpoint (fresher than the general feed).
+    const snapLivePromise = tf === 'today'
+      ? fetchSnapToday()
+          .then(async r => {
+            if (r) return r;
+            const { fetchSnapDailyFromWindsor } = await import('@/src/lib/tiktokLive');
+            const days = await fetchSnapDailyFromWindsor(currentParams.date_from, currentParams.date_to);
+            const d = days?.find(x => x.date === currentParams.date_from) ?? days?.[days.length - 1];
+            return d ? { spend: d.spend, revenue: d.revenue } : null;
+          })
+          .catch(() => null)
+      : Promise.resolve(null);
+    // TikTok has no direct-API hookup — Windsor's per-platform endpoint is
+    // the freshest available source for today.
+    const tiktokLivePromise = tf === 'today'
+      ? (async () => {
+          const { fetchTiktokDaily } = await import('@/src/lib/tiktokLive');
+          const days = await fetchTiktokDaily(currentParams.date_from, currentParams.date_to);
+          const d = days?.find(x => x.date === currentParams.date_from) ?? days?.[days.length - 1];
+          return d ? { spend: d.spend, revenue: d.revenue } : null;
+        })().catch(() => null)
+      : Promise.resolve(null);
     const shopifySplitPromise = fetchShopifyCustomerSplit(currentParams.date_from, currentParams.date_to).catch(() => null);
     const creditSpendBeforePromise = (async () => {
       const { AD_CREDITS } = await import('@/src/lib/adCredits');
@@ -604,6 +626,24 @@ export async function GET(request: NextRequest) {
         current.metrics.snapchatSpend = Math.round(snapLive.spend * 100) / 100;
         current.metrics.totalAdSpend = Math.round((current.metrics.totalAdSpend + spendDelta) * 100) / 100;
         if (snapLive.revenue > 0) current.metrics.snapchatRevenue = Math.round(snapLive.revenue);
+        current.metrics.mer = current.metrics.totalAdSpend > 0
+          ? Math.round(((current.metrics.netSales ?? current.metrics.totalRevenue) / current.metrics.totalAdSpend) * 100) / 100 : 0;
+        if (current.revenueData.length > 0) {
+          current.revenueData[0].adSpend = Math.round(current.metrics.totalAdSpend);
+        }
+      }
+    }
+
+    // Same live overlay for TikTok — Windsor's per-platform endpoint is
+    // fresher than the general intraday feed that otherwise understates
+    // today's TikTok spend by hours.
+    if (tf === 'today' && !latestAvailableDate) {
+      const ttLive = await tiktokLivePromise;
+      if (ttLive && ttLive.spend >= (current.metrics.tiktokSpend ?? 0)) {
+        const spendDelta = ttLive.spend - (current.metrics.tiktokSpend ?? 0);
+        current.metrics.tiktokSpend = Math.round(ttLive.spend * 100) / 100;
+        current.metrics.totalAdSpend = Math.round((current.metrics.totalAdSpend + spendDelta) * 100) / 100;
+        if (ttLive.revenue > 0) current.metrics.tiktokRevenue = Math.round(ttLive.revenue);
         current.metrics.mer = current.metrics.totalAdSpend > 0
           ? Math.round(((current.metrics.netSales ?? current.metrics.totalRevenue) / current.metrics.totalAdSpend) * 100) / 100 : 0;
         if (current.revenueData.length > 0) {
