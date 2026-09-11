@@ -339,11 +339,12 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     ? (async () => {
         const { fetchMetaDaily } = await import('@/src/lib/metaLive');
         const { fetchSnapDaily } = await import('@/src/lib/snapLive');
-        const { fetchTiktokDaily, fetchSnapDailyFromWindsor } = await import('@/src/lib/tiktokLive');
+        const { fetchTiktokDaily, fetchSnapDailyFromWindsor, fetchGoogleDailyFromWindsor } = await import('@/src/lib/tiktokLive');
         return Promise.all([
           fetchMetaDaily(patchFrom, dateTo).catch(() => null),
           fetchSnapDaily(patchFrom, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFrom, dateTo)).catch(() => null),
           fetchTiktokDaily(patchFrom, dateTo).catch(() => null),
+          fetchGoogleDailyFromWindsor(patchFrom, dateTo).catch(() => null),
         ]);
       })()
     : null;
@@ -398,7 +399,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // Apply the ~35-day patch (kicked off above) from each platform's freshest
   // source — the same numbers their Ads Managers show.
   if (patchPromise) {
-    const [metaPatch, snapPatch, tiktokPatch] = await patchPromise;
+    const [metaPatch, snapPatch, tiktokPatch, googlePatch] = await patchPromise;
     const adsByDatePatch: Record<string, AdsRow> = {};
     for (const a of adsRows) adsByDatePatch[a.date] = a;
     if (metaPatch) {
@@ -416,6 +417,18 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
         if (row && day.spend >= Number(row.tiktok_spend || 0)) {
           row.tiktok_spend = day.spend;
           if (day.revenue > 0) row.tiktok_revenue = day.revenue;
+        }
+      }
+    }
+    // Google's BQ sync trails Windsor's own REST endpoint (the reconcile
+    // reference), leaving a standing "-10%" banner — patch recent days from
+    // REST so the two agree.
+    if (googlePatch) {
+      for (const day of googlePatch) {
+        const row = adsByDatePatch[day.date];
+        if (row && day.spend >= Number(row.google_spend || 0)) {
+          row.google_spend = day.spend;
+          if (day.revenue > 0) row.google_revenue = day.revenue;
         }
       }
     }

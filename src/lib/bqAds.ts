@@ -190,11 +190,12 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     ? (async () => {
         const { fetchMetaDaily } = await import('@/src/lib/metaLive');
         const { fetchSnapDaily } = await import('@/src/lib/snapLive');
-        const { fetchTiktokDaily, fetchSnapDailyFromWindsor } = await import('@/src/lib/tiktokLive');
+        const { fetchTiktokDaily, fetchSnapDailyFromWindsor, fetchGoogleDailyFromWindsor } = await import('@/src/lib/tiktokLive');
         return Promise.all([
           fetchMetaDaily(patchFromEarly, dateTo).catch(() => null),
           fetchSnapDaily(patchFromEarly, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFromEarly, dateTo)).catch(() => null),
           fetchTiktokDaily(patchFromEarly, dateTo).catch(() => null),
+          fetchGoogleDailyFromWindsor(patchFromEarly, dateTo).catch(() => null),
         ]);
       })()
     : null;
@@ -240,7 +241,20 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   // once-a-day sync captures those days part-way through, understating spend
   // until the next sync overwrites them.
   if (patchPromise) {
-    const [metaPatch, snapPatch, tiktokPatch] = await patchPromise;
+    const [metaPatch, snapPatch, tiktokPatch, googlePatch] = await patchPromise;
+    // Google patched from Windsor REST — the same source the reconcile check
+    // uses as its reference, so the two agree by construction.
+    for (const day of googlePatch ?? []) {
+      const b = byDate[day.date];
+      if (b && day.spend > b.google) {
+        const delta = day.spend - b.google;
+        b.google = Math.round(day.spend);
+        if (googlePlatform) {
+          googlePlatform.spend = Math.round((googlePlatform.spend + delta) * 100) / 100;
+          googlePlatform.roas = googlePlatform.spend > 0 ? Math.round((googlePlatform.revenue / googlePlatform.spend) * 100) / 100 : 0;
+        }
+      }
+    }
     for (const day of tiktokPatch ?? []) {
       const b = byDate[day.date];
       if (b && day.spend > b.tiktok) {

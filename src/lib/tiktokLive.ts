@@ -5,7 +5,7 @@
 export interface PlatformDay { date: string; spend: number; revenue: number }
 
 async function fetchWindsorDaily(
-  source: 'tiktok' | 'snapchat',
+  source: 'tiktok' | 'snapchat' | 'google_ads',
   revenueFields: string[],
   since: string,
   until: string
@@ -49,4 +49,12 @@ export function fetchTiktokDaily(since: string, until: string): Promise<Platform
 // Fallback for Snapchat when the direct Snap Marketing API creds aren't set.
 export function fetchSnapDailyFromWindsor(since: string, until: string): Promise<PlatformDay[] | null> {
   return fetchWindsorDaily('snapchat', ['conversion_purchases_value'], since, until);
+}
+
+// Google via Windsor REST — Google has no direct-API hookup (dev-token
+// approval), and its BigQuery sync trails the REST endpoint enough to trip
+// the reconcile banner. The REST totals ARE the reconcile reference, so
+// patching from them keeps dashboard and reference aligned by construction.
+export function fetchGoogleDailyFromWindsor(since: string, until: string): Promise<PlatformDay[] | null> {
+  return fetchWindsorDaily('google_ads', ['conversions_value', 'conversion_value'], since, until);
 }
