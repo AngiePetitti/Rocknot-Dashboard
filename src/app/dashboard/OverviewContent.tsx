@@ -613,6 +613,22 @@ export default function OverviewContent() {
                 🎁 {formatCurrency(metrics.adCreditApplied!)} Snapchat ad credit deducted (gross spend {formatCurrency(metrics.totalAdSpend)})
               </p>
             )}
+            {/* When the reconcile check says spend is under-synced, the MER
+                itself is provisional — say so ON the number, with the
+                corrected estimate, so nobody trades on a flattered ratio. */}
+            {health && !health.allOk && (() => {
+              const missing = health.platforms.reduce((s, p) => s + (p.status === 'warn' && p.diff !== null && p.diff < 0 ? -p.diff : 0), 0);
+              if (missing <= 0) return null;
+              const shownSpend = metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend;
+              const net = metrics.netSales ?? metrics.totalRevenue;
+              const corrected = shownSpend + missing > 0 ? net / (shownSpend + missing) : null;
+              return (
+                <p className="text-[11px] font-semibold text-amber-600 mt-0.5">
+                  ⚠ PROVISIONAL — ad spend is still syncing (≈{formatCurrency(missing)} not yet counted over the check window).
+                  {corrected !== null && metrics.mer > 0 && <> True MER is likely closer to <b>{corrected.toFixed(2)}x</b>.</>}
+                </p>
+              );
+            })()}
           </div>
           <div className="hidden sm:block w-px h-20 bg-gray-100" />
           <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-4 sm:gap-8">
