@@ -499,6 +499,10 @@ export async function GET(request: NextRequest) {
     }
 
     const isShortTf = tf === 'today' || tf === 'yesterday';
+    // Cleo (and deep links) ask for today as a CUSTOM range (today->today);
+    // the live spend overlays must fire there too, or those callers get
+    // fresh revenue over stale spend and an inflated MER.
+    const isTodayRange = tf === 'today' || (currentParams.date_from === todayStr && currentParams.date_to === todayStr);
 
     // ── Kick every independent upstream call off NOW, in parallel.
     // These used to run sequentially after the Windsor aggregate, stacking
@@ -507,10 +511,10 @@ export async function GET(request: NextRequest) {
     const shopifyLivePromise = fetchShopifyDaily(currentParams.date_from, currentParams.date_to)
       .then(rows => ({ rows, err: null as string | null }))
       .catch((e: unknown) => ({ rows: [] as Awaited<ReturnType<typeof fetchShopifyDaily>>, err: String(e instanceof Error ? e.message : e) }));
-    const metaLivePromise = tf === 'today' ? fetchMetaToday().catch(() => null) : Promise.resolve(null);
+    const metaLivePromise = isTodayRange ? fetchMetaToday().catch(() => null) : Promise.resolve(null);
     // Snap: direct Marketing API when SNAP_* creds are set; otherwise
     // Windsor's per-platform live endpoint (fresher than the general feed).
-    const snapLivePromise = tf === 'today'
+    const snapLivePromise = isTodayRange
       ? fetchSnapToday()
           .then(async r => {
             if (r) return r;
@@ -523,7 +527,7 @@ export async function GET(request: NextRequest) {
       : Promise.resolve(null);
     // TikTok has no direct-API hookup — Windsor's per-platform endpoint is
     // the freshest available source for today.
-    const tiktokLivePromise = tf === 'today'
+    const tiktokLivePromise = isTodayRange
       ? (async () => {
           const { fetchTiktokDaily } = await import('@/src/lib/tiktokLive');
           const days = await fetchTiktokDaily(currentParams.date_from, currentParams.date_to);
@@ -602,7 +606,7 @@ export async function GET(request: NextRequest) {
     // For "today", overlay live Meta spend from the Graph API — Windsor's
     // intraday sync lags by up to an hour, so the Overview otherwise shows a
     // lower Meta number than Ads Manager. (Same overlay Ad Performance uses.)
-    if (tf === 'today' && !latestAvailableDate) {
+    if (isTodayRange && !latestAvailableDate) {
       const metaLive = await metaLivePromise;
       if (metaLive && metaLive.spend >= current.metrics.metaSpend) {
         const spendDelta = metaLive.spend - current.metrics.metaSpend;
@@ -619,7 +623,7 @@ export async function GET(request: NextRequest) {
 
     // Same live overlay for Snapchat — Windsor's snapchat connector lags
     // intraday by hours, which materially understates today's spend/MER.
-    if (tf === 'today' && !latestAvailableDate) {
+    if (isTodayRange && !latestAvailableDate) {
       const snapLive = await snapLivePromise;
       if (snapLive && snapLive.spend >= current.metrics.snapchatSpend) {
         const spendDelta = snapLive.spend - current.metrics.snapchatSpend;
@@ -637,7 +641,7 @@ export async function GET(request: NextRequest) {
     // Same live overlay for TikTok — Windsor's per-platform endpoint is
     // fresher than the general intraday feed that otherwise understates
     // today's TikTok spend by hours.
-    if (tf === 'today' && !latestAvailableDate) {
+    if (isTodayRange && !latestAvailableDate) {
       const ttLive = await tiktokLivePromise;
       if (ttLive && ttLive.spend >= (current.metrics.tiktokSpend ?? 0)) {
         const spendDelta = ttLive.spend - (current.metrics.tiktokSpend ?? 0);
