@@ -50,7 +50,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_top_products',
-    description: 'Top products by revenue for a date range, with units sold, gross margin %, and share of total revenue.',
+    description: 'Top products by revenue for a date range, with units sold, gross margin %, share of total revenue — AND a variant-level (size/color) breakdown, so per-size / per-color questions are answerable directly from this tool.',
     input_schema: {
       type: 'object',
       properties: {
@@ -223,7 +223,12 @@ New customers ${m.newCustomers ?? 'N/A'} (${m.pctNew ?? '?'}%) · Returning ${m.
     const d = await get(`/api/windsor/products?${params}`);
     const prods = (d?.products as { name: string; category: string; revenue: number; unitsSold: number; grossMargin: number; percentOfTotal: number }[]) ?? [];
     if (!prods.length) return `No product sales data for ${from} → ${to}.`;
-    return `Top products ${from} → ${to} (by revenue):\n${prods.slice(0, 25).map((p, i) => `${i + 1}. ${p.name} [${p.category}] $${p.revenue.toLocaleString()} · ${p.unitsSold}u · ${p.grossMargin?.toFixed?.(0) ?? '?'}% margin · ${p.percentOfTotal}% of total`).join('\n')}`;
+    const variants = (d?.variants as { product: string; variant: string; revenue: number; unitsSold: number }[]) ?? [];
+    const variantLines = variants.filter(v => v.variant).slice(0, 60)
+      .map((v, i) => `${i + 1}. ${v.product} · ${v.variant}: $${v.revenue.toLocaleString()} · ${v.unitsSold}u`);
+    return `Top products ${from} → ${to} (by revenue):\n${prods.slice(0, 25).map((p, i) => `${i + 1}. ${p.name} [${p.category}] $${p.revenue.toLocaleString()} · ${p.unitsSold}u · ${p.grossMargin?.toFixed?.(0) ?? '?'}% margin · ${p.percentOfTotal}% of total`).join('\n')}${
+      variantLines.length ? `\n\nTop variants (size/color level, by revenue):\n${variantLines.join('\n')}` : ''
+    }`;
   }
 
   if (name === 'get_ad_performance') {
