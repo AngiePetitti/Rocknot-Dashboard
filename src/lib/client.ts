@@ -48,7 +48,7 @@ export interface ClientProfile {
   wordmark: string;
   /** Single-letter fallback when the logo file is missing. */
   initial: string;
-  /** Path under /public. A missing file falls back to `initial`. */
+  /** Path under /public ('' = no logo yet; the initial is shown instead). */
   logo: string;
   /** Sidebar/login accent gradient (hex, inline-styled so Tailwind purging can't drop it). */
   theme: { accentFrom: string; accentTo: string; loginMark: string };
@@ -173,7 +173,7 @@ const KAILEEP: ClientProfile = {
   name: 'Kailee P',
   wordmark: 'KAILEE P',
   initial: 'K',
-  logo: '/kaileep-logo.png',
+  logo: '', // drop a file at public/kaileep-logo.png and set this to '/kaileep-logo.png'
   theme: { accentFrom: '#f9a8d4', accentTo: '#e9d5ff', loginMark: '#f472b6' },
   siteDomain: 'kaileep.com',
   dashboardUrl: 'https://kaileep-dashboard.vercel.app',

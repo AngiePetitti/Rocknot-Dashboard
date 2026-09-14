@@ -16,17 +16,19 @@ function LoginInner() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center">
         <div className="w-12 h-12 rounded-full text-white text-xl font-bold flex items-center justify-center mx-auto mb-4 overflow-hidden" style={{ backgroundColor: client.theme.loginMark }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={client.logo}
-            alt={client.wordmark}
-            className="w-full h-full object-contain p-0.5"
-            onError={e => {
-              e.currentTarget.style.display = 'none';
-              (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty('display');
-            }}
-          />
-          <span style={{ display: 'none' }}>{client.initial}</span>
+          {client.logo && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={client.logo}
+              alt={client.wordmark}
+              className="w-full h-full object-contain p-0.5"
+              onError={e => {
+                e.currentTarget.style.display = 'none';
+                (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty('display');
+              }}
+            />
+          )}
+          <span style={{ display: client.logo ? 'none' : undefined }}>{client.initial}</span>
         </div>
         <h1 className="text-lg font-bold text-gray-800">{client.wordmark} Dashboard</h1>
         <p className="text-sm text-gray-400 mt-1 mb-6">Sign in to continue</p>

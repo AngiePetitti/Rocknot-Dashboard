@@ -39,17 +39,19 @@ export default function DashboardShell({ children }: { children: React.ReactNode
           </button>
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-md flex items-center justify-center overflow-hidden" style={{ backgroundImage: `linear-gradient(to bottom right, ${client.theme.accentFrom}, ${client.theme.accentTo})` }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={client.logo}
-                alt={client.wordmark}
-                className="w-full h-full object-contain p-0.5"
-                onError={e => {
-                  e.currentTarget.style.display = 'none';
-                  (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty('display');
-                }}
-              />
-              <span style={{ display: 'none' }} className="text-white font-bold text-xs">{client.initial}</span>
+              {client.logo && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={client.logo}
+                  alt={client.wordmark}
+                  className="w-full h-full object-contain p-0.5"
+                  onError={e => {
+                    e.currentTarget.style.display = 'none';
+                    (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty('display');
+                  }}
+                />
+              )}
+              <span style={{ display: client.logo ? 'none' : undefined }} className="text-white font-bold text-xs">{client.initial}</span>
             </div>
             <span className="font-bold text-gray-900 text-sm tracking-wide">{client.wordmark}</span>
           </div>
