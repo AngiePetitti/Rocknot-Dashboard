@@ -188,9 +188,10 @@ const KAILEEP: ClientProfile = {
   shopify: { defaultDomain: '' },
   ads: {
     platforms: ['meta', 'google', 'pinterest'],
+    // Meta ad account "Kailee P. Weddings" (Windsor account name matches on 'kailee').
     metaAccountNameMatch: 'kailee',
     metaAccountNameMode: 'contains',
-    metaAccountIdDefault: '',
+    metaAccountIdDefault: '449159425278819',
   },
   finance: { qbAccountMatch: 'kailee' },
   // No annual target has been shared yet — the Goals tab asks for one. The
