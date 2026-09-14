@@ -94,7 +94,7 @@ Rules:
 - Mix revenue campaigns with pure-value retention sends (${brand.brand.contentAngles}) — best practice is ~1 value send per 2 sales sends.
 - Every launch on the calendar gets a tease → launch → last-chance arc.
 - Write actual copy, not placeholders: 3 subject line options, preview text, hero headline, body copy (2-3 short paragraphs max), CTA button text.
-- Design brief must name the exact layout and assets ("hero: lifestyle shot of X, product grid of 3 below") using existing product/UGC photography only, with colors and type taken strictly from the BRAND GUIDELINES section.
+- Design brief must name the exact layout and assets ("hero: ${brand.brand.founder ? 'founder wearing X' : 'lifestyle shot of X'}, product grid of 3 below") using existing product/UGC photography only, with colors and type taken strictly from the BRAND GUIDELINES section.
 
 Return ONLY valid JSON, no markdown fences:
 {"monthOverview": "2-3 sentence strategy summary",

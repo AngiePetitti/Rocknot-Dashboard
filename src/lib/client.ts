@@ -51,7 +51,7 @@ export interface ClientProfile {
   /** Path under /public. A missing file falls back to `initial`. */
   logo: string;
   /** Sidebar/login accent gradient (hex, inline-styled so Tailwind purging can't drop it). */
-  theme: { accentFrom: string; accentTo: string };
+  theme: { accentFrom: string; accentTo: string; loginMark: string };
   /** Public storefront domain the AI may point designers to. */
   siteDomain: string;
   /** Where this deployment lives — used in alert emails' deep links. */
@@ -83,6 +83,8 @@ export interface ClientProfile {
      * META_ACCOUNT_NAME env var. Empty string = no name filter.
      */
     metaAccountNameMatch: string;
+    /** 'exact' = account_name must equal the match (Rocknot's original rule); 'contains' = substring. */
+    metaAccountNameMode: 'exact' | 'contains';
     /** Fallback when META_AD_ACCOUNT_ID isn't set ('' = env only). */
     metaAccountIdDefault: string;
   };
@@ -129,7 +131,7 @@ const ROCKNOT: ClientProfile = {
   wordmark: 'ROCKNOT',
   initial: 'R',
   logo: '/logo.png',
-  theme: { accentFrom: '#a78bfa', accentTo: '#f472b6' },
+  theme: { accentFrom: '#a78bfa', accentTo: '#f472b6', loginMark: '#ec4899' },
   siteDomain: 'rocknot.com',
   dashboardUrl: 'https://rocknot-dashboard.vercel.app',
   storagePrefix: 'rocknot',
@@ -144,6 +146,7 @@ const ROCKNOT: ClientProfile = {
   ads: {
     platforms: ['meta', 'google', 'tiktok', 'snapchat'],
     metaAccountNameMatch: 'rocknot',
+    metaAccountNameMode: 'exact',
     metaAccountIdDefault: '165092079662754',
   },
   finance: { qbAccountMatch: 'rocknot' },
@@ -171,7 +174,7 @@ const KAILEEP: ClientProfile = {
   wordmark: 'KAILEE P',
   initial: 'K',
   logo: '/kaileep-logo.png',
-  theme: { accentFrom: '#f9a8d4', accentTo: '#e9d5ff' },
+  theme: { accentFrom: '#f9a8d4', accentTo: '#e9d5ff', loginMark: '#f472b6' },
   siteDomain: 'kaileep.com',
   dashboardUrl: 'https://kaileep-dashboard.vercel.app',
   storagePrefix: 'kaileep',
@@ -186,6 +189,7 @@ const KAILEEP: ClientProfile = {
   ads: {
     platforms: ['meta', 'google', 'pinterest'],
     metaAccountNameMatch: 'kailee',
+    metaAccountNameMode: 'contains',
     metaAccountIdDefault: '',
   },
   finance: { qbAccountMatch: 'kailee' },
@@ -270,7 +274,10 @@ export function metaAccountNameMatch(profile: ClientProfile = getClient()): stri
  */
 export function metaAccountSql(profile: ClientProfile = getClient()): string {
   const m = metaAccountNameMatch(profile).replace(/[^a-z0-9 _.-]/g, '');
-  return m ? ` AND LOWER(account_name) LIKE '%${m}%'` : '';
+  if (!m) return '';
+  return profile.ads.metaAccountNameMode === 'exact'
+    ? ` AND LOWER(account_name) = '${m}'`
+    : ` AND LOWER(account_name) LIKE '%${m}%'`;
 }
 
 /**

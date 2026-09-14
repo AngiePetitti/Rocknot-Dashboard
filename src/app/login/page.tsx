@@ -15,7 +15,7 @@ function LoginInner() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center">
-        <div className="w-12 h-12 rounded-full text-white text-xl font-bold flex items-center justify-center mx-auto mb-4 overflow-hidden" style={{ backgroundImage: `linear-gradient(to bottom right, ${client.theme.accentFrom}, ${client.theme.accentTo})` }}>
+        <div className="w-12 h-12 rounded-full text-white text-xl font-bold flex items-center justify-center mx-auto mb-4 overflow-hidden" style={{ backgroundColor: client.theme.loginMark }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={client.logo}

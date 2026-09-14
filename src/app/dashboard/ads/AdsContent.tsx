@@ -179,9 +179,9 @@ export default function AdsContent() {
   const recommendations = platforms
     .filter(p => p.spend > 0)
     .map(p => {
-      if (p.roas >= ROAS_GOAL * 1.15) return { platform: p, msg: `Scale budget — ROAS of ${formatROAS(p.roas)} is well above the ${ROAS_GOAL}x goal.`, type: 'scale' };
+      if (p.roas >= ROAS_GOAL + 0.5) return { platform: p, msg: `Scale budget — ROAS of ${formatROAS(p.roas)} is well above the ${ROAS_GOAL}x goal.`, type: 'scale' };
       if (p.roas >= ROAS_GOAL) return { platform: p, msg: `Maintain current spend — ROAS is at ${formatROAS(p.roas)}, right at goal.`, type: 'maintain' };
-      if (p.roas >= ROAS_GOAL * 0.57) return { platform: p, msg: `Optimize creatives — ROAS of ${formatROAS(p.roas)} is below goal. Test new ad formats.`, type: 'optimize' };
+      if (p.roas >= ROAS_GOAL - 1.5) return { platform: p, msg: `Optimize creatives — ROAS of ${formatROAS(p.roas)} is below goal. Test new ad formats.`, type: 'optimize' };
       return { platform: p, msg: `Review campaigns — ROAS of ${formatROAS(p.roas)} needs immediate attention. Pause low performers.`, type: 'pause' };
     });
 
