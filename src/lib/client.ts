@@ -1,0 +1,278 @@
+// Client profiles — the ONE place a deployment learns which brand it serves.
+//
+// The dashboard started life as Rocknot's; everything brand-specific (name,
+// logo, Shopify store, which ad platforms run, how the Meta/QuickBooks feeds
+// are filtered, the voice of the AI prompts, Rocknot's bag/strap inventory
+// rules) now reads from the active profile so the same codebase deploys per
+// client with env vars only.
+//
+// Selecting the client (checked in this order):
+//   1. CLIENT env var            — "rocknot" | "kaileep"
+//   2. BQ_DATASET env var        — a dataset named after a known client
+//   3. default                   — "kaileep"
+//
+// Server code calls getClient(). Client components use useClient() from
+// src/components/ClientProvider.tsx (the root layout hands the profile down).
+// Keep profiles JSON-serialisable: they cross the server → browser boundary.
+
+export type ClientId = 'rocknot' | 'kaileep';
+
+// Every ad platform the dashboard knows how to read. A client lists the ones
+// it actually runs; queries and UI for the rest are skipped.
+export type PlatformKey = 'meta' | 'google' | 'tiktok' | 'snapchat' | 'pinterest';
+
+export interface PlatformDef {
+  key: PlatformKey;
+  label: string;          // display name used across the UI and API payloads
+  color: string;          // chart / chip colour (dashboard pastel)
+  chipColor: string;      // stronger tint for badges
+  bqTable: string;        // Windsor → BigQuery destination table
+  windsorSource: string;  // Windsor REST connector name
+}
+
+export const PLATFORMS: Record<PlatformKey, PlatformDef> = {
+  meta:      { key: 'meta',      label: 'Meta',      color: '#818cf8', chipColor: '#818cf8', bqTable: 'facebook_ads',  windsorSource: 'facebook' },
+  google:    { key: 'google',    label: 'Google',    color: '#34d399', chipColor: '#34d399', bqTable: 'google_ads',    windsorSource: 'google_ads' },
+  tiktok:    { key: 'tiktok',    label: 'TikTok',    color: '#f472b6', chipColor: '#f472b6', bqTable: 'tiktok_ads',    windsorSource: 'tiktok' },
+  snapchat:  { key: 'snapchat',  label: 'Snapchat',  color: '#facc15', chipColor: '#eab308', bqTable: 'snapchat_ads',  windsorSource: 'snapchat' },
+  pinterest: { key: 'pinterest', label: 'Pinterest', color: '#fb7185', chipColor: '#e11d48', bqTable: 'pinterest_ads', windsorSource: 'pinterest' },
+};
+
+export interface ClientProfile {
+  id: ClientId;
+  /** Brand name as written in prose: "Kailee P". */
+  name: string;
+  /** Uppercase wordmark for the sidebar / login card. */
+  wordmark: string;
+  /** Single-letter fallback when the logo file is missing. */
+  initial: string;
+  /** Path under /public. A missing file falls back to `initial`. */
+  logo: string;
+  /** Sidebar/login accent gradient (hex, inline-styled so Tailwind purging can't drop it). */
+  theme: { accentFrom: string; accentTo: string };
+  /** Public storefront domain the AI may point designers to. */
+  siteDomain: string;
+  /** Where this deployment lives — used in alert emails' deep links. */
+  dashboardUrl: string;
+  /** Prefix for browser localStorage keys so two clients never share a cache. */
+  storagePrefix: string;
+  /** Legal entity as it appears in QuickBooks. */
+  legalEntity: string;
+  brand: {
+    /** One-paragraph description of the business for every AI prompt. */
+    description: string;
+    /** Founder who appears on camera (drives the founder creative track). */
+    founder: { name: string; onCamera: boolean } | null;
+    /** Approx. average order value in USD, when known (null = omit from prompts). */
+    aov: number | null;
+    /** Retention-plan and insight prompts lean on this for "value" content ideas. */
+    contentAngles: string;
+  };
+  shopify: {
+    /** Fallback when SHOPIFY_STORE_DOMAIN isn't set. */
+    defaultDomain: string;
+  };
+  ads: {
+    platforms: PlatformKey[];
+    /**
+     * Case-insensitive substring of the Meta ad account name. Windsor's
+     * facebook feed can carry every client in the agency workspace, so
+     * BigQuery and REST rows are filtered to this account. Override with the
+     * META_ACCOUNT_NAME env var. Empty string = no name filter.
+     */
+    metaAccountNameMatch: string;
+    /** Fallback when META_AD_ACCOUNT_ID isn't set ('' = env only). */
+    metaAccountIdDefault: string;
+  };
+  finance: {
+    /** Case-insensitive regex source matched against QuickBooks account_name ('' = keep all). */
+    qbAccountMatch: string;
+  };
+  goals: {
+    /** Starting annual net-sales target shown until an admin saves one (0 = ask). */
+    defaultAnnualTarget: number;
+    /** Net-sales MER the ad budgets are planned around. */
+    targetMer: number;
+    /** Per-platform ROAS the Ad Performance recommendations grade against. */
+    targetRoas: number;
+  };
+  inventory: {
+    /**
+     * "rocknot-bags": Rocknot's hand-audited bag/strap consolidation rules.
+     * "standard": one row per Shopify variant, no special-casing.
+     */
+    mode: 'rocknot-bags' | 'standard';
+  };
+  creatives: {
+    /** Founder on-camera brief track (null = only video-edit and static tracks). */
+    founderTrack: { label: string; personName: string } | null;
+    /** Pinned Drive folders on the Creative Analysis tab. */
+    driveFolders: Array<{ label: string; url: string; tone: 'blue' | 'purple' }>;
+  };
+  alerts: {
+    /** "From" display name for the Monday restock email. */
+    fromName: string;
+  };
+  analyst: {
+    /** Name of the in-house AI analyst persona. */
+    name: string;
+  };
+  /** Rocknot's one-time data seed routes (reorders, calendar) only make sense for Rocknot. */
+  seedsEnabled: boolean;
+}
+
+const ROCKNOT: ClientProfile = {
+  id: 'rocknot',
+  name: 'Rocknot',
+  wordmark: 'ROCKNOT',
+  initial: 'R',
+  logo: '/logo.png',
+  theme: { accentFrom: '#a78bfa', accentTo: '#f472b6' },
+  siteDomain: 'rocknot.com',
+  dashboardUrl: 'https://rocknot-dashboard.vercel.app',
+  storagePrefix: 'rocknot',
+  legalEntity: 'Rocknot LLC',
+  brand: {
+    description: 'Rocknot is a DTC music-inspired rhinestone jewelry, handbag & accessories brand (bags with interchangeable straps, jewelry, phone accessories).',
+    founder: { name: 'Orly', onCamera: true },
+    aov: 170,
+    contentAngles: 'styling tips, founder story, UGC roundups',
+  },
+  shopify: { defaultDomain: 'shop-rocknot.myshopify.com' },
+  ads: {
+    platforms: ['meta', 'google', 'tiktok', 'snapchat'],
+    metaAccountNameMatch: 'rocknot',
+    metaAccountIdDefault: '165092079662754',
+  },
+  finance: { qbAccountMatch: 'rocknot' },
+  goals: { defaultAnnualTarget: 4_000_000, targetMer: 3.5, targetRoas: 3.5 },
+  inventory: { mode: 'rocknot-bags' },
+  creatives: {
+    founderTrack: { label: 'Orly', personName: 'Orly' },
+    driveFolders: [
+      { label: '📁 Rocknot Marketing Folder', url: 'https://drive.google.com/drive/folders/1DfcJWwZPVDG9vIbPNZr5qjCBDfR_C9TL', tone: 'blue' },
+      { label: '🎨 Internal Design Folder', url: 'https://drive.google.com/drive/folders/1LGEZyg5zqCCLLWgpI4lfYUjsoLAC6ia4', tone: 'purple' },
+    ],
+  },
+  alerts: { fromName: 'Rocknot Dashboard' },
+  analyst: { name: 'Cleo' },
+  seedsEnabled: true,
+};
+
+// Kailee P — bridal shoes (kaileep.com) plus flower girl and kids shoes.
+// Paid media runs on Google, Meta and Pinterest (NP Digital); email via
+// Klaviyo; store on Shopify. Business facts below come from the Sept 2026
+// engagement running doc and the NP Digital Google/Meta audit.
+const KAILEEP: ClientProfile = {
+  id: 'kaileep',
+  name: 'Kailee P',
+  wordmark: 'KAILEE P',
+  initial: 'K',
+  logo: '/kaileep-logo.png',
+  theme: { accentFrom: '#f9a8d4', accentTo: '#e9d5ff' },
+  siteDomain: 'kaileep.com',
+  dashboardUrl: 'https://kaileep-dashboard.vercel.app',
+  storagePrefix: 'kaileep',
+  legalEntity: 'Kailee P',
+  brand: {
+    description: 'Kailee P is a DTC bridal shoe brand (kaileep.com): wedding heels, flats and "something blue" styles for brides, plus flower girl and kids shoes. Purchases are occasion-driven with a long planning window; the core buyer is a woman aged 25-34 planning her wedding, and bridal accessories are natural add-ons.',
+    founder: { name: 'Kailee', onCamera: true },
+    aov: null,
+    contentAngles: 'real-bride and wedding-day features, styling the shoe with the dress, comfort and break-in tips, flower girl moments',
+  },
+  shopify: { defaultDomain: '' },
+  ads: {
+    platforms: ['meta', 'google', 'pinterest'],
+    metaAccountNameMatch: 'kailee',
+    metaAccountIdDefault: '',
+  },
+  finance: { qbAccountMatch: 'kailee' },
+  // No annual target has been shared yet — the Goals tab asks for one. The
+  // MER/ROAS bars start from the NP Digital audit's blended Meta ROAS (~15x
+  // reported) discounted for the Google tag inflation it found; adjust once
+  // the real plan lands.
+  goals: { defaultAnnualTarget: 0, targetMer: 8, targetRoas: 8 },
+  inventory: { mode: 'standard' },
+  creatives: {
+    founderTrack: { label: 'Kailee', personName: 'Kailee' },
+    driveFolders: [],
+  },
+  alerts: { fromName: 'Kailee P Dashboard' },
+  analyst: { name: 'Cleo' },
+  seedsEnabled: false,
+};
+
+export const CLIENTS: Record<ClientId, ClientProfile> = { rocknot: ROCKNOT, kaileep: KAILEEP };
+
+function isClientId(v: string): v is ClientId {
+  return v === 'rocknot' || v === 'kaileep';
+}
+
+export function getClientId(): ClientId {
+  const explicit = (process.env.CLIENT || process.env.NEXT_PUBLIC_CLIENT || '').trim().toLowerCase();
+  if (isClientId(explicit)) return explicit;
+  const ds = (process.env.BQ_DATASET || '').trim().toLowerCase();
+  if (ds.includes('rocknot')) return 'rocknot';
+  if (ds.includes('kailee')) return 'kaileep';
+  return 'kaileep';
+}
+
+export function getClient(): ClientProfile {
+  return CLIENTS[getClientId()];
+}
+
+// ── Convenience helpers used by the data layer ──────────────────────────────
+
+export function clientPlatforms(profile: ClientProfile = getClient()): PlatformDef[] {
+  return profile.ads.platforms.map(k => PLATFORMS[k]);
+}
+
+export function hasPlatform(key: PlatformKey, profile: ClientProfile = getClient()): boolean {
+  return profile.ads.platforms.includes(key);
+}
+
+/** Shopify store domain: env first, then the profile's default. */
+export function shopifyDomain(profile: ClientProfile = getClient()): string {
+  return (process.env.SHOPIFY_STORE_DOMAIN || profile.shopify.defaultDomain).trim();
+}
+
+/** Bare numeric Meta ad account id ('' when unknown). */
+export function metaAccountId(profile: ClientProfile = getClient()): string {
+  return (process.env.META_AD_ACCOUNT_ID || profile.ads.metaAccountIdDefault).trim().replace('act_', '');
+}
+
+/** Lower-cased substring the Meta account name must contain ('' = no filter). */
+export function metaAccountNameMatch(profile: ClientProfile = getClient()): string {
+  return (process.env.META_ACCOUNT_NAME || profile.ads.metaAccountNameMatch).trim().toLowerCase();
+}
+
+/**
+ * SQL fragment (starting with AND) that keeps only this client's Meta rows in
+ * the shared facebook_ads table. Interpolated as a literal — the value comes
+ * from code/env, never from a request.
+ */
+export function metaAccountSql(profile: ClientProfile = getClient()): string {
+  const m = metaAccountNameMatch(profile).replace(/[^a-z0-9 _.-]/g, '');
+  return m ? ` AND LOWER(account_name) LIKE '%${m}%'` : '';
+}
+
+/**
+ * Keep only this client's rows from Windsor's multi-client facebook feed:
+ * by account_id when configured, otherwise by account_name substring, else all.
+ */
+export function keepClientMetaRows<T extends object>(rows: T[], profile: ClientProfile = getClient()): T[] {
+  const field = (r: T, k: string) => (r as Record<string, unknown>)[k];
+  const id = metaAccountId(profile);
+  if (id) return rows.filter(r => String(field(r, 'account_id') ?? '').replace('act_', '') === id);
+  const name = metaAccountNameMatch(profile);
+  if (name) return rows.filter(r => {
+    const n = String(field(r, 'account_name') ?? '').toLowerCase();
+    return !n || n.includes(name);
+  });
+  return rows;
+}
+
+/** Case-insensitive QuickBooks entity matcher (null = keep every account). */
+export function qbAccountRegex(profile: ClientProfile = getClient()): RegExp | null {
+  return profile.finance.qbAccountMatch ? new RegExp(profile.finance.qbAccountMatch, 'i') : null;
+}

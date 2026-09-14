@@ -6,6 +6,7 @@ import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { fetchMetaToday } from '@/src/lib/metaLive';
 import { fetchSnapToday } from '@/src/lib/snapLive';
+import { metaAccountNameMatch, hasPlatform } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -120,10 +121,12 @@ interface AggregatedMetrics {
   googleSpend: number;
   tiktokSpend: number;
   snapchatSpend: number;
+  pinterestSpend?: number;
   metaRevenue: number;
   googleRevenue: number;
   tiktokRevenue: number;
   snapchatRevenue: number;
+  pinterestRevenue?: number;
   adCreditApplied?: number;
   netAdSpend?: number;
   newCustomers: number;
@@ -142,18 +145,20 @@ interface DayBucket {
   googleRevenue: number;
   tiktokRevenue: number;
   snapchatRevenue: number;
+  pinterestRevenue: number;
   orders: number;
   adSpend: number;
   metaSpend: number;
   googleSpend: number;
   tiktokSpend: number;
   snapchatSpend: number;
+  pinterestSpend: number;
   newCustomers: number;
   returningCustomers: number;
 }
 
 function emptyBucket(date: string): DayBucket {
-  return { date, shopifyRevenue: 0, shopifyNetSales: 0, metaRevenue: 0, googleRevenue: 0, tiktokRevenue: 0, snapchatRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, snapchatSpend: 0, newCustomers: 0, returningCustomers: 0 };
+  return { date, shopifyRevenue: 0, shopifyNetSales: 0, metaRevenue: 0, googleRevenue: 0, tiktokRevenue: 0, snapchatRevenue: 0, pinterestRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, snapchatSpend: 0, pinterestSpend: 0, newCustomers: 0, returningCustomers: 0 };
 }
 
 function aggregateRows(rows: WindsorRow[]) {
@@ -185,10 +190,11 @@ function aggregateRows(rows: WindsorRow[]) {
       byDate[date].orders += Math.round(Number(row.order_count || 0));
     } else {
       if (src.includes('facebook') || src.includes('meta')) {
-        // Only include the Rocknot ad account — other accounts in the same
+        // Only include this client's ad account — other accounts in the same
         // Windsor workspace would otherwise inflate today's Meta spend.
         const accountName = String((row as Record<string, unknown>).account_name || '').toLowerCase();
-        if (accountName && !accountName.includes('rocknot')) continue;
+        const wantAccount = metaAccountNameMatch();
+        if (wantAccount && accountName && !accountName.includes(wantAccount)) continue;
         const roasArr = Array.isArray((row as Record<string, unknown>).purchase_roas)
           ? (row as Record<string, unknown>).purchase_roas as Array<{ value?: string }>
           : null;
@@ -214,6 +220,11 @@ function aggregateRows(rows: WindsorRow[]) {
         byDate[date].snapchatRevenue += Number((row as Record<string, unknown>).conversion_purchases_value || 0);
         byDate[date].snapchatSpend += spend;
         byDate[date].adSpend += spend;
+      } else if (src.includes('pinterest')) {
+        const pr = row as Record<string, unknown>;
+        byDate[date].pinterestRevenue += Number(pr.total_checkout_value || pr.total_conversions_value || row.conversion_value || row.revenue || 0);
+        byDate[date].pinterestSpend += spend;
+        byDate[date].adSpend += spend;
       }
     }
   }
@@ -236,6 +247,8 @@ function aggregateRows(rows: WindsorRow[]) {
   const totalTikTokRevenue = dailyData.reduce((s, d) => s + d.tiktokRevenue, 0);
   const totalSnapSpend  = dailyData.reduce((s, d) => s + d.snapchatSpend, 0);
   const totalSnapRevenue = dailyData.reduce((s, d) => s + d.snapchatRevenue, 0);
+  const totalPinterestSpend = dailyData.reduce((s, d) => s + d.pinterestSpend, 0);
+  const totalPinterestRevenue = dailyData.reduce((s, d) => s + d.pinterestRevenue, 0);
   const totalNewCust    = dailyData.reduce((s, d) => s + d.newCustomers, 0);
   const totalRetCust    = dailyData.reduce((s, d) => s + d.returningCustomers, 0);
 
@@ -257,6 +270,8 @@ function aggregateRows(rows: WindsorRow[]) {
     tiktokRevenue: Math.round(totalTikTokRevenue),
     snapchatSpend: Math.round(totalSnapSpend),
     snapchatRevenue: Math.round(totalSnapRevenue),
+    pinterestSpend: Math.round(totalPinterestSpend),
+    pinterestRevenue: Math.round(totalPinterestRevenue),
     newCustomers: totalNewCust,
     returningCustomers: totalRetCust,
     newCustomerRevenue: 0,
@@ -288,6 +303,13 @@ const SHOPIFY_FIELDS = ['date', 'source', 'order_id', 'order_count', 'order_curr
 const TIKTOK_FIELDS = ['date', 'source', 'spend', 'clicks', 'impressions', 'complete_payment', 'total_complete_payment_rate'].join(',');
 const SNAP_FIELDS = ['date', 'source', 'spend', 'clicks', 'impressions', 'conversion_purchases', 'conversion_purchases_value'].join(',');
 const TIKTOK_FIELDS_LEGACY = ['date', 'source', 'spend', 'clicks', 'impressions', 'complete_payment', 'complete_payment_value'].join(',');
+// Pinterest revenue/conversion column names vary by Windsor connector version —
+// try the checkout pair first, then the generic conversions pair, then spend only.
+const PINTEREST_FIELD_SETS = [
+  ['date', 'source', 'spend', 'clicks', 'impressions', 'total_checkout', 'total_checkout_value'],
+  ['date', 'source', 'spend', 'clicks', 'impressions', 'total_conversions', 'total_conversions_value'],
+  ['date', 'source', 'spend', 'clicks', 'impressions'],
+].map(f => f.join(','));
 
 // Separate queries per Windsor support: orders (with customer id) and the
 // Customers report (customer_is_returning) must not share a query — they are
@@ -356,19 +378,28 @@ async function fetchFromWindsor(endpoint: string, fields: string, params: Record
 let lastWindsorError: string | null = null;
 
 async function fetchAllRows(params: Record<string, string>): Promise<WindsorRow[]> {
+  const empty = { rows: [] as WindsorRow[], rowCount: 0 };
   // Try tiktok_ads endpoint first, then tiktok, then legacy revenue field
-  const tiktokResult = await fetchFromWindsor('tiktok_ads', TIKTOK_FIELDS, params)
-    .then(r => r.rowCount > 0 ? r : fetchFromWindsor('tiktok', TIKTOK_FIELDS, params))
-    .then(r => r.rowCount > 0 ? r : fetchFromWindsor('tiktok_ads', TIKTOK_FIELDS_LEGACY, params))
-    .then(r => r.rowCount > 0 ? r : fetchFromWindsor('tiktok', TIKTOK_FIELDS_LEGACY, params))
-    .catch(() => ({ rows: [] as WindsorRow[], rowCount: 0 }));
+  const tiktokResult = hasPlatform('tiktok')
+    ? await fetchFromWindsor('tiktok_ads', TIKTOK_FIELDS, params)
+        .then(r => r.rowCount > 0 ? r : fetchFromWindsor('tiktok', TIKTOK_FIELDS, params))
+        .then(r => r.rowCount > 0 ? r : fetchFromWindsor('tiktok_ads', TIKTOK_FIELDS_LEGACY, params))
+        .then(r => r.rowCount > 0 ? r : fetchFromWindsor('tiktok', TIKTOK_FIELDS_LEGACY, params))
+        .catch(() => empty)
+    : empty;
 
-  const [meta, google, shopify, snap] = await Promise.all([
+  const [meta, google, shopify, snap, pinterest] = await Promise.all([
     fetchFromWindsor('facebook', META_FIELDS, params),
     fetchFromWindsor('google_ads', GOOGLE_FIELDS, params),
     // Windsor /all filtered to shopify source — /shopify endpoint returns null order fields
     fetchFromWindsor('all', SHOPIFY_FIELDS, params),
-    fetchFromWindsor('snapchat', SNAP_FIELDS, params).catch(() => ({ rows: [] as WindsorRow[], rowCount: 0 })),
+    hasPlatform('snapchat') ? fetchFromWindsor('snapchat', SNAP_FIELDS, params).catch(() => empty) : Promise.resolve(empty),
+    hasPlatform('pinterest')
+      ? fetchFromWindsor('pinterest', PINTEREST_FIELD_SETS[0], params)
+          .then(r => r.rowCount > 0 ? r : fetchFromWindsor('pinterest', PINTEREST_FIELD_SETS[1], params))
+          .then(r => r.rowCount > 0 ? r : fetchFromWindsor('pinterest', PINTEREST_FIELD_SETS[2], params))
+          .catch(() => empty)
+      : Promise.resolve(empty),
   ]);
 
   const shopifyRows = shopify.rows.filter(r =>
@@ -382,6 +413,7 @@ async function fetchAllRows(params: Record<string, string>): Promise<WindsorRow[
     ...google.rows.map(r => ({ ...r, source: 'google' })),
     ...tiktokResult.rows.map(r => ({ ...r, source: 'tiktok' })),
     ...snap.rows.map(r => ({ ...r, source: 'snapchat' })),
+    ...pinterest.rows.map(r => ({ ...r, source: 'pinterest' })),
     ...shopifyRows,
   ];
 }
@@ -514,7 +546,7 @@ export async function GET(request: NextRequest) {
     const metaLivePromise = isTodayRange ? fetchMetaToday().catch(() => null) : Promise.resolve(null);
     // Snap: direct Marketing API when SNAP_* creds are set; otherwise
     // Windsor's per-platform live endpoint (fresher than the general feed).
-    const snapLivePromise = isTodayRange
+    const snapLivePromise = isTodayRange && hasPlatform('snapchat')
       ? fetchSnapToday()
           .then(async r => {
             if (r) return r;
@@ -527,10 +559,19 @@ export async function GET(request: NextRequest) {
       : Promise.resolve(null);
     // TikTok has no direct-API hookup — Windsor's per-platform endpoint is
     // the freshest available source for today.
-    const tiktokLivePromise = isTodayRange
+    const tiktokLivePromise = isTodayRange && hasPlatform('tiktok')
       ? (async () => {
           const { fetchTiktokDaily } = await import('@/src/lib/tiktokLive');
           const days = await fetchTiktokDaily(currentParams.date_from, currentParams.date_to);
+          const d = days?.find(x => x.date === currentParams.date_from) ?? days?.[days.length - 1];
+          return d ? { spend: d.spend, revenue: d.revenue } : null;
+        })().catch(() => null)
+      : Promise.resolve(null);
+    // Pinterest: Windsor's per-platform endpoint, same treatment as TikTok.
+    const pinterestLivePromise = isTodayRange && hasPlatform('pinterest')
+      ? (async () => {
+          const { fetchPinterestDailyFromWindsor } = await import('@/src/lib/tiktokLive');
+          const days = await fetchPinterestDailyFromWindsor(currentParams.date_from, currentParams.date_to);
           const d = days?.find(x => x.date === currentParams.date_from) ?? days?.[days.length - 1];
           return d ? { spend: d.spend, revenue: d.revenue } : null;
         })().catch(() => null)
@@ -648,6 +689,22 @@ export async function GET(request: NextRequest) {
         current.metrics.tiktokSpend = Math.round(ttLive.spend * 100) / 100;
         current.metrics.totalAdSpend = Math.round((current.metrics.totalAdSpend + spendDelta) * 100) / 100;
         if (ttLive.revenue > 0) current.metrics.tiktokRevenue = Math.round(ttLive.revenue);
+        current.metrics.mer = current.metrics.totalAdSpend > 0
+          ? Math.round(((current.metrics.netSales ?? current.metrics.totalRevenue) / current.metrics.totalAdSpend) * 100) / 100 : 0;
+        if (current.revenueData.length > 0) {
+          current.revenueData[0].adSpend = Math.round(current.metrics.totalAdSpend);
+        }
+      }
+    }
+
+    // Same live overlay for Pinterest.
+    if (isTodayRange && !latestAvailableDate) {
+      const pinLive = await pinterestLivePromise;
+      if (pinLive && pinLive.spend >= (current.metrics.pinterestSpend ?? 0)) {
+        const spendDelta = pinLive.spend - (current.metrics.pinterestSpend ?? 0);
+        current.metrics.pinterestSpend = Math.round(pinLive.spend * 100) / 100;
+        current.metrics.totalAdSpend = Math.round((current.metrics.totalAdSpend + spendDelta) * 100) / 100;
+        if (pinLive.revenue > 0) current.metrics.pinterestRevenue = Math.round(pinLive.revenue);
         current.metrics.mer = current.metrics.totalAdSpend > 0
           ? Math.round(((current.metrics.netSales ?? current.metrics.totalRevenue) / current.metrics.totalAdSpend) * 100) / 100 : 0;
         if (current.revenueData.length > 0) {

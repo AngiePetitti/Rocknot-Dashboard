@@ -1,4 +1,5 @@
 import { runQuery, getDataset } from '@/src/lib/bigquery';
+import { metaAccountSql, hasPlatform, PLATFORMS } from '@/src/lib/client';
 
 // Ad Performance tab data from the Windsor→BigQuery tables.
 // Mirrors the shape returned by /api/windsor/ads so the frontend is unchanged.
@@ -22,6 +23,7 @@ export interface DaySpend {
   google: number;
   tiktok: number;
   snapchat: number;
+  pinterest?: number;
 }
 
 interface RawRow {
@@ -84,8 +86,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
       0 AS impressions
     FROM \`${ds}.facebook_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
-      AND LOWER(account_name) = 'rocknot'
+    WHERE DATE(date) BETWEEN @date_from AND @date_to${metaAccountSql()}
   `;
 
   const googleSql = `
@@ -129,8 +130,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   const metaDailySql = `
     SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
     FROM \`${ds}.facebook_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
-      AND LOWER(account_name) = 'rocknot'
+    WHERE DATE(date) BETWEEN @date_from AND @date_to${metaAccountSql()}
     GROUP BY d
   `;
 
@@ -163,6 +163,33 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
   `;
 
+  // Pinterest (Windsor → pinterest_ads). Windsor's Pinterest column names vary
+  // by connector version, so try the checkout-value pair first, then the
+  // generic conversions pair, then spend-only. Guarded like Snapchat.
+  const pinterestSqlFor = (revenueCol: string, convCol: string) => `
+    SELECT SUM(CAST(spend AS FLOAT64)) AS spend,
+           SUM(IFNULL(CAST(${revenueCol} AS FLOAT64), 0)) AS revenue,
+           SUM(IFNULL(CAST(${convCol} AS FLOAT64), 0)) AS conversions,
+           SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+           SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
+    FROM \`${ds}.pinterest_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
+  `;
+  const pinterestSql = pinterestSqlFor('total_checkout_value', 'total_checkout');
+  const pinterestSqlAlt = pinterestSqlFor('total_conversions_value', 'total_conversions');
+  const pinterestSqlMin = `
+    SELECT SUM(CAST(spend AS FLOAT64)) AS spend, 0 AS revenue, 0 AS conversions,
+           SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+           SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
+    FROM \`${ds}.pinterest_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
+  `;
+  const pinterestDailySql = `
+    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
+    FROM \`${ds}.pinterest_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+  `;
+
   // Safe fallbacks using only columns confirmed to exist in BigQuery
   // Minimal fallbacks — spend + revenue only — in case Windsor changes the schema
   const metaSqlMin = `
@@ -170,8 +197,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
            SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
            0 AS conversions, 0 AS clicks, 0 AS impressions
     FROM \`${ds}.facebook_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
-      AND LOWER(account_name) = 'rocknot'
+    WHERE DATE(date) BETWEEN @date_from AND @date_to${metaAccountSql()}
   `;
   const googleSqlMin = `
     SELECT SUM(CAST(spend AS FLOAT64)) AS spend,
@@ -190,58 +216,72 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     ? (async () => {
         const { fetchMetaDaily } = await import('@/src/lib/metaLive');
         const { fetchSnapDaily } = await import('@/src/lib/snapLive');
-        const { fetchTiktokDaily, fetchSnapDailyFromWindsor, fetchGoogleDailyFromWindsor } = await import('@/src/lib/tiktokLive');
+        const { fetchTiktokDaily, fetchSnapDailyFromWindsor, fetchGoogleDailyFromWindsor, fetchPinterestDailyFromWindsor } = await import('@/src/lib/tiktokLive');
+        const none = Promise.resolve(null);
         return Promise.all([
           fetchMetaDaily(patchFromEarly, dateTo).catch(() => null),
-          fetchSnapDaily(patchFromEarly, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFromEarly, dateTo)).catch(() => null),
-          fetchTiktokDaily(patchFromEarly, dateTo).catch(() => null),
+          hasPlatform('snapchat') ? fetchSnapDaily(patchFromEarly, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFromEarly, dateTo)).catch(() => null) : none,
+          hasPlatform('tiktok') ? fetchTiktokDaily(patchFromEarly, dateTo).catch(() => null) : none,
           fetchGoogleDailyFromWindsor(patchFromEarly, dateTo).catch(() => null),
+          hasPlatform('pinterest') ? fetchPinterestDailyFromWindsor(patchFromEarly, dateTo).catch(() => null) : none,
         ]);
       })()
     : null;
 
-  const [metaRows, googleRows, tiktokRows, snapRows, metaDaily, googleDaily, tiktokDaily, snapDaily] = await Promise.all([
+  // Only query the tables this client's platforms sync — a platform the
+  // client doesn't run never appears, and its missing table can't error.
+  const noRows = Promise.resolve(null);
+  const noDaily = Promise.resolve([] as DailySpendRow[]);
+  const [metaRows, googleRows, tiktokRows, snapRows, pinterestRows, metaDaily, googleDaily, tiktokDaily, snapDaily, pinterestDaily] = await Promise.all([
     runQuery<RawRow>(metaSql, params)
       .catch(() => runQuery<RawRow>(metaSqlMin, params))
       .catch(() => null),
     runQuery<RawRow>(googleSql, params)
       .catch(() => runQuery<RawRow>(googleSqlMin, params))
       .catch(() => null),
-    runQuery<RawRow>(tiktokSql, params)
+    hasPlatform('tiktok') ? runQuery<RawRow>(tiktokSql, params)
       .catch(() => runQuery<RawRow>(tiktokSqlLegacy, params))
       .catch(() => runQuery<RawRow>(tiktokSqlFallback, params))
-      .catch(() => null),
-    runQuery<RawRow>(snapSql, params).catch(() => null),
+      .catch(() => null) : noRows,
+    hasPlatform('snapchat') ? runQuery<RawRow>(snapSql, params).catch(() => null) : noRows,
+    hasPlatform('pinterest') ? runQuery<RawRow>(pinterestSql, params)
+      .catch(() => runQuery<RawRow>(pinterestSqlAlt, params))
+      .catch(() => runQuery<RawRow>(pinterestSqlMin, params))
+      .catch(() => null) : noRows,
     runQuery<DailySpendRow>(metaDailySql, params).catch(() => [] as DailySpendRow[]),
     runQuery<DailySpendRow>(googleDailySql, params).catch(() => [] as DailySpendRow[]),
-    runQuery<DailySpendRow>(tiktokDailySql, params).catch(() => [] as DailySpendRow[]),
-    runQuery<DailySpendRow>(snapDailySql, params).catch(() => [] as DailySpendRow[]),
+    hasPlatform('tiktok') ? runQuery<DailySpendRow>(tiktokDailySql, params).catch(() => [] as DailySpendRow[]) : noDaily,
+    hasPlatform('snapchat') ? runQuery<DailySpendRow>(snapDailySql, params).catch(() => [] as DailySpendRow[]) : noDaily,
+    hasPlatform('pinterest') ? runQuery<DailySpendRow>(pinterestDailySql, params).catch(() => [] as DailySpendRow[]) : noDaily,
   ]);
 
   const platforms: PlatformData[] = [];
-  const metaPlatform = buildPlatform('Meta', '#818cf8', metaRows?.[0] ?? null);
-  const googlePlatform = buildPlatform('Google', '#34d399', googleRows?.[0] ?? null);
-  const tiktokPlatform = buildPlatform('TikTok', '#f472b6', tiktokRows?.[0] ?? null);
-  const snapPlatform = buildPlatform('Snapchat', '#facc15', snapRows?.[0] ?? null);
+  const metaPlatform = buildPlatform(PLATFORMS.meta.label, PLATFORMS.meta.color, metaRows?.[0] ?? null);
+  const googlePlatform = buildPlatform(PLATFORMS.google.label, PLATFORMS.google.color, googleRows?.[0] ?? null);
+  const tiktokPlatform = buildPlatform(PLATFORMS.tiktok.label, PLATFORMS.tiktok.color, tiktokRows?.[0] ?? null);
+  const snapPlatform = buildPlatform(PLATFORMS.snapchat.label, PLATFORMS.snapchat.color, snapRows?.[0] ?? null);
+  const pinterestPlatform = buildPlatform(PLATFORMS.pinterest.label, PLATFORMS.pinterest.color, pinterestRows?.[0] ?? null);
   if (metaPlatform) platforms.push(metaPlatform);
   if (googlePlatform) platforms.push(googlePlatform);
   if (tiktokPlatform) platforms.push(tiktokPlatform);
   if (snapPlatform) platforms.push(snapPlatform);
+  if (pinterestPlatform) platforms.push(pinterestPlatform);
 
   // Merge the daily series into one array spanning the full date range
-  const byDate: Record<string, { meta: number; google: number; tiktok: number; snapchat: number }> = {};
-  const ensureDate = (d: string) => { if (!byDate[d]) byDate[d] = { meta: 0, google: 0, tiktok: 0, snapchat: 0 }; };
+  const byDate: Record<string, { meta: number; google: number; tiktok: number; snapchat: number; pinterest: number }> = {};
+  const ensureDate = (d: string) => { if (!byDate[d]) byDate[d] = { meta: 0, google: 0, tiktok: 0, snapchat: 0, pinterest: 0 }; };
 
   for (const r of metaDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].meta = Math.round(Number(r.spend || 0)); }
   for (const r of googleDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].google = Math.round(Number(r.spend || 0)); }
   for (const r of tiktokDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].tiktok = Math.round(Number(r.spend || 0)); }
   for (const r of snapDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].snapchat = Math.round(Number(r.spend || 0)); }
+  for (const r of pinterestDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].pinterest = Math.round(Number(r.spend || 0)); }
 
   // Patch the most recent 1-2 days from the platforms' own APIs — Windsor's
   // once-a-day sync captures those days part-way through, understating spend
   // until the next sync overwrites them.
   if (patchPromise) {
-    const [metaPatch, snapPatch, tiktokPatch, googlePatch] = await patchPromise;
+    const [metaPatch, snapPatch, tiktokPatch, googlePatch, pinterestPatch] = await patchPromise;
     // A day Windsor hasn't synced AT ALL has no BigQuery row — creating the
     // bucket (instead of skipping) is what keeps a late sync from silently
     // dropping a whole day of spend from every platform.
@@ -298,6 +338,19 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
         if (snapPlatform) {
           snapPlatform.spend = Math.round((snapPlatform.spend + delta) * 100) / 100;
           snapPlatform.roas = snapPlatform.spend > 0 ? Math.round((snapPlatform.revenue / snapPlatform.spend) * 100) / 100 : 0;
+        }
+      }
+    }
+    for (const day of pinterestPatch ?? []) {
+      if (!inRange(day.date)) continue;
+      ensureDate(day.date);
+      const b = byDate[day.date];
+      if (day.spend > b.pinterest) {
+        const delta = day.spend - b.pinterest;
+        b.pinterest = Math.round(day.spend);
+        if (pinterestPlatform) {
+          pinterestPlatform.spend = Math.round((pinterestPlatform.spend + delta) * 100) / 100;
+          pinterestPlatform.roas = pinterestPlatform.spend > 0 ? Math.round((pinterestPlatform.revenue / pinterestPlatform.spend) * 100) / 100 : 0;
         }
       }
     }

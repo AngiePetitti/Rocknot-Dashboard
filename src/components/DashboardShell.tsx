@@ -3,9 +3,11 @@
 import { useState } from 'react';
 import Sidebar from './Sidebar';
 import CleoChat from './CleoChat';
+import { useClient } from '@/src/components/ClientProvider';
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const client = useClient();
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -36,20 +38,20 @@ export default function DashboardShell({ children }: { children: React.ReactNode
             </svg>
           </button>
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-400 to-pink-400 flex items-center justify-center overflow-hidden">
+            <div className="w-6 h-6 rounded-md flex items-center justify-center overflow-hidden" style={{ backgroundImage: `linear-gradient(to bottom right, ${client.theme.accentFrom}, ${client.theme.accentTo})` }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src="/logo.png"
-                alt="ROCKNOT"
+                src={client.logo}
+                alt={client.wordmark}
                 className="w-full h-full object-contain p-0.5"
                 onError={e => {
                   e.currentTarget.style.display = 'none';
                   (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty('display');
                 }}
               />
-              <span style={{ display: 'none' }} className="text-white font-bold text-xs">R</span>
+              <span style={{ display: 'none' }} className="text-white font-bold text-xs">{client.initial}</span>
             </div>
-            <span className="font-bold text-gray-900 text-sm tracking-wide">ROCKNOT</span>
+            <span className="font-bold text-gray-900 text-sm tracking-wide">{client.wordmark}</span>
           </div>
         </div>
 

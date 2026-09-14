@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
+import { shopifyDomain } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
 const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
-const DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com').trim();
+const DOMAIN = shopifyDomain();
 
 // End-of-day sales forecast for the live Today view. Learns the store's
 // typical intraday revenue curve from the last 7 complete days of hourly

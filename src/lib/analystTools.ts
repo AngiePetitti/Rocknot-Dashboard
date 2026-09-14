@@ -1,3 +1,4 @@
+import { getClient } from '@/src/lib/client';
 import type Anthropic from '@anthropic-ai/sdk';
 
 // ── Internal data access ─────────────────────────────────────────────────
@@ -62,7 +63,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_ad_performance',
-    description: 'Per-platform ad performance (Meta, Google, TikTok) for a date range: spend, attributed revenue, ROAS, clicks, conversions.',
+    description: 'Per-platform ad performance (every paid platform the store runs) for a date range: spend, attributed revenue, ROAS, clicks, conversions.',
     input_schema: {
       type: 'object',
       properties: {
@@ -86,7 +87,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_inventory',
-    description: 'CURRENT inventory state (not historical): stock value at cost/retail, the full slow/dead stock list ACROSS ALL CATEGORIES (straps, jewelry, accessories) with per-SKU on-hand units, 90-day sales, days of supply and cash tied up (use this for discount/sale candidates), out-of-stock fast sellers with weekly velocity, true bag stock counts with listing prices.',
+    description: 'CURRENT inventory state (not historical): stock value at cost/retail, the full slow/dead stock list ACROSS ALL CATEGORIES with per-SKU on-hand units, 90-day sales, days of supply and cash tied up (use this for discount/sale candidates), out-of-stock fast sellers with weekly velocity, true bag stock counts with listing prices.',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -96,7 +97,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_financials',
-    description: "The company's P&L from QuickBooks (Rocknot LLC) for a date range: income, COGS, gross profit, operating expenses, net income and margins; monthly breakdown with a QuickBooks-vs-Shopify reconciliation gap (big gaps = bookkeeping not caught up for that month — treat those months' figures as incomplete); and, when the direct QuickBooks connection is active, every account-level line item. ADMIN-ONLY data: it returns a restriction notice for non-admin users — never speculate about financials for them.",
+    description: "The company's P&L from QuickBooks for a date range: income, COGS, gross profit, operating expenses, net income and margins; monthly breakdown with a QuickBooks-vs-Shopify reconciliation gap (big gaps = bookkeeping not caught up for that month — treat those months' figures as incomplete); and, when the direct QuickBooks connection is active, every account-level line item. ADMIN-ONLY data: it returns a restriction notice for non-admin users — never speculate about financials for them.",
     input_schema: {
       type: 'object',
       properties: {
@@ -112,7 +113,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_ad_creatives',
-    description: 'Per-AD creative performance (individual ads, not platform totals) across Meta/TikTok/Snapchat: spend, attributed revenue, ROAS, CTR, conversions, cost per conversion, campaign and ad set. Use to find winning/losing creatives.',
+    description: 'Per-AD creative performance (individual ads, not platform totals) across the social ad platforms: spend, attributed revenue, ROAS, CTR, conversions, cost per conversion, campaign and ad set. Use to find winning/losing creatives.',
     input_schema: {
       type: 'object',
       properties: {
@@ -214,8 +215,8 @@ export async function execTool(get: Getter, name: string, input: Record<string, 
     }
 
     return `Metrics ${from} → ${to}:
-Total sales $${(m.totalRevenue ?? 0).toLocaleString()} · Net sales $${(m.netSales ?? m.totalRevenue ?? 0).toLocaleString()} · Orders ${(m.totalOrders ?? 0).toLocaleString()} · AOV $${(m.aov ?? 0).toFixed(2)} · Ad spend $${(m.totalAdSpend ?? 0).toLocaleString()} · MER ${m.mer?.toFixed?.(2) ?? 'N/A'}x (net sales ÷ net ad spend; goal 3.5x)
-Meta $${(m.metaSpend ?? 0).toLocaleString()} · Google $${(m.googleSpend ?? 0).toLocaleString()} · TikTok $${(m.tiktokSpend ?? 0).toLocaleString()}${m.snapchatSpend ? ` · Snapchat $${m.snapchatSpend.toLocaleString()}` : ''}
+Total sales $${(m.totalRevenue ?? 0).toLocaleString()} · Net sales $${(m.netSales ?? m.totalRevenue ?? 0).toLocaleString()} · Orders ${(m.totalOrders ?? 0).toLocaleString()} · AOV $${(m.aov ?? 0).toFixed(2)} · Ad spend $${(m.totalAdSpend ?? 0).toLocaleString()} · MER ${m.mer?.toFixed?.(2) ?? 'N/A'}x (net sales ÷ net ad spend; goal ${getClient().goals.targetMer}x)
+Meta $${(m.metaSpend ?? 0).toLocaleString()} · Google $${(m.googleSpend ?? 0).toLocaleString()}${m.tiktokSpend ? ` · TikTok $${m.tiktokSpend.toLocaleString()}` : ''}${m.snapchatSpend ? ` · Snapchat $${m.snapchatSpend.toLocaleString()}` : ''}${m.pinterestSpend ? ` · Pinterest $${m.pinterestSpend.toLocaleString()}` : ''}
 New customers ${m.newCustomers ?? 'N/A'} (${m.pctNew ?? '?'}%) · Returning ${m.returningCustomers ?? 'N/A'} · Conversion rate ${m.conversionRate ?? 'N/A'}%${series}`;
   }
 
@@ -258,7 +259,7 @@ New customers ${m.newCustomers ?? 'N/A'} (${m.pctNew ?? '?'}%) · Returning ${m.
       .map(i => `${i.product}${i.variant ? ' – ' + i.variant : ''} (~${Math.round(i.dailyVelocity * 7)}/wk, $${i.unitPrice})`);
     const fmtSlow = (i: Item) =>
       `${i.product}${i.variant ? ' – ' + i.variant : ''} [${i.category}]: ${i.currentStock}u on hand, sold ${i.unitsSold90d} in 90d${i.daysRemaining !== null ? `, ${i.daysRemaining}d supply` : ' (no sales)'}, $${i.stockValue.toLocaleString()} at cost, sells $${i.unitPrice}`;
-    return `Current inventory (all categories — straps, jewelry, accessories, bags):
+    return `Current inventory (all categories):
 Stock at cost $${(fin?.totalCostValue ?? 0).toLocaleString()} · at retail $${(fin?.totalRetailValue ?? 0).toLocaleString()} · slow/dead $${(fin?.slowStockCostValue ?? 0).toLocaleString()} across ${fin?.slowStockCount ?? 0} SKUs
 Slow/dead stock (in stock the whole period but not selling — dead = zero 90d sales, slow = over a year of supply; the top ${slow.length} by cash tied up, discount/bundle candidates):
 ${slow.map(fmtSlow).join('\n') || 'none'}

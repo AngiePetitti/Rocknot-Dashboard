@@ -4,12 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useClient } from '@/src/components/ClientProvider';
 
 // Cleo — the AI analyst chat, available on every dashboard tab as a floating
 // bubble. Fullscreen on mobile, a docked panel on desktop. Conversations are
 // cached per-login in localStorage and synced to the server chat store.
 
-const CHAT_KEY = 'rocknot_ai_analyst_chat';
 
 const SUGGESTED_QUESTIONS = [
   'Which products should we put more ad spend behind, and why?',
@@ -93,6 +93,8 @@ export default function CleoChat() {
   const endRef = useRef<HTMLDivElement>(null);
   const { data: session, status: sessionStatus } = useSession();
   // Scope saved chat to the signed-in user so it never leaks across logins on a shared device.
+  const client = useClient();
+  const CHAT_KEY = `${client.storagePrefix}_ai_analyst_chat`;
   const chatKey = session?.user?.email ? `${CHAT_KEY}:${session.user.email.toLowerCase()}` : CHAT_KEY;
 
   useEffect(() => {

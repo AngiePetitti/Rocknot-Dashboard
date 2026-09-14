@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getClient } from '@/src/lib/client';
 import { getReorders, addReorder } from '@/src/lib/chatStore';
 
 export const dynamic = 'force-dynamic';
@@ -47,6 +48,8 @@ const ORDERS: { product: string; variant: string; qty: number; orderedDate: stri
 ];
 
 export async function GET() {
+  // Rocknot's one-time seed data — meaningless (and harmful) for any other client.
+  if (!getClient().seedsEnabled) return NextResponse.json({ error: 'Seed routes are disabled for this client' }, { status: 404 });
   try {
     const existing = await getReorders();
     const openKeys = new Set(

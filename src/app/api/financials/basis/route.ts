@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
+import { qbAccountRegex } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -74,8 +75,9 @@ export async function GET(req: NextRequest) {
     const num = (v: unknown) => Number(v ?? 0) || 0;
     interface Row { [k: string]: string | number | null | undefined }
     let rows = (qbRes.data || []) as Row[];
-    const rocknot = rows.filter(r => /rocknot/i.test(String(r.account_name || '')));
-    if (rocknot.length) rows = rocknot;
+    const qbMatch = qbAccountRegex();
+    const ownRows = qbMatch ? rows.filter(r => qbMatch.test(String(r.account_name || ''))) : rows;
+    if (ownRows.length) rows = ownRows;
 
     // Daily QB figures + monthly aggregates for bookedness detection.
     const qbDaily = new Map<string, { net: number }>();
@@ -105,7 +107,7 @@ export async function GET(req: NextRequest) {
     const adsDaily = new Map<string, number>();
     const adsMonthly = new Map<string, number>();
     for (const d of ads?.dailySpend ?? []) {
-      const spend = d.meta + d.google + d.tiktok + (d.snapchat || 0);
+      const spend = d.meta + d.google + d.tiktok + (d.snapchat || 0) + (d.pinterest || 0);
       adsDaily.set(d.date, (adsDaily.get(d.date) ?? 0) + spend);
       const mk = d.date.slice(0, 7);
       adsMonthly.set(mk, (adsMonthly.get(mk) ?? 0) + spend);

@@ -11,6 +11,8 @@ import MetricCard from '@/src/components/ui/MetricCard';
 import TimeframeSelector from '@/src/components/ui/TimeframeSelector';
 import PlatformBadge from '@/src/components/ui/PlatformBadge';
 import ROASChart from '@/src/components/charts/ROASChart';
+import { useClient } from '@/src/components/ClientProvider';
+import { PLATFORMS } from '@/src/lib/client';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
   LineChart, Line, Legend,
@@ -35,12 +37,13 @@ interface DaySpend {
   google: number;
   tiktok: number;
   snapchat?: number;
+  pinterest?: number;
 }
 
 interface CreativeRow {
   id: string;
   name: string;
-  platform: 'Meta' | 'TikTok' | 'Snapchat';
+  platform: 'Meta' | 'TikTok' | 'Snapchat' | 'Pinterest';
   adUrl: string | null;
   campaign: string;
   adset: string;
@@ -78,6 +81,8 @@ function formatDate(dateStr: string) {
 
 export default function AdsContent() {
   const searchParams = useSearchParams();
+  const client = useClient();
+  const ROAS_GOAL = client.goals.targetRoas;
   const tfRaw = searchParams.get('tf') || '30d';
   const tf = (tfRaw === 'custom' ? '30d' : tfRaw) as Timeframe;
   const dateFrom = searchParams.get('date_from') || '';
@@ -164,7 +169,7 @@ export default function AdsContent() {
   const visibleCreatives = showAllAds ? sortedCreatives : sortedCreatives.slice(0, 15);
   const adPlatforms: Array<'All' | CreativeRow['platform']> =
     ['All', ...Array.from(new Set(creatives.map(c => c.platform)))];
-  const PLATFORM_CHIP_COLORS: Record<string, string> = { Meta: '#818cf8', TikTok: '#f472b6', Snapchat: '#eab308' };
+  const PLATFORM_CHIP_COLORS: Record<string, string> = Object.fromEntries(Object.values(PLATFORMS).map(p => [p.label, p.chipColor]));
 
   const subtitle = tfRaw === 'custom' && dateFrom && dateTo
     ? `Ad Performance · ${dateFrom} → ${dateTo}`
@@ -174,9 +179,9 @@ export default function AdsContent() {
   const recommendations = platforms
     .filter(p => p.spend > 0)
     .map(p => {
-      if (p.roas >= 4) return { platform: p, msg: `Scale budget — ROAS of ${formatROAS(p.roas)} is well above the 3.5x goal.`, type: 'scale' };
-      if (p.roas >= 3.5) return { platform: p, msg: `Maintain current spend — ROAS is at ${formatROAS(p.roas)}, right at goal.`, type: 'maintain' };
-      if (p.roas >= 2) return { platform: p, msg: `Optimize creatives — ROAS of ${formatROAS(p.roas)} is below goal. Test new ad formats.`, type: 'optimize' };
+      if (p.roas >= ROAS_GOAL * 1.15) return { platform: p, msg: `Scale budget — ROAS of ${formatROAS(p.roas)} is well above the ${ROAS_GOAL}x goal.`, type: 'scale' };
+      if (p.roas >= ROAS_GOAL) return { platform: p, msg: `Maintain current spend — ROAS is at ${formatROAS(p.roas)}, right at goal.`, type: 'maintain' };
+      if (p.roas >= ROAS_GOAL * 0.57) return { platform: p, msg: `Optimize creatives — ROAS of ${formatROAS(p.roas)} is below goal. Test new ad formats.`, type: 'optimize' };
       return { platform: p, msg: `Review campaigns — ROAS of ${formatROAS(p.roas)} needs immediate attention. Pause low performers.`, type: 'pause' };
     });
 
@@ -189,9 +194,10 @@ export default function AdsContent() {
     Google: d.google,
     TikTok: d.tiktok,
     Snapchat: d.snapchat ?? 0,
+    Pinterest: d.pinterest ?? 0,
   }));
 
-  const hasSpend = dailySpend.some(d => d.meta > 0 || d.google > 0 || d.tiktok > 0 || (d.snapchat ?? 0) > 0);
+  const hasSpend = dailySpend.some(d => d.meta > 0 || d.google > 0 || d.tiktok > 0 || (d.snapchat ?? 0) > 0 || (d.pinterest ?? 0) > 0);
 
   return (
     <div>
@@ -258,7 +264,7 @@ export default function AdsContent() {
               value={formatROAS(blendedROAS)}
               subtitle="Revenue / Spend"
               accentColor="#86efac"
-              valueColor={blendedROAS >= 3.5 ? '#22c55e' : '#ef4444'}
+              valueColor={blendedROAS >= ROAS_GOAL ? '#22c55e' : '#ef4444'}
             />
             <MetricCard
               title="Best Platform"
@@ -308,7 +314,7 @@ export default function AdsContent() {
                   <div>
                     <p className="text-gray-400 uppercase font-semibold mb-0.5">ROAS</p>
                     {p.revenue > 0 ? (
-                      <p className="font-bold" style={{ color: p.roas >= 3.5 ? '#22c55e' : '#ef4444' }}>{formatROAS(p.roas)}</p>
+                      <p className="font-bold" style={{ color: p.roas >= ROAS_GOAL ? '#22c55e' : '#ef4444' }}>{formatROAS(p.roas)}</p>
                     ) : (
                       <p className="font-bold text-gray-400" title="No purchase value reported for this platform">—</p>
                     )}
@@ -338,8 +344,8 @@ export default function AdsContent() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
             <Card accentColor="#c4b5fd">
               <h2 className="text-sm font-bold text-gray-700 mb-1">ROAS by Platform</h2>
-              <p className="text-xs text-gray-400 mb-4">Red dashed line = 3.5x goal</p>
-              <ROASChart data={platforms} goalLine={3.5} />
+              <p className="text-xs text-gray-400 mb-4">Red dashed line = {ROAS_GOAL}x goal</p>
+              <ROASChart data={platforms} goalLine={ROAS_GOAL} />
             </Card>
 
             <Card accentColor="#f9a8d4">
@@ -375,6 +381,7 @@ export default function AdsContent() {
                   {platforms.some(p => p.platform === 'Google') && <Line type="monotone" dataKey="Google" stroke="#34d399" strokeWidth={2} dot={false} />}
                   {platforms.some(p => p.platform === 'TikTok') && <Line type="monotone" dataKey="TikTok" stroke="#f472b6" strokeWidth={2} dot={false} />}
                   {platforms.some(p => p.platform === 'Snapchat') && <Line type="monotone" dataKey="Snapchat" stroke="#eab308" strokeWidth={2} dot={false} />}
+                  {platforms.some(p => p.platform === 'Pinterest') && <Line type="monotone" dataKey="Pinterest" stroke={PLATFORMS.pinterest.chipColor} strokeWidth={2} dot={false} />}
                 </LineChart>
               </ResponsiveContainer>
             </Card>
@@ -491,7 +498,7 @@ export default function AdsContent() {
                         <td className="py-2.5 px-3 text-center whitespace-nowrap text-gray-600">{formatCurrency(ad.spend)}</td>
                         <td className="py-2.5 px-3 text-center whitespace-nowrap">
                           {ad.revenue > 0 ? (
-                            <span className="font-bold" style={{ color: ad.roas >= 3.5 ? '#22c55e' : '#ef4444' }}>
+                            <span className="font-bold" style={{ color: ad.roas >= ROAS_GOAL ? '#22c55e' : '#ef4444' }}>
                               {formatROAS(ad.roas)}
                             </span>
                           ) : (

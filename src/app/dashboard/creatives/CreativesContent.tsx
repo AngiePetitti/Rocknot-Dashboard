@@ -9,11 +9,13 @@ import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import TimeframeSelector from '@/src/components/ui/TimeframeSelector';
 import PlatformBadge from '@/src/components/ui/PlatformBadge';
+import { useClient } from '@/src/components/ClientProvider';
+import { PLATFORMS } from '@/src/lib/client';
 
 interface CreativePerformance {
   id: string;
   name: string;
-  platform: 'Meta' | 'TikTok' | 'Snapchat';
+  platform: 'Meta' | 'TikTok' | 'Snapchat' | 'Pinterest';
   thumbnailUrl: string | null;
   videoUrl: string | null;
   previewUrl?: string | null;
@@ -31,10 +33,14 @@ interface CreativePerformance {
 }
 
 type SortKey = 'spend' | 'roas' | 'ctr' | 'conversions';
-type PlatformFilter = 'all' | 'Meta' | 'TikTok' | 'Snapchat';
+type PlatformFilter = 'all' | 'Meta' | 'TikTok' | 'Snapchat' | 'Pinterest';
 
 export default function CreativesContent() {
   const searchParams = useSearchParams();
+  const client = useClient();
+  const founderTrack = client.creatives.founderTrack;
+  // Creative-level data comes from the social platforms' Windsor feeds; Google has no per-ad creative feed here.
+  const creativePlatforms = client.ads.platforms.filter(k => k !== 'google').map(k => PLATFORMS[k].label);
   const tf = (searchParams.get('tf') || '30d') as Timeframe;
 
   const [creatives, setCreatives] = useState<CreativePerformance[]>([]);
@@ -53,14 +59,14 @@ export default function CreativesContent() {
   const [sharing, setSharing] = useState(false);
 
   // ── Creative briefs (AI) + format overview ──
-  interface BriefEntry { id: string; track: 'video' | 'static' | 'orly'; title: string; summary: string }
+  interface BriefEntry { id: string; track: 'video' | 'static' | 'founder'; title: string; summary: string }
   interface BriefsPayload { briefs?: BriefEntry[] | null; generatedAt?: string }
   const [briefsData, setBriefsData] = useState<BriefsPayload | null>(null);
   const [briefsGenerating, setBriefsGenerating] = useState(false);
   const [briefsError, setBriefsError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
-  const [briefCounts, setBriefCounts] = useState<{ video: number; static: number; orly: number }>({ video: 1, static: 1, orly: 1 });
-  const totalBriefs = briefCounts.video + briefCounts.static + briefCounts.orly;
+  const [briefCounts, setBriefCounts] = useState<{ video: number; static: number; founder: number }>({ video: 1, static: 1, founder: founderTrack ? 1 : 0 });
+  const totalBriefs = briefCounts.video + briefCounts.static + briefCounts.founder;
   useEffect(() => {
     fetch('/api/creatives/briefs', { cache: 'no-store' }).then(r => r.json()).then(setBriefsData).catch(() => {});
   }, []);
@@ -177,13 +183,15 @@ export default function CreativesContent() {
 
   // Deterministic format rollup from the loaded creatives (name conventions).
   const [openFormat, setOpenFormat] = useState<string | null>(null);
+  const founderName = (client.brand.founder?.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const founderRe = new RegExp(founderName ? `founder|${founderName}` : 'founder');
   const formatStats = useMemo(() => {
     const buckets = new Map<string, { spend: number; revenue: number; clicks: number; impressions: number; ads: CreativePerformance[] }>();
     const formatOf = (name: string): string => {
       const n = name.toLowerCase();
       if (/^static|static_|_img_|image|\bstatic\b/.test(n)) return 'Static image';
       if (/ugc|montage|_mu_/.test(n)) return 'Video · UGC/montage';
-      if (/founder|orly/.test(n)) return 'Video · founder';
+      if (founderRe.test(n)) return 'Video · founder';
       if (/talking\s*head/.test(n)) return 'Video · talking head';
       if (/demo/.test(n)) return 'Video · product demo';
       if (/showcase/.test(n)) return 'Video · product showcase';
@@ -264,29 +272,26 @@ export default function CreativesContent() {
 
   return (
     <div>
-      <Header title="Creative Analysis" subtitle={`Meta, TikTok & Snapchat creatives · ${TIMEFRAME_LABELS[tf] || tf}`}>
+      <Header title="Creative Analysis" subtitle={`${creativePlatforms.join(', ').replace(/, ([^,]*)$/, ' & $1')} creatives · ${TIMEFRAME_LABELS[tf] || tf}`}>
         <TimeframeSelector />
       </Header>
 
-      {/* ── Content folders — pinned so nobody hunts for the Drive links ── */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        <a
-          href="https://drive.google.com/drive/folders/1DfcJWwZPVDG9vIbPNZr5qjCBDfR_C9TL"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl px-3 py-2 transition-colors"
-        >
-          📁 Rocknot Marketing Folder ↗
-        </a>
-        <a
-          href="https://drive.google.com/drive/folders/1LGEZyg5zqCCLLWgpI4lfYUjsoLAC6ia4"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl px-3 py-2 transition-colors"
-        >
-          🎨 Internal Design Folder ↗
-        </a>
-      </div>
+      {/* ── Content folders — pinned so nobody hunts for the Drive links (from the client profile) ── */}
+      {client.creatives.driveFolders.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          {client.creatives.driveFolders.map(f => (
+            <a
+              key={f.url}
+              href={f.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`flex items-center gap-1.5 text-xs font-semibold border rounded-xl px-3 py-2 transition-colors ${f.tone === 'purple' ? 'text-purple-700 bg-purple-50 hover:bg-purple-100 border-purple-200' : 'text-blue-700 bg-blue-50 hover:bg-blue-100 border-blue-200'}`}
+            >
+              {f.label} ↗
+            </a>
+          ))}
+        </div>
+      )}
 
       {/* Summary */}
       {status === 'live' && (
@@ -374,7 +379,7 @@ export default function CreativesContent() {
           <div className="flex flex-wrap items-center gap-3 mb-1">
             <h2 className="text-sm font-bold text-gray-700">🎬 Creative Briefs — Ready to Produce</h2>
             <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
-              {([['video', '✂️ Edits'], ['static', '🖼 Statics'], ['orly', '🎥 Orly']] as Array<[keyof typeof briefCounts, string]>).map(([k, label]) => (
+              {([['video', '✂️ Edits'], ['static', '🖼 Statics'], ...(founderTrack ? [['founder', `🎥 ${founderTrack.label}`]] : [])] as Array<[keyof typeof briefCounts, string]>).map(([k, label]) => (
                 <label key={k} className="flex items-center gap-1 text-[11px] text-gray-500">
                   {label}
                   <select
@@ -414,7 +419,7 @@ export default function CreativesContent() {
             const TRACK_META: Record<string, { icon: string; label: string }> = {
               video: { icon: '✂️', label: 'Video editor · re-edit of existing footage' },
               static: { icon: '🖼', label: 'Static ad · existing photography' },
-              orly: { icon: '🎥', label: 'Orly on-camera · new shoot' },
+              founder: { icon: '🎥', label: `${founderTrack?.personName || 'Founder'} on-camera · new shoot` },
             };
             const renderBrief = (b: typeof all[number]) => {
               const meta = TRACK_META[b.track] || { icon: '📄', label: b.track };
@@ -506,7 +511,7 @@ export default function CreativesContent() {
           {/* Brand guidelines the AI must follow */}
           <div className="mt-4 pt-3 border-t border-gray-100">
             <button onClick={() => setGuidelinesOpen(o => !o)} className="text-xs font-semibold text-gray-600 hover:text-gray-800">
-              📘 Brand guidelines {guidelines ? '(uploaded ✓)' : '(none yet — add them so briefs match the real Rocknot brand)'} {guidelinesOpen ? '▾' : '▸'}
+              📘 Brand guidelines {guidelines ? '(uploaded ✓)' : `(none yet — add them so briefs match the real ${client.name} brand)`} {guidelinesOpen ? '▾' : '▸'}
             </button>
             {guidelinesOpen && (
               <div className="mt-2">
@@ -546,7 +551,7 @@ export default function CreativesContent() {
       {/* Filters */}
       {status === 'live' && (
         <div className="flex flex-wrap items-center gap-2 mb-5">
-          {(['all', 'Meta', 'TikTok', 'Snapchat'] as PlatformFilter[]).map(p => (
+          {(['all', ...creativePlatforms] as PlatformFilter[]).map(p => (
             <button
               key={p}
               onClick={() => setPlatformFilter(p)}
@@ -890,7 +895,7 @@ export default function CreativesContent() {
                     rel="noopener noreferrer"
                     className="text-xs font-semibold text-purple-600 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 rounded-lg px-3 py-2 transition-colors"
                   >
-                    Open in {selected.platform === 'Meta' ? 'Ads Manager' : selected.platform === 'Snapchat' ? 'Snapchat Ads' : 'TikTok Ads'} ↗
+                    Open in {selected.platform === 'Meta' ? 'Ads Manager' : selected.platform === 'Snapchat' ? 'Snapchat Ads' : selected.platform === 'Pinterest' ? 'Pinterest Ads' : 'TikTok Ads'} ↗
                   </a>
                 )}
               </div>

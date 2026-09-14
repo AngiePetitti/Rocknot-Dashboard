@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { getClient } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120; // Claude analysis can take a while
@@ -194,15 +195,16 @@ export async function GET(req: NextRequest) {
     buildBusinessContext(get),
   ]);
 
+  const brand = getClient();
   const dataSnapshotText = compareMode && compareData
-    ? `## Rocknot Performance Comparison\n\n${buildSnapshot(primary.label, primaryData)}\n\n${buildSnapshot(`Q4 ${todayYear - 1} (Comparison)`, compareData)}`
-    : `## Rocknot Performance — ${primary.label}\n\n${buildSnapshot(primary.label, primaryData)}`;
+    ? `## ${brand.name} Performance Comparison\n\n${buildSnapshot(primary.label, primaryData)}\n\n${buildSnapshot(`Q4 ${todayYear - 1} (Comparison)`, compareData)}`
+    : `## ${brand.name} Performance — ${primary.label}\n\n${buildSnapshot(primary.label, primaryData)}`;
 
   const compareInstruction = compareMode
     ? 'You are comparing two periods. Reference both specifically — what improved, what declined, and what it means for strategy.'
     : `Reference the specific period (${primary.label}) in your recommendations.`;
 
-  const prompt = `You are a sharp e-commerce marketing strategist advising Rocknot, a music-inspired handbag & accessories brand (bags with interchangeable straps, jewelry, phone accessories). ${compareInstruction}
+  const prompt = `You are a sharp e-commerce marketing strategist advising ${brand.name}. ${brand.brand.description} ${compareInstruction}
 
 Rules:
 - Reference actual product names, dollar figures, and platform names from the data. No generic advice.

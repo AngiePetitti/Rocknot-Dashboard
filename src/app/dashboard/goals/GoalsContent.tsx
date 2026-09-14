@@ -6,11 +6,11 @@ import { cachedJson } from '@/src/lib/clientCache';
 import { formatCurrency } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
+import { useClient } from '@/src/components/ClientProvider';
 
 interface MonthGoal { month: string; revenueGoal: number; adBudget: number; pinned?: boolean }
 interface MonthActual { revenue: number; adSpend: number }
 
-const TARGET_MER = 3.5; // net-sales MER target; ad budgets are derived from this when auto-planning
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -28,7 +28,7 @@ function monthKey(y: number, m: number): string {
 // otherwise the month-end pace projection counts today's revenue without
 // counting today as an elapsed day and lands way above the Overview's
 // forecast for the same month.
-// Goals track NET sales (the $5M target is net) — falls back to total sales
+// Goals track NET sales (the annual target is net) — falls back to total sales
 // for days where net isn't reported.
 function byMonth(daily: { date: string; revenue: number; netSales?: number; adSpend: number }[]): Record<string, MonthActual> {
   const t = pstToday();
@@ -45,12 +45,14 @@ function byMonth(daily: { date: string; revenue: number; netSales?: number; adSp
 }
 
 export default function GoalsContent() {
+  const client = useClient();
+  const TARGET_MER = client.goals.targetMer; // net-sales MER target; ad budgets are derived from this when auto-planning
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === 'admin';
   const { y: year, m: curMonth, d: today } = pstToday();
 
   const [goals, setGoals] = useState<Record<string, MonthGoal>>({});
-  const [target, setTarget] = useState<number>(4_000_000);
+  const [target, setTarget] = useState<number>(client.goals.defaultAnnualTarget);
   const [targetTouched, setTargetTouched] = useState(false);
   const [actuals, setActuals] = useState<Record<string, MonthActual>>({});
   const [lastYear, setLastYear] = useState<Record<string, MonthActual>>({});
@@ -334,7 +336,7 @@ export default function GoalsContent() {
             ) : (
               <p className="text-2xl font-bold text-gray-800">{formatCurrency(target)}</p>
             )}
-            {!targetTouched && <p className="text-[11px] text-gray-400 mt-1">Default — set your real target and auto-plan.</p>}
+            {!targetTouched && <p className="text-[11px] text-gray-400 mt-1">{target > 0 ? 'Default — set your real target and auto-plan.' : 'No annual target set yet — enter one to unlock the year-vs-target view and auto-plan.'}</p>}
           </div>
           {isAdmin && (
             <button
@@ -352,8 +354,8 @@ export default function GoalsContent() {
         </div>
       </Card>
 
-      {/* ── Year vs target — the one card that answers "are we hitting $5M" ── */}
-      {(() => {
+      {/* ── Year vs target — the one card that answers "are we hitting the annual number" ── */}
+      {target > 0 && (() => {
         // The year the plan describes: past months at actuals (goal months at
         // their goal), current month at its goal, future months at goals.
         const planYear = goalTotal + months.reduce((s, k, i) => (i + 1 < curMonth && !goals[k]?.revenueGoal ? s + (actuals[k]?.revenue || 0) : s), 0);

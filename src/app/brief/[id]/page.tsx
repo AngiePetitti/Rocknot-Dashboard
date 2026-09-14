@@ -1,10 +1,11 @@
 import { loadDoc } from '@/src/lib/docStore';
+import { getClient } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
 // Public, shareable creative brief — designers open the link with no login.
 // Neutral document styling on purpose: the dashboard's pastel theme is NOT
-// Rocknot's brand, and a brief should read like a professional work doc.
+// the client's brand, and a brief should read like a professional work doc.
 
 // Minimal markdown → HTML (headings, bold, italics, lists, tables, hr).
 function esc(s: string): string {
@@ -145,7 +146,7 @@ export default async function BriefPage({ params }: { params: { id: string } }) 
         .brief-meta { font-family: -apple-system, sans-serif; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: #999; margin-bottom: 26px; }
         @media print { .brief-doc { padding: 0; } }
       `}</style>
-      <p className="brief-meta">Rocknot · Creative Brief</p>
+      <p className="brief-meta">{getClient().name} · Creative Brief</p>
       <div dangerouslySetInnerHTML={{ __html: mdToHtml(md) }} />
     </div>
   );

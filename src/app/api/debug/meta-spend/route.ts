@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runQuery, getDataset, isBigQueryConfigured } from '@/src/lib/bigquery';
+import { metaAccountSql } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
   const from = single || request.nextUrl.searchParams.get('from') || monthStart;
   const to = single || request.nextUrl.searchParams.get('to') || yesterday;
   const params = { from, to } as Record<string, string | number>;
-  const WHERE = `WHERE DATE(date) BETWEEN @from AND @to AND LOWER(account_name) = 'rocknot'`;
+  const WHERE = `WHERE DATE(date) BETWEEN @from AND @to${metaAccountSql()}`;
 
   try {
     const cols = await runQuery<{ column_name: string }>(
@@ -84,10 +85,10 @@ export async function GET(request: NextRequest) {
     const rawMultiRows = await runQuery(
       `SELECT *
        FROM \`${ds}.facebook_ads\`
-       WHERE DATE(date) = @inspect AND LOWER(account_name) = 'rocknot'
+       WHERE DATE(date) = @inspect${metaAccountSql()}
          AND campaign IN (
            SELECT campaign FROM \`${ds}.facebook_ads\`
-           WHERE DATE(date) = @inspect AND LOWER(account_name) = 'rocknot'
+           WHERE DATE(date) = @inspect${metaAccountSql()}
            GROUP BY campaign HAVING COUNT(*) > 1
          )
        ORDER BY campaign, date, CAST(spend AS FLOAT64)`,

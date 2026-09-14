@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getClient } from '@/src/lib/client';
 import { qbConfigured, exchangeQbCode, setQbRealm } from '@/src/lib/qbAuth';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +23,7 @@ function page(title: string, body: string): NextResponse {
 }
 
 export async function GET(req: NextRequest) {
+  const client = getClient();
   const origin = req.nextUrl.origin;
   const redirectUri = `${origin}${REDIRECT_PATH}`;
   const code = req.nextUrl.searchParams.get('code');
@@ -30,7 +32,7 @@ export async function GET(req: NextRequest) {
   if (!qbConfigured()) {
     return page('QuickBooks — Step 1: create the Intuit app', `
       <ol>
-        <li>Go to <a href="https://developer.intuit.com" target="_blank">developer.intuit.com</a> → sign in with the account that owns Rocknot's QuickBooks → <b>Create an app</b> → QuickBooks Online and Payments.</li>
+        <li>Go to <a href="https://developer.intuit.com" target="_blank">developer.intuit.com</a> → sign in with the account that owns ${client.name}'s QuickBooks → <b>Create an app</b> → QuickBooks Online and Payments.</li>
         <li>In the app's <b>Keys &amp; credentials</b> (use the <b>Production</b> keys), copy the Client ID and Client Secret.</li>
         <li>Still there, add this exact <b>Redirect URI</b>: <code>${redirectUri}</code></li>
         <li>In Vercel, add env vars <code>QB_CLIENT_ID</code> and <code>QB_CLIENT_SECRET</code>, then redeploy.</li>
@@ -52,8 +54,8 @@ export async function GET(req: NextRequest) {
   }
 
   // Step 2: kick off consent.
-  const authUrl = `https://appcenter.intuit.com/connect/oauth2?client_id=${encodeURIComponent((process.env.QB_CLIENT_ID || '').trim())}&response_type=code&scope=${encodeURIComponent('com.intuit.quickbooks.accounting')}&redirect_uri=${encodeURIComponent(redirectUri)}&state=rocknot`;
+  const authUrl = `https://appcenter.intuit.com/connect/oauth2?client_id=${encodeURIComponent((process.env.QB_CLIENT_ID || '').trim())}&response_type=code&scope=${encodeURIComponent('com.intuit.quickbooks.accounting')}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${client.id}`;
   return page('QuickBooks — Step 2: connect', `
-    <p>Click below and approve access for <b>Rocknot LLC</b> (pick the Rocknot company file if Intuit asks which company).</p>
+    <p>Click below and approve access for <b>${client.legalEntity}</b> (pick the ${client.name} company file if Intuit asks which company).</p>
     <p><a class="btn" href="${authUrl}">Connect QuickBooks →</a></p>`);
 }

@@ -1,5 +1,6 @@
 import { runQuery, getDataset, dedupedOrdersCte } from '@/src/lib/bigquery';
 import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
+import { shopifyDomain, metaAccountSql, hasPlatform } from '@/src/lib/client';
 
 export interface OverviewResult {
   adsError?: string;
@@ -19,6 +20,8 @@ export interface OverviewResult {
     tiktokRevenue: number;
     snapchatSpend?: number;
     snapchatRevenue?: number;
+    pinterestSpend?: number;
+    pinterestRevenue?: number;
     adCreditApplied?: number;
     netAdSpend?: number;
     newCustomers: number;
@@ -65,7 +68,7 @@ interface ShopifyDay {
 // Trim env values: Vercel copy-paste often leaves a trailing newline, which
 // corrupts the auth header (401) and the request host.
 const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
-const SHOPIFY_DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com').trim();
+const SHOPIFY_DOMAIN = shopifyDomain();
 
 export async function fetchShopifyDaily(from: string, to: string): Promise<ShopifyDay[]> {
   if (!SHOPIFY_TOKEN) return [];
@@ -222,8 +225,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
              SUM(CAST(spend AS FLOAT64)) AS spend,
              SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.facebook_ads\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to
-        AND LOWER(account_name) = 'rocknot'
+      WHERE DATE(date) BETWEEN @date_from AND @date_to${metaAccountSql()}
       GROUP BY d
     ),
     google AS (
@@ -233,12 +235,14 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       FROM \`${ds}.google_ads\`
       WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
     ),
-    tiktok AS (
+    tiktok AS (${hasPlatform('tiktok') ? `
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
              SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.tiktok_ads\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d` : `
+      -- client doesn't run TikTok: empty CTE keeps the joins below intact
+      SELECT CAST(NULL AS DATE) AS d, 0.0 AS spend, 0.0 AS revenue`}
     ),
     days AS (SELECT d FROM UNNEST(GENERATE_DATE_ARRAY(@date_from, @date_to)) AS d)
     SELECT
@@ -330,6 +334,22 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     GROUP BY date
   `;
 
+  // Pinterest, same guarded pattern. Windsor's Pinterest revenue column name
+  // varies by connector version — try each, then spend-only.
+  const pinterestSqlFor = (revenueExpr: string) => `
+    SELECT FORMAT_DATE('%Y-%m-%d', DATE(date)) AS date,
+           SUM(CAST(spend AS FLOAT64)) AS spend,
+           ${revenueExpr} AS revenue
+    FROM \`${ds}.pinterest_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    GROUP BY date
+  `;
+  const pinterestSqls = [
+    pinterestSqlFor('SUM(IFNULL(CAST(total_checkout_value AS FLOAT64), 0))'),
+    pinterestSqlFor('SUM(IFNULL(CAST(total_conversions_value AS FLOAT64), 0))'),
+    pinterestSqlFor('0'),
+  ];
+
   // Kick the platform-API patch fetches off NOW so they run concurrently with
   // the BigQuery/Shopify queries below instead of adding their latency on top.
   const todayPst = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
@@ -339,12 +359,14 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     ? (async () => {
         const { fetchMetaDaily } = await import('@/src/lib/metaLive');
         const { fetchSnapDaily } = await import('@/src/lib/snapLive');
-        const { fetchTiktokDaily, fetchSnapDailyFromWindsor, fetchGoogleDailyFromWindsor } = await import('@/src/lib/tiktokLive');
+        const { fetchTiktokDaily, fetchSnapDailyFromWindsor, fetchGoogleDailyFromWindsor, fetchPinterestDailyFromWindsor } = await import('@/src/lib/tiktokLive');
+        const none = Promise.resolve(null);
         return Promise.all([
           fetchMetaDaily(patchFrom, dateTo).catch(() => null),
-          fetchSnapDaily(patchFrom, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFrom, dateTo)).catch(() => null),
-          fetchTiktokDaily(patchFrom, dateTo).catch(() => null),
+          hasPlatform('snapchat') ? fetchSnapDaily(patchFrom, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFrom, dateTo)).catch(() => null) : none,
+          hasPlatform('tiktok') ? fetchTiktokDaily(patchFrom, dateTo).catch(() => null) : none,
           fetchGoogleDailyFromWindsor(patchFrom, dateTo).catch(() => null),
+          hasPlatform('pinterest') ? fetchPinterestDailyFromWindsor(patchFrom, dateTo).catch(() => null) : none,
         ]);
       })()
     : null;
@@ -366,7 +388,9 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   `;
 
   let adsQueryError: string | undefined;
-  const [shopifyDaysQl, shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows] = await Promise.all([
+  type PlatformDayRow = { date: string; spend: number | null; revenue: number | null };
+  const noPlatformRows = Promise.resolve([] as PlatformDayRow[]);
+  const [shopifyDaysQl, shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows, pinterestRows] = await Promise.all([
     fetchShopifyDaily(dateFrom, dateTo).catch(() => null),
     runQuery<{ date: string; orders: number; total_sales: number | null; net_sales: number | null }>(bqShopifySql, params)
       .then(rows => rows.map(r => ({
@@ -382,8 +406,15 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     runQuery<CustomerRow>(customerSql, params).catch(() => [] as CustomerRow[]),
     runQuery<{ date: string; new_customers: number | null; buyers: number | null }>(customerDailySql, params).catch(() => [] as Array<{ date: string; new_customers: number | null; buyers: number | null }>),
     fetchShopifyConversion(dateFrom, dateTo).catch(() => null),
-    runQuery<{ date: string; spend: number | null; revenue: number | null }>(snapSql, params)
-      .catch(() => [] as Array<{ date: string; spend: number | null; revenue: number | null }>),
+    hasPlatform('snapchat')
+      ? runQuery<PlatformDayRow>(snapSql, params).catch(() => [] as PlatformDayRow[])
+      : noPlatformRows,
+    hasPlatform('pinterest')
+      ? runQuery<PlatformDayRow>(pinterestSqls[0], params)
+          .catch(() => runQuery<PlatformDayRow>(pinterestSqls[1], params))
+          .catch(() => runQuery<PlatformDayRow>(pinterestSqls[2], params))
+          .catch(() => [] as PlatformDayRow[])
+      : noPlatformRows,
   ]);
 
   const shopifyDays: ShopifyDay[] =
@@ -393,13 +424,15 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
 
   const snapByDate: Record<string, { spend: number; revenue: number }> = {};
   for (const r of snapRows) snapByDate[r.date] = { spend: Number(r.spend || 0), revenue: Number(r.revenue || 0) };
+  const pinterestByDate: Record<string, { spend: number; revenue: number }> = {};
+  for (const r of pinterestRows) pinterestByDate[r.date] = { spend: Number(r.spend || 0), revenue: Number(r.revenue || 0) };
 
   // Windsor's daily sync captures a day PART-WAY through (task runs once a
   // day), so recent days in BigQuery understate spend until the next sync.
   // Apply the ~35-day patch (kicked off above) from each platform's freshest
   // source — the same numbers their Ads Managers show.
   if (patchPromise) {
-    const [metaPatch, snapPatch, tiktokPatch, googlePatch] = await patchPromise;
+    const [metaPatch, snapPatch, tiktokPatch, googlePatch, pinterestPatch] = await patchPromise;
     const adsByDatePatch: Record<string, AdsRow> = {};
     for (const a of adsRows) adsByDatePatch[a.date] = a;
     if (metaPatch) {
@@ -440,6 +473,14 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
         }
       }
     }
+    if (pinterestPatch) {
+      for (const day of pinterestPatch) {
+        const existing = pinterestByDate[day.date];
+        if (!existing || day.spend >= existing.spend) {
+          pinterestByDate[day.date] = { spend: day.spend, revenue: day.revenue || existing?.revenue || 0 };
+        }
+      }
+    }
   }
 
   const custDailyByDate: Record<string, { newCustomers: number; totalCustomers: number }> = {};
@@ -458,8 +499,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   for (const s of shopifyDays) shopifyByDate[s.date] = s;
 
   let totalRevenue = 0, totalNetSales = 0, totalOrders = 0;
-  let metaSpend = 0, googleSpend = 0, tiktokSpend = 0, snapchatSpend = 0;
-  let metaRevenue = 0, googleRevenue = 0, tiktokRevenue = 0, snapchatRevenue = 0;
+  let metaSpend = 0, googleSpend = 0, tiktokSpend = 0, snapchatSpend = 0, pinterestSpend = 0;
+  let metaRevenue = 0, googleRevenue = 0, tiktokRevenue = 0, snapchatRevenue = 0, pinterestRevenue = 0;
 
   // The ads query always emits one row per day across the full range, so it
   // drives the daily series; Shopify figures are overlaid by date.
@@ -473,7 +514,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     const revenue = s ? s.totalSales : 0;
     const orders = s ? s.orders : 0;
     const snap = snapByDate[date];
-    const adSpend = Number(a?.meta_spend || 0) + Number(a?.google_spend || 0) + Number(a?.tiktok_spend || 0) + (snap?.spend || 0);
+    const pin = pinterestByDate[date];
+    const adSpend = Number(a?.meta_spend || 0) + Number(a?.google_spend || 0) + Number(a?.tiktok_spend || 0) + (snap?.spend || 0) + (pin?.spend || 0);
 
     totalRevenue += revenue;
     totalNetSales += s ? s.netSales : 0;
@@ -486,6 +528,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     tiktokRevenue += Number(a?.tiktok_revenue || 0);
     snapchatSpend += snap?.spend || 0;
     snapchatRevenue += snap?.revenue || 0;
+    pinterestSpend += pin?.spend || 0;
+    pinterestRevenue += pin?.revenue || 0;
 
     const cd = custDailyByDate[date];
     return {
@@ -495,7 +539,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     };
   });
 
-  const totalAdSpend = metaSpend + googleSpend + tiktokSpend + snapchatSpend;
+  const totalAdSpend = metaSpend + googleSpend + tiktokSpend + snapchatSpend + pinterestSpend;
 
   // Platform ad credits (e.g. Snap's $7.5K): promo spend isn't real cash out,
   // so MER divides by NET spend. Spend before this range (since the credit
@@ -549,6 +593,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       tiktokRevenue: Math.round(tiktokRevenue),
       snapchatSpend: Math.round(snapchatSpend * 100) / 100,
       snapchatRevenue: Math.round(snapchatRevenue),
+      pinterestSpend: Math.round(pinterestSpend * 100) / 100,
+      pinterestRevenue: Math.round(pinterestRevenue),
       newCustomers,
       returningCustomers,
       newCustomerRevenue: Math.round(newCustomerRevenue),

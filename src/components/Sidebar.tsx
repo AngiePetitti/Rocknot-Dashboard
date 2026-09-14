@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
+import { useClient } from '@/src/components/ClientProvider';
 
 const navItems = [
   { href: '/dashboard', label: 'Overview', icon: '📊' },
@@ -33,6 +34,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const searchParams = useSearchParams();
   const tf = searchParams.get('tf') || '30d';
   const { data: session, status } = useSession();
+  const client = useClient();
   const isAdmin = session?.user?.role === 'admin';
   // Hide admin-only items unless the user is an admin. When auth isn't wired up
   // (unauthenticated session), show everything so the pre-auth site is intact.
@@ -55,22 +57,22 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       {/* Logo */}
       <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-400 to-pink-400 flex items-center justify-center overflow-hidden">
-            {/* Brand logo from /public/logo.png; falls back to the R mark until one is uploaded. */}
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden" style={{ backgroundImage: `linear-gradient(to bottom right, ${client.theme.accentFrom}, ${client.theme.accentTo})` }}>
+            {/* Brand logo from /public (profile.logo); falls back to the initial until one is uploaded. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="/logo.png"
-              alt="ROCKNOT"
+              src={client.logo}
+              alt={client.wordmark}
               className="w-full h-full object-contain p-0.5"
               onError={e => {
                 e.currentTarget.style.display = 'none';
                 (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty('display');
               }}
             />
-            <span style={{ display: 'none' }} className="text-white font-bold text-sm">R</span>
+            <span style={{ display: 'none' }} className="text-white font-bold text-sm">{client.initial}</span>
           </div>
           <div>
-            <p className="font-bold text-gray-900 text-sm leading-none tracking-wide">ROCKNOT</p>
+            <p className="font-bold text-gray-900 text-sm leading-none tracking-wide">{client.wordmark}</p>
             <p className="text-[10px] text-gray-400 leading-none mt-0.5">Dashboard</p>
           </div>
         </div>
@@ -136,7 +138,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         </div>
       )}
       <div className="px-5 py-3 border-t border-gray-100">
-        <p className="text-[10px] text-gray-300 leading-relaxed">Rocknot Analytics v1.0 · Windsor.ai</p>
+        <p className="text-[10px] text-gray-300 leading-relaxed">{client.name} Analytics v1.0 · Windsor.ai</p>
       </div>
     </aside>
   );

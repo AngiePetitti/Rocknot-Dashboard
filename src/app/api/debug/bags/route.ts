@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
+import { shopifyDomain, getClient } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
 const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
-const DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com').trim();
+const DOMAIN = shopifyDomain();
 
 // Lists every bag-ish row in the live inventory so we can walk through which
 // are real handbags vs strap/bundle/closure variants. Read-only diagnostic.
@@ -34,6 +35,7 @@ async function runShopifyQL(query: string) {
 }
 
 export async function GET() {
+  if (getClient().inventory.mode !== 'rocknot-bags') return NextResponse.json({ error: 'Bag diagnostics only apply to the Rocknot inventory model' }, { status: 404 });
   const SINCE = (() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split('T')[0]; })();
   const UNTIL = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 

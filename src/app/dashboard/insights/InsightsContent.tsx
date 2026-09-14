@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
+import { useClient } from '@/src/components/ClientProvider';
 
 interface Insight {
   title: string;
@@ -29,7 +30,6 @@ interface Snapshot {
   hasCalendarContext?: boolean;
 }
 
-const STORAGE_KEY = 'rocknot_ai_insights_last';
 
 const CATEGORIES = [
   { key: 'creatives' as const, label: 'Ad Creative Ideas', icon: '🎨', accentColor: '#818cf8', bg: 'bg-indigo-50', text: 'text-indigo-700', dot: 'bg-indigo-400', description: 'New angles, hooks & formats to test' },
@@ -73,6 +73,8 @@ function SkeletonCard() {
 }
 
 export default function InsightsContent() {
+  const client = useClient();
+  const STORAGE_KEY = `${client.storagePrefix}_ai_insights_last`;
   const [insights, setInsights] = useState<InsightSet | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [loading, setLoading] = useState(false);
@@ -117,7 +119,7 @@ export default function InsightsContent() {
         if (typeof saved.compareMode === 'boolean') setCompareMode(saved.compareMode);
       }
     } catch { /* corrupt cache — ignore */ }
-  }, []);
+  }, [STORAGE_KEY]);
 
   async function generate() {
     if (tf === 'custom' && (!customFrom || !customTo)) return;

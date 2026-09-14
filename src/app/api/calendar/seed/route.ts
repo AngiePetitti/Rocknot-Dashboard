@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getClient } from '@/src/lib/client';
 import { getEvents, saveEvents, TYPE_COLORS, MarketingEvent, EventType } from '@/src/lib/calendarStore';
 
 export const dynamic = 'force-dynamic';
@@ -87,6 +88,8 @@ function norm(s: string): string {
 }
 
 export async function GET() {
+  // Rocknot's one-time seed data — meaningless (and harmful) for any other client.
+  if (!getClient().seedsEnabled) return NextResponse.json({ error: 'Seed routes are disabled for this client' }, { status: 404 });
   try {
     let events = await getEvents();
 

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRevenueForTimeframe, getMetricsForTimeframe, shopifyLast30Days } from '@/src/lib/mockData';
 import { Timeframe } from '@/src/lib/mockData';
+import { shopifyDomain } from '@/src/lib/client';
 
 const TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
-const DOMAIN = process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com';
+const DOMAIN = shopifyDomain();
 
 const SINCE_MAP: Record<Timeframe, string> = {
   today:      'today',
