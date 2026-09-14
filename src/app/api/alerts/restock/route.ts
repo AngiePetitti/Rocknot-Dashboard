@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getReorders, getDiscontinued } from '@/src/lib/chatStore';
+import { getClient } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -16,10 +17,11 @@ interface InvItem {
 }
 
 export async function GET(req: NextRequest) {
+  const client = getClient();
   const webhook = (process.env.SLACK_RESTOCK_WEBHOOK_URL || '').trim();
   const resendKey = (process.env.RESEND_API_KEY || '').trim();
   const emailTo = (process.env.RESTOCK_EMAIL_TO || '').split(',').map(s => s.trim()).filter(Boolean);
-  const emailFrom = (process.env.RESTOCK_EMAIL_FROM || 'Rocknot Dashboard <onboarding@resend.dev>').trim();
+  const emailFrom = (process.env.RESTOCK_EMAIL_FROM || `${client.alerts.fromName} <onboarding@resend.dev>`).trim();
   if (!webhook && !(resendKey && emailTo.length)) {
     return NextResponse.json({
       error: 'No alert channel configured — set SLACK_RESTOCK_WEBHOOK_URL and/or RESEND_API_KEY + RESTOCK_EMAIL_TO in Vercel.',
@@ -39,8 +41,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Inventory data unavailable', detail: inv?.error || invRes.status }, { status: 502 });
   }
 
-  // Bags are tracked separately from the SKU list — include both pools,
-  // matching the Inventory tab's order banner.
+  // Bags (Rocknot's separately tracked pool) plus the SKU list — matching the
+  // Inventory tab's order banner. `bags` is empty for standard-inventory clients.
   const items = [...((inv.bags as InvItem[]) ?? []), ...((inv.items as InvItem[]) ?? [])];
   const reorders = await getReorders().catch(() => []);
   const discontinued = await getDiscontinued().catch(() => []);
@@ -76,12 +78,12 @@ export async function GET(req: NextRequest) {
 
   let text: string;
   if (toOrder.length === 0) {
-    text = `*📦 Rocknot Monday Restock — ${today}*\n\n✅ Nothing needs ordering this week — all fast sellers are stocked or already on order.`;
+    text = `*📦 ${client.name} Monday Restock — ${today}*\n\n✅ Nothing needs ordering this week — all fast sellers are stocked or already on order.`;
   } else {
     const lines = toOrder.map(i =>
       `• *${i.product}${i.variant ? ` – ${i.variant}` : ''}* — order *${i.reorderQty.toLocaleString()}* (${i.status === 'out_of_stock' ? 'OUT OF STOCK' : `${i.daysRemaining}d left`}, selling ~${Math.round(i.dailyVelocity * 7)}/wk)`
     );
-    text = `*📦 Rocknot Monday Restock — ${today}*\n\n*${toOrder.length} item${toOrder.length !== 1 ? 's' : ''} to order this week* (quantities cover ~90 days at current pace):\n\n${lines.join('\n')}\n\n_Once ordered, log the quantity + date on the dashboard's Inventory tab so it drops off next week's list._`;
+    text = `*📦 ${client.name} Monday Restock — ${today}*\n\n*${toOrder.length} item${toOrder.length !== 1 ? 's' : ''} to order this week* (quantities cover ~90 days at current pace):\n\n${lines.join('\n')}\n\n_Once ordered, log the quantity + date on the dashboard's Inventory tab so it drops off next week's list._`;
   }
   if (openOrders.length > 0) {
     text += `\n\n🚚 *Already on order (${openOrders.length}):* ${openOrders.map(r => `${r.product}${r.variant ? ` – ${r.variant}` : ''} ×${r.qty}${r.eta ? ` (expected ${r.eta})` : ` (ordered ${r.orderedDate})`}`).join(' · ')}`;
@@ -114,14 +116,14 @@ export async function GET(req: NextRequest) {
       : '';
     const html = `
       <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:640px;margin:0 auto">
-        <h2 style="color:#ea580c">📦 Rocknot Monday Restock — ${today}</h2>
+        <h2 style="color:#ea580c">📦 ${client.name} Monday Restock — ${today}</h2>
         ${toOrder.length === 0
           ? '<p style="color:#16a34a;font-weight:600">✅ Nothing needs ordering this week — all fast sellers are stocked or already on order.</p>'
           : `<p style="color:#374151">${toOrder.length} item${toOrder.length !== 1 ? 's' : ''} to order this week (quantities cover ~90 days at current pace):</p>
              <table style="border-collapse:collapse;width:100%;font-size:13px">${rowsHtml}</table>
              <p style="color:#9ca3af;font-size:12px">Once ordered, log the quantity + dates on the dashboard's Inventory tab so it drops off next week's list.</p>`}
         ${openHtml}
-        <p style="font-size:12px"><a href="https://rocknot-dashboard.vercel.app/dashboard/inventory" style="color:#7c3aed">Open the Inventory tab →</a></p>
+        <p style="font-size:12px"><a href="${client.dashboardUrl}/dashboard/inventory" style="color:#7c3aed">Open the Inventory tab →</a></p>
       </div>`;
     const emailRes = await fetch('https://api.resend.com/emails', {
       method: 'POST',

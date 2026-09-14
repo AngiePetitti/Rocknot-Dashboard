@@ -16,10 +16,12 @@ import TimeframeSelector from '@/src/components/ui/TimeframeSelector';
 import RevenueChart from '@/src/components/charts/RevenueChart';
 import CACChart from '@/src/components/charts/CACChart';
 import SpendDonut from '@/src/components/charts/SpendDonut';
+import { useClient } from '@/src/components/ClientProvider';
+import { PLATFORMS } from '@/src/lib/client';
 
 // MER runs on NET sales (post-discount/returns, excl. taxes+shipping); the
-// goal stays 3.5x on that basis — Angie's call, a deliberately higher bar.
-const MER_GOAL = 3.5;
+// goal is the client profile's targetMer on that basis (Rocknot: 3.5x —
+// Angie's call, a deliberately higher bar).
 const TARGET_CAC = 100; // target New Customer CAC — flagged when exceeded
 
 const EMPTY_METRICS: LiveMetrics = {
@@ -47,6 +49,8 @@ interface LiveMetrics {
   tiktokRevenue?: number;
   snapchatSpend?: number;
   snapchatRevenue?: number;
+  pinterestSpend?: number;
+  pinterestRevenue?: number;
   adCreditApplied?: number;
   netAdSpend?: number;
   newCustomers?: number;
@@ -70,6 +74,9 @@ interface PriorPeriod {
 
 export default function OverviewContent() {
   const searchParams = useSearchParams();
+  const client = useClient();
+  const MER_GOAL = client.goals.targetMer;
+  const runs = (k: keyof typeof PLATFORMS) => client.ads.platforms.includes(k);
   const tfRaw = searchParams.get('tf') || '30d';
   const isCustom = tfRaw === 'custom';
   const tf = (isCustom ? '30d' : tfRaw) as Timeframe;
@@ -216,7 +223,7 @@ export default function OverviewContent() {
   }, []);
 
   function buildLivePlatformSpend(m: LiveMetrics): PlatformSpend[] | null {
-    if (!m.metaSpend && !m.googleSpend && !m.tiktokSpend) return null;
+    if (!m.metaSpend && !m.googleSpend && !m.tiktokSpend && !m.snapchatSpend && !m.pinterestSpend) return null;
     const platforms: PlatformSpend[] = [];
     const push = (platform: string, spend: number, revenue: number, color: string) => {
       if (spend <= 0) return;
@@ -238,6 +245,7 @@ export default function OverviewContent() {
     push('Google', m.googleSpend ?? 0, m.googleRevenue ?? 0, '#34d399');
     push('TikTok', m.tiktokSpend ?? 0, m.tiktokRevenue ?? 0, '#f472b6');
     push('Snapchat', m.snapchatSpend ?? 0, m.snapchatRevenue ?? 0, '#facc15');
+    push('Pinterest', m.pinterestSpend ?? 0, m.pinterestRevenue ?? 0, PLATFORMS.pinterest.color);
     return platforms.length > 0 ? platforms : null;
   }
 
@@ -821,12 +829,22 @@ export default function OverviewContent() {
                   subtitle={platSub(metrics.googleSpend ?? 0, metrics.googleRevenue ?? 0)}
                   accentColor="#fef08a"
                 />
-                <MetricCard
-                  title="TikTok Spend"
-                  value={formatCurrency(metrics.tiktokSpend ?? 0)}
-                  subtitle={platSub(metrics.tiktokSpend ?? 0, metrics.tiktokRevenue ?? 0)}
-                  accentColor="#fbcfe8"
-                />
+                {(runs('tiktok') || (metrics.tiktokSpend ?? 0) > 0) && (
+                  <MetricCard
+                    title="TikTok Spend"
+                    value={formatCurrency(metrics.tiktokSpend ?? 0)}
+                    subtitle={platSub(metrics.tiktokSpend ?? 0, metrics.tiktokRevenue ?? 0)}
+                    accentColor="#fbcfe8"
+                  />
+                )}
+                {(runs('pinterest') || (metrics.pinterestSpend ?? 0) > 0) && (
+                  <MetricCard
+                    title="Pinterest Spend"
+                    value={formatCurrency(metrics.pinterestSpend ?? 0)}
+                    subtitle={platSub(metrics.pinterestSpend ?? 0, metrics.pinterestRevenue ?? 0)}
+                    accentColor="#fecdd3"
+                  />
+                )}
                 {(metrics.snapchatSpend ?? 0) > 0 && (
                   <MetricCard
                     title="Snapchat Spend"

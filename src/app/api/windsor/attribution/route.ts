@@ -75,6 +75,7 @@ export async function GET(request: NextRequest) {
       Google: { revenue: overview.metrics.googleRevenue, color: '#34d399' },
       TikTok: { revenue: overview.metrics.tiktokRevenue, color: '#f472b6' },
       Snapchat: { revenue: overview.metrics.snapchatRevenue ?? 0, color: '#facc15' },
+      Pinterest: { revenue: overview.metrics.pinterestRevenue ?? 0, color: '#fb7185' },
     };
 
     const spendByPlatform: Record<string, number> = {};

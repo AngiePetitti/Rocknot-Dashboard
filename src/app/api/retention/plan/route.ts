@@ -6,6 +6,7 @@ import { getKV, setKV } from '@/src/lib/chatStore';
 import { getEvents } from '@/src/lib/calendarStore';
 import { klaviyoConfigured, fetchRetentionData } from '@/src/lib/klaviyo';
 import { loadDoc } from '@/src/lib/docStore';
+import { getClient } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -72,9 +73,12 @@ Already scheduled/drafted (do NOT duplicate these): ${d.scheduled.map(c => `${c.
 
   const guidelines = (await loadDoc('brand_guidelines').catch(() => null)) || '';
 
-  const prompt = `You are Cleo, Rocknot's retention marketing strategist. Rocknot is a DTC rhinestone jewelry/handbag brand; founder Orly is the face of the brand; AOV ~$170.
+  const brand = getClient();
+  const founderLine = brand.brand.founder ? ` Founder ${brand.brand.founder.name} is the face of the brand.` : '';
+  const aovLine = brand.brand.aov ? ` AOV ~$${brand.brand.aov}.` : '';
+  const prompt = `You are ${brand.analyst.name}, ${brand.name}'s retention marketing strategist. ${brand.brand.description}${founderLine}${aovLine}
 
-BRAND GUIDELINES (ALL copy voice and every design brief must follow these — never invent brand colors, fonts, or aesthetic descriptors that are not in this section. If it is empty, write design briefs that instruct the designer to pull visual identity from rocknot.com and note the guidelines doc is pending):
+BRAND GUIDELINES (ALL copy voice and every design brief must follow these — never invent brand colors, fonts, or aesthetic descriptors that are not in this section. If it is empty, write design briefs that instruct the designer to pull visual identity from ${brand.siteDomain} and note the guidelines doc is pending):
 ${guidelines || '(none uploaded yet)'}
 
 Today is ${today}. Build the next 30 days of the Email/SMS campaign calendar with COMPLETE briefs a designer can execute without asking questions.
@@ -87,10 +91,10 @@ ${perf}
 
 Rules:
 - 2-4 emails/week + 1-2 SMS/week max; SMS only for high-urgency moments (launch day, sale ending, back in stock).
-- Mix revenue campaigns with pure-value retention sends (styling tips, founder story, UGC roundups) — best practice is ~1 value send per 2 sales sends.
+- Mix revenue campaigns with pure-value retention sends (${brand.brand.contentAngles}) — best practice is ~1 value send per 2 sales sends.
 - Every launch on the calendar gets a tease → launch → last-chance arc.
 - Write actual copy, not placeholders: 3 subject line options, preview text, hero headline, body copy (2-3 short paragraphs max), CTA button text.
-- Design brief must name the exact layout and assets ("hero: founder wearing X, product grid of 3 below") using existing product/UGC photography only, with colors and type taken strictly from the BRAND GUIDELINES section.
+- Design brief must name the exact layout and assets ("hero: ${brand.brand.founder ? 'founder wearing X' : 'lifestyle shot of X'}, product grid of 3 below") using existing product/UGC photography only, with colors and type taken strictly from the BRAND GUIDELINES section.
 
 Return ONLY valid JSON, no markdown fences:
 {"monthOverview": "2-3 sentence strategy summary",

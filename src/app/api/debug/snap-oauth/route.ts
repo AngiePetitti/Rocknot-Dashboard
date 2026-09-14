@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getClient } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,7 @@ function page(html: string): NextResponse {
 }
 
 export async function GET(req: NextRequest) {
+  const brand = getClient();
   const clientId = (process.env.SNAP_CLIENT_ID || '').trim();
   const clientSecret = (process.env.SNAP_CLIENT_SECRET || '').trim();
   const redirectUri = `${req.nextUrl.origin}/api/debug/snap-oauth`;
@@ -30,7 +32,7 @@ export async function GET(req: NextRequest) {
     return page(`<h2>Snapchat setup — step 1 of 3</h2>
       <p>Missing <code>SNAP_CLIENT_ID</code> / <code>SNAP_CLIENT_SECRET</code>.</p>
       <ol>
-        <li>In <b>business.snapchat.com</b> → Business Details → <b>OAuth Apps</b> → create an app named <code>rocknot-dashboard</code></li>
+        <li>In <b>business.snapchat.com</b> → Business Details → <b>OAuth Apps</b> → create an app named <code>${brand.id}-dashboard</code></li>
         <li>Set its <b>Redirect URI</b> to exactly:<br><code>${redirectUri}</code></li>
         <li>Copy the Client ID and Client Secret into Vercel env vars <code>SNAP_CLIENT_ID</code> and <code>SNAP_CLIENT_SECRET</code> (mark Sensitive), redeploy, then reload this page.</li>
       </ol>`);
@@ -39,7 +41,7 @@ export async function GET(req: NextRequest) {
   if (!code) {
     const authUrl = `https://accounts.snapchat.com/login/oauth2/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=snapchat-marketing-api`;
     return page(`<h2>Snapchat setup — step 2 of 3</h2>
-      <p>Click below and approve access with the Snapchat account that manages the Rocknot ads. You'll be sent back here automatically.</p>
+      <p>Click below and approve access with the Snapchat account that manages the ${brand.name} ads. You'll be sent back here automatically.</p>
       <p><a href="${authUrl}" style="display:inline-block;background:#8b5cf6;color:#fff;padding:12px 20px;border-radius:12px;text-decoration:none;font-weight:600">Authorize with Snapchat →</a></p>`);
   }
 

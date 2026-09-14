@@ -5,14 +5,12 @@ import { fetchMetaToday } from '@/src/lib/metaLive';
 import { fetchSnapToday } from '@/src/lib/snapLive';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
+import { keepClientMetaRows, hasPlatform, PLATFORMS } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
-// Rocknot's Meta ad account. Other clients connected to the same Windsor
-// workspace are returned by the facebook feed too and must be excluded.
-const ROCKNOT_META_ACCOUNT_ID = (process.env.META_AD_ACCOUNT_ID || '165092079662754').trim().replace('act_', '');
 
 
 interface WindsorRow {
@@ -33,6 +31,7 @@ interface DaySpend {
   google: number;
   tiktok: number;
   snapchat: number;
+  pinterest: number;
 }
 
 export interface PlatformData {
@@ -47,45 +46,49 @@ export interface PlatformData {
 }
 
 // Totals request: no date field — Windsor returns per-ad aggregated rows (avoids row-limit truncation)
-async function fetchSourceTotals(source: 'facebook' | 'google_ads' | 'tiktok' | 'snapchat', params: Record<string, string>): Promise<WindsorRow[]> {
-  const fieldMap = {
+type AdSource = 'facebook' | 'google_ads' | 'tiktok' | 'snapchat' | 'pinterest';
+
+async function fetchSourceTotals(source: AdSource, params: Record<string, string>): Promise<WindsorRow[]> {
+  const fieldMap: Record<AdSource, string> = {
     facebook:   'account_id,source,spend,impressions,clicks,action_values_omni_purchase,actions_omni_purchase',
     google_ads: 'source,spend,impressions,clicks,conversion_value',
     tiktok:     'source,spend,impressions,clicks,complete_payment,total_complete_payment_rate,onsite_total_purchase_value,conversion_value',
     snapchat:   'source,spend,impressions,clicks,conversion_purchases,conversion_purchases_value',
+    pinterest:  'source,spend,impressions,clicks,total_checkout,total_checkout_value',
   };
   try {
     const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields: fieldMap[source], _renderer: 'json', ...params });
     const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = await res.json();
-    return onlyRocknot(source, (json.data || []) as WindsorRow[]);
+    return onlyThisClient(source, (json.data || []) as WindsorRow[]);
   } catch {
     return [];
   }
 }
 
-// Facebook feed can contain multiple clients' accounts; keep Rocknot only.
-function onlyRocknot(source: string, rows: WindsorRow[]): WindsorRow[] {
+// Facebook feed can contain every client in the agency's Windsor workspace;
+// keep this deployment's account only.
+function onlyThisClient(source: string, rows: WindsorRow[]): WindsorRow[] {
   if (source !== 'facebook') return rows;
-  return rows.filter(r => String(r.account_id ?? '').replace('act_', '') === ROCKNOT_META_ACCOUNT_ID);
+  return keepClientMetaRows(rows);
 }
 
 // Daily request: only date+spend — Windsor returns ~1 row per day (small row count for chart)
-async function fetchSourceDaily(source: 'facebook' | 'google_ads' | 'tiktok' | 'snapchat', params: Record<string, string>): Promise<WindsorRow[]> {
+async function fetchSourceDaily(source: AdSource, params: Record<string, string>): Promise<WindsorRow[]> {
   try {
     const fields = source === 'facebook' ? 'date,account_id,source,spend' : 'date,source,spend';
     const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
     const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = await res.json();
-    return onlyRocknot(source, (json.data || []) as WindsorRow[]);
+    return onlyThisClient(source, (json.data || []) as WindsorRow[]);
   } catch {
     return [];
   }
 }
 
-function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'TikTok' | 'Snapchat', color: string): PlatformData {
+function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'TikTok' | 'Snapchat' | 'Pinterest', color: string): PlatformData {
   let spend = 0, impressions = 0, clicks = 0, revenue = 0;
 
   for (const row of rows) {
@@ -98,6 +101,9 @@ function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'Ti
       revenue += Number((row as Record<string, unknown>).action_values_omni_purchase || 0);
     } else if (platform === 'Snapchat') {
       revenue += Number((row as Record<string, unknown>).conversion_purchases_value || 0);
+    } else if (platform === 'Pinterest') {
+      const pr = row as Record<string, unknown>;
+      revenue += Number(pr.total_checkout_value || pr.total_conversions_value || row.conversion_value || 0);
     } else if (platform === 'TikTok') {
       const tk = row as Record<string, unknown>;
       // total_complete_payment_rate is TikTok's total purchase value (Windsor's
@@ -120,14 +126,14 @@ function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'Ti
   };
 }
 
-function buildDailySpend(metaRows: WindsorRow[], googleRows: WindsorRow[], tiktokRows: WindsorRow[], snapRows: WindsorRow[]): DaySpend[] {
+function buildDailySpend(metaRows: WindsorRow[], googleRows: WindsorRow[], tiktokRows: WindsorRow[], snapRows: WindsorRow[], pinterestRows: WindsorRow[]): DaySpend[] {
   const byDate: Record<string, DaySpend> = {};
 
-  const add = (rows: WindsorRow[], key: 'meta' | 'google' | 'tiktok' | 'snapchat') => {
+  const add = (rows: WindsorRow[], key: 'meta' | 'google' | 'tiktok' | 'snapchat' | 'pinterest') => {
     for (const row of rows) {
       const date = String(row.date || '').split('T')[0];
       if (!date) continue;
-      if (!byDate[date]) byDate[date] = { date, meta: 0, google: 0, tiktok: 0, snapchat: 0 };
+      if (!byDate[date]) byDate[date] = { date, meta: 0, google: 0, tiktok: 0, snapchat: 0, pinterest: 0 };
       byDate[date][key] += Number(row.spend || 0);
     }
   };
@@ -136,6 +142,7 @@ function buildDailySpend(metaRows: WindsorRow[], googleRows: WindsorRow[], tikto
   add(googleRows, 'google');
   add(tiktokRows, 'tiktok');
   add(snapRows, 'snapchat');
+  add(pinterestRows, 'pinterest');
 
   return Object.values(byDate)
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -145,6 +152,7 @@ function buildDailySpend(metaRows: WindsorRow[], googleRows: WindsorRow[], tikto
       google: Math.round(d.google),
       tiktok: Math.round(d.tiktok),
       snapchat: Math.round(d.snapchat),
+      pinterest: Math.round(d.pinterest),
     }));
 }
 
@@ -233,15 +241,18 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [metaTotals, googleTotals, tiktokTotals, snapTotals, metaDaily, googleDaily, tiktokDaily, snapDaily] = await Promise.all([
+    const none = Promise.resolve([] as WindsorRow[]);
+    const [metaTotals, googleTotals, tiktokTotals, snapTotals, pinterestTotals, metaDaily, googleDaily, tiktokDaily, snapDaily, pinterestDaily] = await Promise.all([
       fetchSourceTotals('facebook', params),
       fetchSourceTotals('google_ads', params),
-      fetchSourceTotals('tiktok', params),
-      fetchSourceTotals('snapchat', params),
+      hasPlatform('tiktok') ? fetchSourceTotals('tiktok', params) : none,
+      hasPlatform('snapchat') ? fetchSourceTotals('snapchat', params) : none,
+      hasPlatform('pinterest') ? fetchSourceTotals('pinterest', params) : none,
       fetchSourceDaily('facebook', params),
       fetchSourceDaily('google_ads', params),
-      fetchSourceDaily('tiktok', params),
-      fetchSourceDaily('snapchat', params),
+      hasPlatform('tiktok') ? fetchSourceDaily('tiktok', params) : none,
+      hasPlatform('snapchat') ? fetchSourceDaily('snapchat', params) : none,
+      hasPlatform('pinterest') ? fetchSourceDaily('pinterest', params) : none,
     ]);
 
     if (debug) {
@@ -293,7 +304,10 @@ export async function GET(request: NextRequest) {
     }
     if (snapchat.spend > 0) platforms.push(snapchat);
 
-    const dailySpend = buildDailySpend(metaDaily, googleDaily, tiktokDaily, snapDaily);
+    const pinterest = aggregatePlatform(pinterestTotals, 'Pinterest', PLATFORMS.pinterest.color);
+    if (pinterest.spend > 0) platforms.push(pinterest);
+
+    const dailySpend = buildDailySpend(metaDaily, googleDaily, tiktokDaily, snapDaily, pinterestDaily);
 
     return NextResponse.json({ source: 'windsor_live', platforms, dailySpend }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {

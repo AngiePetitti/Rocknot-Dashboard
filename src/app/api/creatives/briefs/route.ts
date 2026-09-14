@@ -4,25 +4,35 @@ import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
 import { saveDoc, loadDoc } from '@/src/lib/docStore';
 import { getEvents } from '@/src/lib/calendarStore';
+import { getClient } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-export interface BriefIndexEntry { id: string; track: 'video' | 'static' | 'orly'; title: string; summary: string }
+export type BriefTrack = 'video' | 'static' | 'founder';
+export interface BriefIndexEntry { id: string; track: BriefTrack; title: string; summary: string }
+
+// Briefs generated before the founder track was made client-agnostic were
+// stored with Rocknot's track key; normalise on the way out.
+function normaliseTrack(t: string): BriefTrack {
+  return t === 'orly' ? 'founder' : (t as BriefTrack);
+}
 
 export async function GET() {
   try {
     const raw = await loadDoc('creative_briefs_index');
     if (!raw) return NextResponse.json({ briefs: null });
-    return NextResponse.json(JSON.parse(raw));
+    const parsed = JSON.parse(raw) as { briefs?: Array<BriefIndexEntry & { track: string }> };
+    if (Array.isArray(parsed.briefs)) parsed.briefs = parsed.briefs.map(b => ({ ...b, track: normaliseTrack(b.track) }));
+    return NextResponse.json(parsed);
   } catch {
     return NextResponse.json({ briefs: null });
   }
 }
 
-const TRACK_SPECS: Record<'video' | 'static' | 'orly', string> = {
+const trackSpecs = (siteDomain: string, founder: string): Record<BriefTrack, string> => ({
   video: `TRACK: VIDEO EDITOR RE-EDIT. The editor can ONLY use footage that already exists in past ads — no new shooting, no product access. The brief must include, as sections:
 1. **The winning ad this starts from** — exact ad name from the data, its numbers, and specifically WHY we believe it works (hook? product? pacing?).
 2. **The hypothesis** — the one variable this edit tests, and the data gap that justifies it.
@@ -37,7 +47,7 @@ const TRACK_SPECS: Record<'video' | 'static' | 'orly', string> = {
 2. **Canvas & versions** — exact sizes to deliver (1080×1080, 1080×1350, 1080×1920) and any platform placements.
 3. **Layout, described spatially** — walk through the composition zone by zone (top third / center / bottom), where the product photo sits, scale, cropping, negative space. Reference which existing photos to use by describing them (e.g. "the flat-lay of the Gali Chain Top on white from the product page").
 4. **Every word on the ad, verbatim** — headline, subline, badge text, CTA button text. No placeholders.
-5. **Typography & color direction** — per the BRAND GUIDELINES section; if guidelines are missing, instruct the designer to pull type and color exactly from rocknot.com product pages, and say so explicitly.
+5. **Typography & color direction** — per the BRAND GUIDELINES section; if guidelines are missing, instruct the designer to pull type and color exactly from ${siteDomain} product pages, and say so explicitly.
 6. **Do NOT** — specific mistakes to avoid.
 7. **Success criteria.**
 
@@ -49,15 +59,15 @@ After the markdown sections, append a machine-readable layout mockup as a fenced
  {"h":12,"type":"subline","text":"..."},
  {"h":10,"type":"cta","text":"..."}]}
 Zone types allowed: headline, subline, badge, product, cta, spacer.`,
-  orly: `TRACK: ORLY ON-CAMERA (founder shoot). Orly is charismatic and converts on camera — the data shows founder-voice content performs. This brief is a shoot plan she can execute in one session:
+  founder: `TRACK: ${founder.toUpperCase()} ON-CAMERA (founder shoot). ${founder} fronts the brand on camera — founder-voice content is the most trusted format for this audience. This brief is a shoot plan she can execute in one session:
 1. **The concept & the trend** — name the specific trending format (describe it precisely: structure, why it's trending, an example of the format in the wild) and why it fits the data.
-2. **Full script** — every spoken line written out, 30-45 seconds, in Orly's casual founder voice, with [action] cues between lines. Write 3 alternative first-lines (hooks) verbatim.
+2. **Full script** — every spoken line written out, 30-45 seconds, in ${founder}'s casual founder voice, with [action] cues between lines. Write 3 alternative first-lines (hooks) verbatim.
 3. **Shot list** — 5-8 shots: framing (close/medium/wide), location suggestion, what happens in frame, which products appear, approx duration each.
 4. **Wardrobe & props** — specific products to wear/feature (tie to what's selling or launching).
 5. **Capture notes** — vertical 9:16, natural light vs ring light, phone is fine, leave 3s of padding, etc.
 6. **B-roll to grab while set up** — 4-6 quick clips for the editor's future use.
 7. **Success criteria** — what winning looks like vs the current best founder ad.`,
-};
+});
 
 export async function POST(req: NextRequest) {
   if (authConfigured()) {
@@ -91,9 +101,14 @@ export async function POST(req: NextRequest) {
     `${c.name} [${c.platform}] — $${Math.round(c.spend)} spend · ${c.roas}x ROAS · ${c.ctr}% CTR · ${c.conversions} conv`
   ).join('\n');
 
-  const shared = `You are Rocknot's senior creative strategist writing a production brief. Rocknot is a DTC rhinestone jewelry/handbag brand; founder Orly fronts the content; AOV ~$170. Ad names encode the creative (Video_/Static_, product, Demo/Talking Head/Montage UGC/Founder, landing page).
+  const brand = getClient();
+  const founder = brand.creatives.founderTrack;
+  const founderLine = brand.brand.founder ? ` Founder ${brand.brand.founder.name} fronts the content.` : '';
+  const aovLine = brand.brand.aov ? ` AOV ~$${brand.brand.aov}.` : '';
+  const TRACK_SPECS = trackSpecs(brand.siteDomain, founder?.personName || 'the founder');
+  const shared = `You are ${brand.name}'s senior creative strategist writing a production brief. ${brand.brand.description}${founderLine}${aovLine} Ad names usually encode the creative (Video_/Static_, product, Demo/Talking Head/Montage UGC/Founder, landing page).
 
-BRAND GUIDELINES (follow these for ALL visual/voice direction — do NOT invent brand colors or assume any palette. If this section is empty, explicitly instruct the designer to pull visual identity from rocknot.com and say the guidelines doc is pending):
+BRAND GUIDELINES (follow these for ALL visual/voice direction — do NOT invent brand colors or assume any palette. If this section is empty, explicitly instruct the designer to pull visual identity from ${brand.siteDomain} and say the guidelines doc is pending):
 ${guidelines || '(none uploaded yet)'}
 
 LAST 30 DAYS OF AD PERFORMANCE:
@@ -108,18 +123,19 @@ At the very end, append a fenced code block tagged refs containing a strict JSON
 
   const body = await req.json().catch(() => ({}));
   const clamp = (v: unknown, fallback: number) => Math.min(3, Math.max(0, Number.isFinite(Number(v)) ? Number(v) : fallback));
-  const counts: Record<'video' | 'static' | 'orly', number> = {
+  const counts: Record<BriefTrack, number> = {
     video: clamp(body?.video, clamp(body?.count, 1) || 1),
     static: clamp(body?.static, clamp(body?.count, 1) || 1),
-    orly: clamp(body?.orly, clamp(body?.count, 1) || 1),
+    // `orly` is the pre-rename request key — still honoured.
+    founder: founder ? clamp(body?.founder ?? body?.orly, clamp(body?.count, 1) || 1) : 0,
   };
-  if (counts.video + counts.static + counts.orly === 0) {
+  if (counts.video + counts.static + counts.founder === 0) {
     return NextResponse.json({ error: 'Pick at least one brief to generate' }, { status: 400 });
   }
 
   try {
     const batch = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    const tracks: Array<'video' | 'static' | 'orly'> = ['video', 'static', 'orly'];
+    const tracks: BriefTrack[] = founder ? ['video', 'static', 'founder'] : ['video', 'static'];
     // Parallel across tracks; sequential within a track so each extra brief
     // sees its predecessors and must pursue a different concept.
     const results = await Promise.all(tracks.map(async track => {
@@ -214,7 +230,7 @@ At the very end, append a fenced code block tagged refs containing a strict JSON
       kept = (old?.briefs ?? []).filter(b => {
         const st = statuses[b.id];
         return st && (st.status === 'production' || st.status === 'completed' || (st.notes ?? '').trim());
-      }).slice(0, 30);
+      }).map(b => ({ ...b, track: normaliseTrack(b.track) })).slice(0, 30);
     } catch { /* fresh start */ }
 
     const payload = { briefs: [...index, ...kept], generatedAt: new Date().toISOString() };

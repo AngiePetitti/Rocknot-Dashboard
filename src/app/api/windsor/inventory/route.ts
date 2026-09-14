@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
+import { shopifyDomain, getClient } from '@/src/lib/client';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 
 export const dynamic = 'force-dynamic';
 
 const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
-const DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com').trim();
+const DOMAIN = shopifyDomain();
+// Rocknot's hand-audited bag/strap consolidation rules only apply to Rocknot's
+// catalog. Every other client gets the standard model: one row per variant.
+const BAG_MODE = getClient().inventory.mode === 'rocknot-bags';
 
 export interface InventoryItem {
   id: string;
@@ -266,8 +270,8 @@ export async function GET() {
         ? Math.max(0, Math.round(dailyVelocity * SUPPLY_TARGET_DAYS) - currentStock)
         : 0;
 
-      const _isBag = isBagOnly(rawProduct);
-      const _isPublicBag = !_isBag && isPublicBag(rawProduct, category, bagKeys);
+      const _isBag = BAG_MODE && isBagOnly(rawProduct);
+      const _isPublicBag = BAG_MODE && !_isBag && isPublicBag(rawProduct, category, bagKeys);
       // Combo/set listings that pair existing products ("X + Y" titles, the
       // PHONEPACK pouch+strap+charm set): their variant counts mirror the
       // component products' stock across many variants (audited Aug 2026 —
@@ -276,10 +280,10 @@ export async function GET() {
       // the component SKUs. Real pre-packed bundles with their own SKUs and
       // distinct per-variant counts (e.g. "Rhinestone Rope Bracelet - 6x
       // Bundle", "The Rope Set") are NOT combos and stay counted.
-      const _isCombo = !_isBag && (/\bphonepack\b/i.test(rawProduct) || /\s\+\s/.test(rawProduct));
+      const _isCombo = BAG_MODE && !_isBag && (/\bphonepack\b/i.test(rawProduct) || /\s\+\s/.test(rawProduct));
       // A bag line is "covered" when it has its own bag-only listing, so its
       // true count comes from there and every public variant is phantom.
-      const _bagCovered = bagKeys.has(bagLineKey(rawProduct));
+      const _bagCovered = BAG_MODE && bagKeys.has(bagLineKey(rawProduct));
       const displayVariant = variant === 'Default Title' ? '' : variant;
       return {
         id: String(i),
@@ -299,7 +303,7 @@ export async function GET() {
         unitPrice: priceFor(rawProduct, variant, retailValue, currentStock),
         _isBag,
         _isGiftCard: /gift\s*card/i.test(rawProduct),
-        _isHandbag: /handbag/i.test(category),
+        _isHandbag: BAG_MODE && /handbag/i.test(category),
         _isPublicBag,
         _isCombo,
         _bagCovered,
@@ -355,7 +359,9 @@ export async function GET() {
       });
       return out;
     };
-    const allRows = dedupSetMirrors(allRowsMapped.filter(r => !r._isSale));
+    // Set/bundle mirror collapsing was audited against Rocknot's jewelry sets;
+    // standard-mode clients keep every variant as Shopify reports it.
+    const allRows = BAG_MODE ? dedupSetMirrors(allRowsMapped.filter(r => !r._isSale)) : allRowsMapped.filter(r => !r._isSale);
 
     const strip = ({ _isBag, _isGiftCard, _isHandbag, _isPublicBag, _isCombo, _bagCovered, _bagBare, _isSale, _rawProduct, _startingStock, ...rest }: RawItem): InventoryItem => rest;
 
@@ -424,7 +430,7 @@ export async function GET() {
       'transformer - crystal', 'transformer - gunmetal', 'transformer - champagne bubbles',
     ]);
 
-    for (const rows of Array.from(byTitle.values())) {
+    for (const rows of BAG_MODE ? Array.from(byTitle.values()) : []) {
       const title = rows[0]._rawProduct;
       const t = norm(title);
 

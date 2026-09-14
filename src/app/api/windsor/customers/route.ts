@@ -4,11 +4,12 @@ import { getCustomerMetrics, getCohortData } from '@/src/lib/bqCustomers';
 import { CustomerMetrics } from '@/src/lib/mockData';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
+import { shopifyDomain } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
 const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
-const SHOPIFY_DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com').trim();
+const SHOPIFY_DOMAIN = shopifyDomain();
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr);

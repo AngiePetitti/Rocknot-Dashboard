@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { shopifyDomain } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
 const CLIENT_ID = process.env.SHOPIFY_CLIENT_ID!;
 const CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET!;
-const SHOP = 'shop-rocknot.myshopify.com';
+const SHOP = shopifyDomain();
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;

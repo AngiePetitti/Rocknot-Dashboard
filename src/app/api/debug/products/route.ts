@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { shopifyDomain } from '@/src/lib/client';
 import { isBigQueryConfigured, tableExists } from '@/src/lib/bigquery';
 import { getProductSales } from '@/src/lib/bqProducts';
 
 export const dynamic = 'force-dynamic';
 
 const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
-const DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com').trim();
+const DOMAIN = shopifyDomain();
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr);

@@ -1,4 +1,4 @@
-// Rocknot Dashboard data
+// Dashboard mock data — only used when no live connectors are configured
 // Shopify revenue/product/inventory data pulled live via Shopify Admin API
 // Ad spend data (Meta/Google/TikTok/CTV) uses estimated figures until ad platform APIs are connected
 
@@ -307,7 +307,7 @@ export const topAds: AdPerformance[] = [
   },
   {
     id: '3',
-    name: 'Brand Search - Rocknot',
+    name: 'Brand Search',
     platform: 'Google',
     spend: 1480,
     revenue: 7200,
@@ -408,7 +408,7 @@ export function getTopProductsForTimeframe(tf: Timeframe): Product[] {
   return shopifyTopProducts30d.map(p => ({
     ...p,
     revenue: Math.round(p.revenue * scale),
-    unitsSold: Math.round((p.revenue * scale) / 85), // avg ~$85 ASP for Rocknot
+    unitsSold: Math.round((p.revenue * scale) / 85), // avg ~$85 ASP placeholder
   }));
 }
 

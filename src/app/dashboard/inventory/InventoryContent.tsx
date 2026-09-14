@@ -5,6 +5,7 @@ import { useEffect, useState, useMemo } from 'react';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import MetricCard from '@/src/components/ui/MetricCard';
+import { useClient } from '@/src/components/ClientProvider';
 
 interface InventoryItem {
   productUnitsSold90d?: number;
@@ -77,6 +78,7 @@ function Collapsible({ icon, title, summary, defaultOpen = false, children }: {
 }
 
 export default function InventoryContent() {
+  const client = useClient();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [bags, setBags] = useState<InventoryItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
@@ -242,7 +244,7 @@ export default function InventoryContent() {
 
   function copyOrderList() {
     const lines = toOrderList.map(i => `${i.product}${i.variant ? ` – ${i.variant}` : ''}: order ${i.remainingQty}${i.incomingQty > 0 ? ` (${i.incomingQty} already incoming)` : ''}`);
-    const text = `Rocknot restock order — ${new Date().toLocaleDateString()}\n${lines.join('\n')}`;
+    const text = `${client.name} restock order — ${new Date().toLocaleDateString()}\n${lines.join('\n')}`;
     try { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ }
   }
 
@@ -639,7 +641,7 @@ export default function InventoryContent() {
         <span>
           <strong>90-day supply target</strong> — velocity based on last 90 days of sales.
           Reorder Qty = units needed to bring stock back to 90 days of supply at current pace.
-          True bag stock is shown in its own section from the hidden &quot;bag only&quot; listings; the public mix-and-match handbag listings (untracked) are excluded.
+          {client.inventory.mode === 'rocknot-bags' && <> True bag stock is shown in its own section from the hidden &quot;bag only&quot; listings; the public mix-and-match handbag listings (untracked) are excluded.</>}
         </span>
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">

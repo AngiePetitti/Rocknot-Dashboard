@@ -5,7 +5,7 @@
 export interface PlatformDay { date: string; spend: number; revenue: number }
 
 async function fetchWindsorDaily(
-  source: 'tiktok' | 'snapchat' | 'google_ads',
+  source: 'tiktok' | 'snapchat' | 'google_ads' | 'pinterest',
   revenueFields: string[],
   since: string,
   until: string
@@ -57,4 +57,14 @@ export function fetchSnapDailyFromWindsor(since: string, until: string): Promise
 // patching from them keeps dashboard and reference aligned by construction.
 export function fetchGoogleDailyFromWindsor(since: string, until: string): Promise<PlatformDay[] | null> {
   return fetchWindsorDaily('google_ads', ['conversions_value', 'conversion_value'], since, until);
+}
+
+// Pinterest via Windsor REST (no direct Pinterest Ads API hookup). Revenue
+// field names differ by connector version — the first one Windsor accepts
+// wins; an unknown field makes Windsor reject the request, which simply means
+// no patch (BigQuery's synced value stands).
+export const PINTEREST_REVENUE_FIELDS = ['total_checkout_value', 'total_conversions_value', 'conversion_value'];
+export const PINTEREST_CONVERSION_FIELDS = ['total_checkout', 'total_conversions', 'conversions'];
+export function fetchPinterestDailyFromWindsor(since: string, until: string): Promise<PlatformDay[] | null> {
+  return fetchWindsorDaily('pinterest', PINTEREST_REVENUE_FIELDS, since, until);
 }

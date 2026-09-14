@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getClient } from '@/src/lib/client';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
 import { listReports, saveReport, deleteReport, isChatStoreConfigured } from '@/src/lib/chatStore';
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing or oversized report content' }, { status: 400 });
   }
   try {
-    const meta = await saveReport(email, (body.title || 'Rocknot report').trim(), html);
+    const meta = await saveReport(email, (body.title || `${getClient().name} report`).trim(), html);
     return NextResponse.json({ ok: true, report: meta });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });

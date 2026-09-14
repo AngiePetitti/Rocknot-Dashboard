@@ -2,14 +2,16 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useClient } from '@/src/components/ClientProvider';
 
-const CHAT_KEY_PREFIX = 'rocknot_ai_analyst_chat';
 
 // Standalone report tab: reads the saved conversation, builds the report from
 // THIS tab (so iOS backgrounding the dashboard tab can't strand the request),
 // then replaces the whole document with the finished report HTML.
 function ReportBuilder() {
   const params = useSearchParams();
+  const client = useClient();
+  const CHAT_KEY_PREFIX = `${client.storagePrefix}_ai_analyst_chat`;
   const [status, setStatus] = useState<'working' | 'waiting' | 'error'>('working');
   const [error, setError] = useState('');
   const [elapsed, setElapsed] = useState(0);

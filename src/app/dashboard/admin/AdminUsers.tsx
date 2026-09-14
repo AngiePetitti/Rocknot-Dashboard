@@ -96,7 +96,7 @@ export default function AdminUsers({ currentEmail }: { currentEmail: string }) {
             ))}
           </div>
         )}
-        <p className="text-[11px] text-gray-400 mt-3">Changes take effect the next time that person signs in (sessions last up to 8 hours). You &amp; Orly are permanent admins and can&apos;t be removed here.</p>
+        <p className="text-[11px] text-gray-400 mt-3">Changes take effect the next time that person signs in (sessions last up to 8 hours). Admins configured in the AUTH_ADMINS env var are permanent and can&apos;t be removed here.</p>
       </Card>
     </div>
   );

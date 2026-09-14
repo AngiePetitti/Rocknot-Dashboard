@@ -3,19 +3,25 @@
 // platform's cumulative spend between `afterSpend` and `afterSpend + amount`
 // (counted from `from`): dollars before the window are real cash, dollars
 // inside it are credited, dollars past it are real cash again.
+import { getClientId, type ClientId } from '@/src/lib/client';
+
 export interface AdCredit {
-  platform: 'snapchat' | 'meta' | 'google' | 'tiktok';
+  client: ClientId;
+  platform: 'snapchat' | 'meta' | 'google' | 'tiktok' | 'pinterest';
   amount: number;
   from: string;
   afterSpend: number;
 }
 
-export const AD_CREDITS: AdCredit[] = [
-  // Snapchat's $7,500 credit covers the SECOND $7,500 of Snap spend — the
+const ALL_CREDITS: AdCredit[] = [
+  // Rocknot — Snapchat's $7,500 credit covers the SECOND $7,500 of Snap spend — the
   // first $7,500 was real cash, then the credit kicks in until $15,000
   // cumulative, after which spend is real cash again.
-  { platform: 'snapchat', amount: 7500, from: '2026-01-01', afterSpend: 7500 },
+  { client: 'rocknot', platform: 'snapchat', amount: 7500, from: '2026-01-01', afterSpend: 7500 },
 ];
+
+// Only the active client's credits apply to this deployment.
+export const AD_CREDITS: AdCredit[] = ALL_CREDITS.filter(c => c.client === getClientId());
 
 // How much credit applies to a query range: the overlap between the range's
 // cumulative-spend interval [spendBeforeRange, spendBeforeRange + spendInRange]

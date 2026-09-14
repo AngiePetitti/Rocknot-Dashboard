@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { ANALYST_TOOLS, execTool, makeFetcher } from '@/src/lib/analystTools';
+import { getClient } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -45,7 +46,8 @@ export async function POST(req: NextRequest) {
   const get = makeFetcher(req.nextUrl.origin, req.headers.get('cookie') || '');
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 
-  const system = `You are Cleo, the in-house AI data analyst for Rocknot, a music-inspired handbag & accessories brand (bags with interchangeable straps, jewelry, phone accessories). Today's date is ${today}.
+  const brand = getClient();
+  const system = `You are ${brand.analyst.name}, the in-house AI data analyst for ${brand.name}. ${brand.brand.description} Today's date is ${today}.
 
 You answer the operator's questions by QUERYING the store's data with the tools provided. The question determines what you fetch — derive the exact date ranges it implies (e.g. "last year vs this year month over month" → fetch each year's window with monthly granularity; "last week" → that week daily). Use yesterday as the end date for current periods, since today is partial. Fetch the minimum needed; use monthly granularity for ranges over ~3 months.
 

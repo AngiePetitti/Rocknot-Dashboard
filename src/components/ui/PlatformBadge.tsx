@@ -5,6 +5,7 @@ const PLATFORM_COLORS: Record<string, string> = {
   TikTok: '#000000',
   Google: '#4285F4',
   Snapchat: '#d9b800',
+  Pinterest: '#E60023',
   CTV: '#FF6B35',
   Shopify: '#96BF48',
   'Direct / Shopify': '#96BF48',

@@ -13,7 +13,8 @@ new client a configuration task instead of a code change.
 2. In the left menu: **BigQuery** → it activates automatically on first open.
 3. In BigQuery, click the three dots next to your project name →
    **Create dataset**:
-   - Dataset ID: `rocknot` (one dataset per client — use the client name)
+   - Dataset ID: `rocknot` / `kaileep` (one dataset per client — use the
+     client's profile id from `src/lib/client.ts`)
    - Location: `US` (multi-region)
    - Leave everything else default → **Create dataset**
 
@@ -34,8 +35,10 @@ new client a configuration task instead of a code change.
 In Windsor (https://onboard.windsor.ai), for **each** connector create a
 destination task to BigQuery. Windsor docs: Destinations → Google BigQuery.
 
-Create these five tasks, all pointed at the `rocknot` dataset, scheduled
-**hourly**:
+Create one task per connector the client runs, all pointed at the client's
+dataset, scheduled **hourly**. Only the platforms listed in the client's
+profile (`ads.platforms` in `src/lib/client.ts`) are queried — Rocknot runs
+Meta/Google/TikTok/Snapchat, Kailee P runs Meta/Google/Pinterest:
 
 | Connector        | Fields to sync                                                                 | Table name          |
 |------------------|--------------------------------------------------------------------------------|---------------------|
@@ -44,6 +47,8 @@ Create these five tasks, all pointed at the `rocknot` dataset, scheduled
 | Facebook Ads     | date, spend, impressions, clicks, purchase_roas, conversions                   | `facebook_ads`      |
 | Google Ads       | date, spend, impressions, clicks, conversions, conversion_value                | `google_ads`        |
 | TikTok Ads       | date, spend, impressions, clicks, conversions, conversion_value                | `tiktok_ads`        |
+| Snapchat Ads     | date, spend, impressions, clicks, swipes, conversion_purchases, conversion_purchases_value | `snapchat_ads` |
+| Pinterest Ads    | date, spend, impressions, clicks, total_checkout, total_checkout_value (or total_conversions, total_conversions_value) | `pinterest_ads` |
 | Shopify (Order Status) | date, order_id, order_cancelled_at                                       | `shopify_order_status` |
 
 The `shopify_order_status` task is optional. The dashboard does not currently
@@ -69,7 +74,8 @@ In the Vercel project → Settings → Environment Variables, add:
 |---------------------------|----------------------------------------------------|
 | `GCP_PROJECT_ID`          | your project id (e.g. `agency-dashboards`)         |
 | `GCP_SERVICE_ACCOUNT_KEY` | the full JSON key file contents (paste as one line) |
-| `BQ_DATASET`              | `rocknot`                                          |
+| `BQ_DATASET`              | `rocknot` / `kaileep`                              |
+| `CLIENT`                  | `rocknot` / `kaileep` — selects the client profile |
 
 Then redeploy. The dashboard automatically switches to BigQuery when these
 three variables are present — the Windsor REST path stays as fallback, so
@@ -80,13 +86,15 @@ You can verify it switched: the live indicator data source will be
 
 ## 5. Onboarding the next client
 
-1. Create a new dataset in the same project (e.g. `clientname`)
-2. Create the same five Windsor destination tasks for the client's
-   connectors → the new dataset
-3. Deploy another Vercel instance of this repo (or a per-client subdomain)
-   with `BQ_DATASET=clientname`
+1. Add (or reuse) a profile in `src/lib/client.ts` — `kaileep` is already
+   there for Kailee P.
+2. Create a new dataset in the same project named after the profile id
+3. Create the Windsor destination tasks for the connectors that client runs
+   → the new dataset
+4. Deploy another Vercel instance of this repo (or a per-client subdomain)
+   with `CLIENT=<profile id>` and `BQ_DATASET=<dataset>`
 
-No code changes.
+See the README's onboarding checklist for the full env list.
 
 ## Revenue, orders, AOV and customer formulas
 

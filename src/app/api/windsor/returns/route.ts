@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { shopifyDomain } from '@/src/lib/client';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
 const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
-const DOMAIN = (process.env.SHOPIFY_STORE_DOMAIN || 'shop-rocknot.myshopify.com').trim();
+const DOMAIN = shopifyDomain();
 
 export interface ReturnedProduct {
   name: string;

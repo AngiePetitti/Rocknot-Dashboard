@@ -15,11 +15,11 @@
 // avoid false alarms from today's partial spend and BigQuery's ~1h sync lag.
 
 import { getAdsOverview } from '@/src/lib/bqAds';
+import { keepClientMetaRows, hasPlatform } from '@/src/lib/client';
 
 const META_TOKEN = (process.env.META_ACCESS_TOKEN || '').trim();
 const META_ACCOUNT_ID = (process.env.META_AD_ACCOUNT_ID || '').trim().replace('act_', '');
 const WINDSOR_API_KEY = (process.env.WINDSOR_API_KEY || '').trim();
-const ROCKNOT_META_ACCOUNT_ID = META_ACCOUNT_ID;
 
 export type ReconcileStatus = 'ok' | 'warn' | 'unavailable';
 
@@ -65,7 +65,7 @@ async function fetchMetaApiSpend(from: string, to: string): Promise<number | nul
 }
 
 // Windsor REST API spend total for a range — an aggregation path independent of
-// our BigQuery SQL. For Meta, filter to the Rocknot account_id.
+// our BigQuery SQL. For Meta, filter to this client's account.
 async function fetchWindsorSpend(source: 'facebook' | 'google_ads' | 'tiktok', from: string, to: string): Promise<number | null> {
   if (!WINDSOR_API_KEY) return null;
   try {
@@ -78,9 +78,7 @@ async function fetchWindsorSpend(source: 'facebook' | 'google_ads' | 'tiktok', f
     if (!res.ok) return null;
     const json = await res.json();
     let rows = (json.data || []) as Array<{ account_id?: string; spend?: number | string }>;
-    if (source === 'facebook') {
-      rows = rows.filter(r => String(r.account_id ?? '').replace('act_', '') === ROCKNOT_META_ACCOUNT_ID);
-    }
+    if (source === 'facebook') rows = keepClientMetaRows(rows);
     return rows.reduce((s, r) => s + Number(r.spend || 0), 0);
   } catch {
     return null;
@@ -124,7 +122,7 @@ export async function reconcileAdSpend(opts?: { from?: string; to?: string; days
     fetchMetaApiSpend(from, to),
     fetchWindsorSpend('facebook', from, to),
     fetchWindsorSpend('google_ads', from, to),
-    fetchWindsorSpend('tiktok', from, to),
+    hasPlatform('tiktok') ? fetchWindsorSpend('tiktok', from, to) : Promise.resolve(null),
   ]);
 
   const platforms: PlatformReconcile[] = [
@@ -134,7 +132,7 @@ export async function reconcileAdSpend(opts?: { from?: string; to?: string; days
       metaApi !== null ? 'Meta Graph API (Ads Manager)' : 'Windsor REST',
       thresholdPct, thresholdDollars),
     compare('Google', dashSpend('Google'), googleWindsor, 'Windsor REST', thresholdPct, thresholdDollars),
-    compare('TikTok', dashSpend('TikTok'), tiktokWindsor, 'Windsor REST', thresholdPct, thresholdDollars),
+    ...(hasPlatform('tiktok') ? [compare('TikTok', dashSpend('TikTok'), tiktokWindsor, 'Windsor REST', thresholdPct, thresholdDollars)] : []),
   ];
 
   return {

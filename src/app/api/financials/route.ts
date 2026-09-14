@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
+import { qbAccountRegex } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -68,10 +69,11 @@ export async function GET(req: NextRequest) {
     let rows = (json.data || []) as QBRow[];
 
     // The Windsor connection can carry multiple QuickBooks companies — only
-    // Rocknot LLC belongs on this P&L. Track what we saw for verification.
+    // this client's entity belongs on this P&L. Track what we saw for verification.
     const accountsSeen = Array.from(new Set(rows.map(r => String(r.account_name || '')))).filter(Boolean);
-    const rocknotRows = rows.filter(r => /rocknot/i.test(String(r.account_name || '')));
-    if (rocknotRows.length > 0) rows = rocknotRows;
+    const qbMatch = qbAccountRegex();
+    const ownRows = qbMatch ? rows.filter(r => qbMatch.test(String(r.account_name || ''))) : rows;
+    if (ownRows.length > 0) rows = ownRows;
 
     const totals = {
       income: 0, cogs: 0, grossProfit: 0, expenses: 0, totalExpenses: 0,
@@ -186,7 +188,7 @@ export async function GET(req: NextRequest) {
       range: { from: dateFrom, to: dateTo },
       rowCount: rows.length,
       accountsSeen,
-      accountUsed: accountsSeen.find(a => /rocknot/i.test(a)) || accountsSeen[0] || 'unknown',
+      accountUsed: accountsSeen.find(a => (qbMatch ? qbMatch.test(a) : true)) || accountsSeen[0] || 'unknown',
       totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, round(v)])),
       monthly: Array.from(monthly.entries()).sort(([a], [b]) => a.localeCompare(b))
         .map(([month, m]) => ({

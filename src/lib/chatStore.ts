@@ -11,6 +11,7 @@
 // Chat sheet layout, tab "Chats" (row 1 = header):
 //   A: Email | B: Index | C: Role | D: Content | E: Updated At
 
+import { getClient } from '@/src/lib/client';
 import { JWT } from 'google-auth-library';
 
 export interface StoredChatMsg { role: 'user' | 'assistant'; content: string }
@@ -111,7 +112,7 @@ async function createChatSheet(): Promise<string> {
   const created = await api('', {
     method: 'POST',
     body: JSON.stringify({
-      properties: { title: 'Rocknot Analyst Chats (private — do not share)' },
+      properties: { title: `${getClient().name} Analyst Chats (private — do not share)` },
       sheets: [{ properties: { title: CHAT_TAB } }],
     }),
   }) as { spreadsheetId?: string };
