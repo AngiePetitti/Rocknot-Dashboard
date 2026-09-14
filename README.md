@@ -1,6 +1,7 @@
-# Agency eCommerce Dashboard (Rocknot · Kailee P)
+# A6 Dashboard
 
-A Next.js 14 analytics dashboard for DTC Shopify brands: live revenue and ad
+Area 6 Marketing's eCommerce analytics dashboard, deployed separately for each
+client (currently Rocknot and Kailee P). A Next.js 14 app for DTC Shopify brands: live revenue and ad
 spend (Overview), per-platform ad performance, creative analysis with
 AI-written production briefs, top products, customer intel, inventory and
 restock alerts, returns, Klaviyo retention planning, attribution, a marketing
@@ -8,7 +9,9 @@ calendar with launch checklists, goals, tasks, AI insights and an in-house AI
 analyst ("Cleo"). Data flows Windsor.ai → BigQuery (plus live Shopify, Meta,
 Snapchat and Windsor REST overlays); AI features use the Anthropic API.
 
-The same codebase deploys once **per client**. Everything brand-specific
+The same codebase deploys once **per client**, as its own Vercel project with
+its own credentials, data stores and user list — clients never share a
+deployment, a database, a Google Sheet or a login. Everything brand-specific
 lives in one file — `src/lib/client.ts` — and the deployment picks its
 profile from env vars.
 

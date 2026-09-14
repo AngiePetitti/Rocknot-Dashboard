@@ -138,7 +138,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         </div>
       )}
       <div className="px-5 py-3 border-t border-gray-100">
-        <p className="text-[10px] text-gray-300 leading-relaxed">{client.name} Analytics v1.0 · Windsor.ai</p>
+        <p className="text-[10px] text-gray-300 leading-relaxed">A6 Dashboard v1.0 · {client.name} · Windsor.ai</p>
       </div>
     </aside>
   );

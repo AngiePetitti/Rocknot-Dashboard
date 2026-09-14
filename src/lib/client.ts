@@ -1,4 +1,6 @@
-// Client profiles — the ONE place a deployment learns which brand it serves.
+// A6 Dashboard client profiles — the ONE place a deployment learns which
+// brand it serves. The product is Area 6 Marketing's; each client gets its
+// own fully separate deployment of it.
 //
 // The dashboard started life as Rocknot's; everything brand-specific (name,
 // logo, Shopify store, which ad platforms run, how the Meta/QuickBooks feeds
@@ -208,12 +210,27 @@ function isClientId(v: string): v is ClientId {
   return v === 'rocknot' || v === 'kaileep';
 }
 
+let warnedUnset = false;
+
 export function getClientId(): ClientId {
   const explicit = (process.env.CLIENT || process.env.NEXT_PUBLIC_CLIENT || '').trim().toLowerCase();
   if (isClientId(explicit)) return explicit;
+
+  // Safety net for the original Rocknot deployment: any Rocknot-specific
+  // credential in the environment locks the profile to Rocknot, so a missing
+  // CLIENT var can never re-brand Rocknot's dashboard as another client.
   const ds = (process.env.BQ_DATASET || '').trim().toLowerCase();
-  if (ds.includes('rocknot')) return 'rocknot';
-  if (ds.includes('kailee')) return 'kaileep';
+  const shop = (process.env.SHOPIFY_STORE_DOMAIN || '').trim().toLowerCase();
+  const metaId = (process.env.META_AD_ACCOUNT_ID || '').trim().replace('act_', '');
+  const looksRocknot = ds.includes('rocknot') || shop.includes('rocknot')
+    || (metaId && metaId === ROCKNOT.ads.metaAccountIdDefault) || Boolean((process.env.SNAP_AD_ACCOUNT_ID || '').trim());
+  if (looksRocknot) return 'rocknot';
+  if (ds.includes('kailee') || shop.includes('kailee')) return 'kaileep';
+
+  if (!warnedUnset && typeof process !== 'undefined' && process.env.NODE_ENV === 'production') {
+    warnedUnset = true;
+    console.warn('[client] CLIENT env var is not set — defaulting to the kaileep profile. Set CLIENT explicitly on every deployment.');
+  }
   return 'kaileep';
 }
 

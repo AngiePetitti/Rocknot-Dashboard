@@ -12,7 +12,7 @@ export function generateMetadata(): Metadata {
   const c = getClient();
   return {
     title: `${c.name} Dashboard`,
-    description: `${c.name} eCommerce Analytics Dashboard`,
+    description: `A6 Dashboard · ${c.name} eCommerce analytics`,
   };
 }
 
