@@ -185,7 +185,7 @@ const KAILEEP: ClientProfile = {
     aov: null,
     contentAngles: 'real-bride and wedding-day features, styling the shoe with the dress, comfort and break-in tips, flower girl moments',
   },
-  shopify: { defaultDomain: '' },
+  shopify: { defaultDomain: 'kailee-p.myshopify.com' },
   ads: {
     platforms: ['meta', 'google', 'pinterest'],
     // Meta ad account "Kailee P. Weddings" (Windsor account name matches on 'kailee').
