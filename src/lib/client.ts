@@ -166,14 +166,14 @@ const ROCKNOT: ClientProfile = {
   finance: { qbAccountMatch: 'rocknot' },
   windsor: {
     accounts: {
+      // Ids as they appear in Rocknot's Windsor → BigQuery tasks (select_accounts=).
       facebook: '165092079662754',
       shopify: 'shop-rocknot.myshopify.com',
-      // Google/TikTok/Snapchat/QuickBooks ids not recorded yet — unscoped, which
-      // is what these calls always were. Set WINDSOR_ACCOUNT_GOOGLE_ADS etc. (or
-      // fill these in) before a second client connects the same platform.
-      google_ads: '',
-      tiktok: '',
-      snapchat: '',
+      google_ads: '785-386-4235',
+      tiktok: '7331079299845357570',
+      snapchat: 'cd018406-4f67-4afc-85cb-8479a6a43698',
+      // QuickBooks: Rocknot LLC is the only company connected; rows are also
+      // filtered by finance.qbAccountMatch.
       quickbooks: '',
       pinterest: null,
     },
