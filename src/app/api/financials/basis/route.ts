@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
-import { qbAccountRegex } from '@/src/lib/client';
+import { qbAccountRegex, windsorParams } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -59,14 +59,16 @@ export async function GET(req: NextRequest) {
     const from = rangeFrom < lookbackFrom ? rangeFrom : lookbackFrom;
     const to = rangeTo > today ? rangeTo : today;
 
+    // No QuickBooks connected for this client → no booked P&L (the card hides).
+    const scoped = windsorParams('quickbooks', { date_from: from, date_to: to });
     const qs = new URLSearchParams({
-      api_key: WINDSOR_API_KEY, date_from: from, date_to: to,
+      api_key: WINDSOR_API_KEY, ...(scoped ?? { date_from: from, date_to: to }),
       fields: ['date', 'account_name', 'profitandloss__totalincome', 'profitandloss__income', 'profitandloss__revenue',
         'profitandloss__cogs', 'profitandloss__operatingexpenses', 'profitandloss__expenses', 'profitandloss__netincome'].join(','),
       _renderer: 'json',
     });
     const [qbRes, shopifyDays, ads] = await Promise.all([
-      fetch(`https://connectors.windsor.ai/quickbooks?${qs}`, { next: { revalidate: 3600 }, signal: AbortSignal.timeout(30000) }).then(r => r.json()),
+      scoped ? fetch(`https://connectors.windsor.ai/quickbooks?${qs}`, { next: { revalidate: 3600 }, signal: AbortSignal.timeout(30000) }).then(r => r.json()) : Promise.resolve({ data: [] }),
       import('@/src/lib/bqOverview').then(mod => mod.fetchShopifyDaily(from, to)).catch(() => []),
       import('@/src/lib/bqAds').then(mod => mod.getAdsOverview(from, to)).catch(() => null),
     ]);

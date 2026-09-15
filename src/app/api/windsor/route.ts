@@ -6,7 +6,7 @@ import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { fetchMetaToday } from '@/src/lib/metaLive';
 import { fetchSnapToday } from '@/src/lib/snapLive';
-import { metaAccountNameMatch, hasPlatform } from '@/src/lib/client';
+import { metaAccountNameMatch, hasPlatform, windsorParams } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -359,8 +359,13 @@ async function fetchCustomerSplit(params: Record<string, string>): Promise<Custo
 }
 
 async function fetchFromWindsor(endpoint: string, fields: string, params: Record<string, string>): Promise<{ rows: WindsorRow[]; error?: string; rowCount: number }> {
+  // Every call is scoped to this client's account in the shared Windsor
+  // workspace ('all' is only ever used for Shopify here). A source the client
+  // hasn't connected returns nothing instead of another client's rows.
+  const scoped = windsorParams(endpoint, params);
+  if (!scoped) return { rows: [], rowCount: 0 };
   try {
-    const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
+    const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...scoped });
     const url = `https://connectors.windsor.ai/${endpoint}?${qs}`;
     const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) return { rows: [], error: `http_${res.status}`, rowCount: 0 };

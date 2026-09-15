@@ -59,17 +59,19 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden" style={{ backgroundImage: `linear-gradient(to bottom right, ${client.theme.accentFrom}, ${client.theme.accentTo})` }}>
             {/* Brand logo from /public (profile.logo); falls back to the initial until one is uploaded. */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={client.logo}
-              alt={client.wordmark}
-              className="w-full h-full object-contain p-0.5"
-              onError={e => {
-                e.currentTarget.style.display = 'none';
-                (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty('display');
-              }}
-            />
-            <span style={{ display: 'none' }} className="text-white font-bold text-sm">{client.initial}</span>
+            {client.logo && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={client.logo}
+                alt={client.wordmark}
+                className="w-full h-full object-contain p-0.5"
+                onError={e => {
+                  e.currentTarget.style.display = 'none';
+                  (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.removeProperty('display');
+                }}
+              />
+            )}
+            <span style={{ display: client.logo ? 'none' : undefined }} className="text-white font-bold text-sm">{client.initial}</span>
           </div>
           <div>
             <p className="font-bold text-gray-900 text-sm leading-none tracking-wide">{client.wordmark}</p>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
-import { keepClientMetaRows, metaAccountId, hasPlatform } from '@/src/lib/client';
+import { keepClientMetaRows, metaAccountId, hasPlatform, windsorParams } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -116,7 +116,9 @@ const FIELDS_BY_SOURCE: Record<CreativeSource, string> = {
 
 async function fetchCreatives(source: CreativeSource, params: Record<string, string>, isToday: boolean, fieldsOverride?: string): Promise<{ rows: CreativeRow[]; raw?: unknown }> {
   const fields = fieldsOverride || FIELDS_BY_SOURCE[source];
-  const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
+  const scoped = windsorParams(source, params);
+  if (!scoped) return { rows: [] };
+  const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...scoped });
   const url = `https://connectors.windsor.ai/${source}?${qs}`;
   // "Today" must stay live (intraday spend changes by the minute). Past
   // ranges are historical and won't change, so cache the Windsor response —
@@ -225,11 +227,13 @@ async function fetchWindsorAdUrls(
   params: Record<string, string>,
   fields: string[]
 ): Promise<{ urls: Record<string, string>; error: string | null }> {
+  const scoped = windsorParams(source, params);
+  if (!scoped) return { urls: {}, error: null };
   const qs = new URLSearchParams({
     api_key: WINDSOR_API_KEY!,
     fields: ['ad_id', 'account_id', ...fields].join(','),
     _renderer: 'json',
-    ...params,
+    ...scoped,
   });
   try {
     const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { next: { revalidate: 3600 } });

@@ -40,6 +40,9 @@ export const PLATFORMS: Record<PlatformKey, PlatformDef> = {
   pinterest: { key: 'pinterest', label: 'Pinterest', color: '#fb7185', chipColor: '#e11d48', bqTable: 'pinterest_ads', windsorSource: 'pinterest' },
 };
 
+/** Windsor REST connector names the dashboard queries directly. */
+export type WindsorSource = 'facebook' | 'google_ads' | 'tiktok' | 'snapchat' | 'pinterest' | 'shopify' | 'quickbooks';
+
 export interface ClientProfile {
   id: ClientId;
   /** Brand name as written in prose: "Kailee P". */
@@ -48,7 +51,7 @@ export interface ClientProfile {
   wordmark: string;
   /** Single-letter fallback when the logo file is missing. */
   initial: string;
-  /** Path under /public. A missing file falls back to `initial`. */
+  /** Path under /public ('' = no logo yet; the initial is shown instead). */
   logo: string;
   /** Sidebar/login accent gradient (hex, inline-styled so Tailwind purging can't drop it). */
   theme: { accentFrom: string; accentTo: string; loginMark: string };
@@ -91,6 +94,17 @@ export interface ClientProfile {
   finance: {
     /** Case-insensitive regex source matched against QuickBooks account_name ('' = keep all). */
     qbAccountMatch: string;
+  };
+  windsor: {
+    /**
+     * The agency's Windsor workspace holds EVERY client's connectors, so every
+     * direct REST call must be scoped to this client's account. Per source:
+     *   string  → sent as Windsor's `select_accounts` parameter
+     *   ''      → unscoped (only safe while this client is the sole account of that type)
+     *   null    → this client has no such account yet: the REST call is skipped
+     * Env override per source: WINDSOR_ACCOUNT_FACEBOOK, WINDSOR_ACCOUNT_GOOGLE_ADS, …
+     */
+    accounts: Record<WindsorSource, string | null>;
   };
   goals: {
     /** Starting annual net-sales target shown until an admin saves one (0 = ask). */
@@ -150,6 +164,20 @@ const ROCKNOT: ClientProfile = {
     metaAccountIdDefault: '165092079662754',
   },
   finance: { qbAccountMatch: 'rocknot' },
+  windsor: {
+    accounts: {
+      // Ids as they appear in Rocknot's Windsor → BigQuery tasks (select_accounts=).
+      facebook: '165092079662754',
+      shopify: 'shop-rocknot.myshopify.com',
+      google_ads: '785-386-4235',
+      tiktok: '7331079299845357570',
+      snapchat: 'cd018406-4f67-4afc-85cb-8479a6a43698',
+      // QuickBooks: Rocknot LLC is the only company connected; rows are also
+      // filtered by finance.qbAccountMatch.
+      quickbooks: '',
+      pinterest: null,
+    },
+  },
   goals: { defaultAnnualTarget: 4_000_000, targetMer: 3.5, targetRoas: 3.5 },
   inventory: { mode: 'rocknot-bags' },
   creatives: {
@@ -173,7 +201,7 @@ const KAILEEP: ClientProfile = {
   name: 'Kailee P',
   wordmark: 'KAILEE P',
   initial: 'K',
-  logo: '/kaileep-logo.png',
+  logo: '', // drop a file at public/kaileep-logo.png and set this to '/kaileep-logo.png'
   theme: { accentFrom: '#f9a8d4', accentTo: '#e9d5ff', loginMark: '#f472b6' },
   siteDomain: 'kaileep.com',
   dashboardUrl: 'https://kaileep-dashboard.vercel.app',
@@ -185,14 +213,28 @@ const KAILEEP: ClientProfile = {
     aov: null,
     contentAngles: 'real-bride and wedding-day features, styling the shoe with the dress, comfort and break-in tips, flower girl moments',
   },
-  shopify: { defaultDomain: '' },
+  shopify: { defaultDomain: 'kailee-p.myshopify.com' },
   ads: {
     platforms: ['meta', 'google', 'pinterest'],
+    // Meta ad account "Kailee P. Weddings" (Windsor account name matches on 'kailee').
     metaAccountNameMatch: 'kailee',
     metaAccountNameMode: 'contains',
-    metaAccountIdDefault: '',
+    metaAccountIdDefault: '449159425278819',
   },
   finance: { qbAccountMatch: 'kailee' },
+  windsor: {
+    accounts: {
+      facebook: '449159425278819',
+      shopify: 'kailee-p.myshopify.com',
+      // Not connected yet: REST calls for these are skipped rather than
+      // returning another client's data from the shared workspace.
+      google_ads: null,
+      pinterest: null,
+      tiktok: null,
+      snapchat: null,
+      quickbooks: null,
+    },
+  },
   // No annual target has been shared yet — the Goals tab asks for one. The
   // MER/ROAS bars start from the NP Digital audit's blended Meta ROAS (~15x
   // reported) discounted for the Google tag inflation it found; adjust once
@@ -294,6 +336,29 @@ export function keepClientMetaRows<T extends object>(rows: T[], profile: ClientP
     return !n || n.includes(name);
   });
   return rows;
+}
+
+/**
+ * Windsor REST scoping for a source: the `select_accounts` value to send, ''
+ * for an unscoped call, or null when this client has no such account (skip).
+ * Windsor endpoint aliases (tiktok_ads → tiktok, all → shopify) are normalised.
+ */
+export function windsorAccount(source: string, profile: ClientProfile = getClient()): string | null {
+  const key = (source === 'tiktok_ads' ? 'tiktok' : source === 'all' ? 'shopify' : source) as WindsorSource;
+  const env = process.env[`WINDSOR_ACCOUNT_${key.toUpperCase()}`];
+  if (env !== undefined && env.trim() !== '') return env.trim();
+  const v = profile.windsor.accounts[key];
+  return v === undefined ? '' : v;
+}
+
+/**
+ * Query params for a Windsor REST call scoped to this client, or null when
+ * the call must be skipped because the client has no account of that type.
+ */
+export function windsorParams(source: string, params: Record<string, string>, profile: ClientProfile = getClient()): Record<string, string> | null {
+  const acct = windsorAccount(source, profile);
+  if (acct === null) return null;
+  return acct ? { ...params, select_accounts: acct } : params;
 }
 
 /** Case-insensitive QuickBooks entity matcher (null = keep every account). */
