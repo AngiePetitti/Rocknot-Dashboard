@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
-import { qbAccountRegex } from '@/src/lib/client';
+import { qbAccountRegex, windsorParams } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -50,10 +50,11 @@ export async function GET(req: NextRequest) {
   const dateFrom = searchParams.get('date_from') || `${today.slice(0, 4)}-01-01`;
   const dateTo = searchParams.get('date_to') || today;
 
+  const scoped = windsorParams('quickbooks', { date_from: dateFrom, date_to: dateTo });
+  if (!scoped) return NextResponse.json({ source: 'not_connected', error: 'QuickBooks is not connected for this client', fields: PNL_FIELDS }, { status: 200 });
   const qs = new URLSearchParams({
     api_key: WINDSOR_API_KEY,
-    date_from: dateFrom,
-    date_to: dateTo,
+    ...scoped,
     fields: PNL_FIELDS.join(','),
     _renderer: 'json',
   });

@@ -1,4 +1,4 @@
-import { runQuery, getDataset, dedupedOrdersCte } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte, tableExists } from '@/src/lib/bigquery';
 import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
 import { shopifyDomain, metaAccountSql, hasPlatform } from '@/src/lib/client';
 
@@ -215,8 +215,20 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const ds = getDataset();
   const params = { date_from: dateFrom, date_to: dateTo };
 
+  // A platform the client runs may not have synced its first table yet (a new
+  // client's Google Ads before access is granted, say). Referencing a missing
+  // table fails the WHOLE ads query and blanks every platform, so each CTE is
+  // stubbed empty until its table exists. Positives are cached for the
+  // instance; a newly created table is picked up on the next request.
+  const EMPTY_CTE = 'SELECT CAST(NULL AS DATE) AS d, 0.0 AS spend, 0.0 AS revenue';
+  const [hasMeta, hasGoogle, hasTiktok] = await Promise.all([
+    tableExists('facebook_ads'),
+    hasPlatform('google') ? tableExists('google_ads') : Promise.resolve(false),
+    hasPlatform('tiktok') ? tableExists('tiktok_ads') : Promise.resolve(false),
+  ]);
+
   const adsSql = `
-    WITH meta AS (
+    WITH meta AS (${hasMeta ? `
       -- Windsor stores one row per ADSET (only the campaign name is exposed, so
       -- a campaign's adsets share a campaign value and appear as multiple rows
       -- with independent spend/clicks/purchases). They must be SUMMED to get the
@@ -226,23 +238,21 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
              SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.facebook_ads\`
       WHERE DATE(date) BETWEEN @date_from AND @date_to${metaAccountSql()}
-      GROUP BY d
+      GROUP BY d` : EMPTY_CTE}
     ),
-    google AS (
+    google AS (${hasGoogle ? `
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
              SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.google_ads\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d` : EMPTY_CTE}
     ),
-    tiktok AS (${hasPlatform('tiktok') ? `
+    tiktok AS (${hasTiktok ? `
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
              SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.tiktok_ads\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d` : `
-      -- client doesn't run TikTok: empty CTE keeps the joins below intact
-      SELECT CAST(NULL AS DATE) AS d, 0.0 AS spend, 0.0 AS revenue`}
+      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d` : EMPTY_CTE}
     ),
     days AS (SELECT d FROM UNNEST(GENERATE_DATE_ARRAY(@date_from, @date_to)) AS d)
     SELECT

@@ -15,7 +15,7 @@
 // avoid false alarms from today's partial spend and BigQuery's ~1h sync lag.
 
 import { getAdsOverview } from '@/src/lib/bqAds';
-import { keepClientMetaRows, hasPlatform } from '@/src/lib/client';
+import { keepClientMetaRows, hasPlatform, windsorParams } from '@/src/lib/client';
 
 const META_TOKEN = (process.env.META_ACCESS_TOKEN || '').trim();
 const META_ACCOUNT_ID = (process.env.META_AD_ACCOUNT_ID || '').trim().replace('act_', '');
@@ -68,12 +68,11 @@ async function fetchMetaApiSpend(from: string, to: string): Promise<number | nul
 // our BigQuery SQL. For Meta, filter to this client's account.
 async function fetchWindsorSpend(source: 'facebook' | 'google_ads' | 'tiktok', from: string, to: string): Promise<number | null> {
   if (!WINDSOR_API_KEY) return null;
+  const scoped = windsorParams(source, { date_from: from, date_to: to });
+  if (!scoped) return null;
   try {
     const fields = source === 'facebook' ? 'account_id,source,spend' : 'source,spend';
-    const qs = new URLSearchParams({
-      api_key: WINDSOR_API_KEY, fields, _renderer: 'json',
-      date_from: from, date_to: to,
-    });
+    const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY, fields, _renderer: 'json', ...scoped });
     const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store' });
     if (!res.ok) return null;
     const json = await res.json();

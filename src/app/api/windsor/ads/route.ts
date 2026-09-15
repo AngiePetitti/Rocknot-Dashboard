@@ -5,7 +5,7 @@ import { fetchMetaToday } from '@/src/lib/metaLive';
 import { fetchSnapToday } from '@/src/lib/snapLive';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
-import { keepClientMetaRows, hasPlatform, PLATFORMS } from '@/src/lib/client';
+import { keepClientMetaRows, hasPlatform, PLATFORMS, windsorParams } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -56,8 +56,10 @@ async function fetchSourceTotals(source: AdSource, params: Record<string, string
     snapchat:   'source,spend,impressions,clicks,conversion_purchases,conversion_purchases_value',
     pinterest:  'source,spend,impressions,clicks,total_checkout,total_checkout_value',
   };
+  const scoped = windsorParams(source, params);
+  if (!scoped) return [];
   try {
-    const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields: fieldMap[source], _renderer: 'json', ...params });
+    const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields: fieldMap[source], _renderer: 'json', ...scoped });
     const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = await res.json();
@@ -76,9 +78,11 @@ function onlyThisClient(source: string, rows: WindsorRow[]): WindsorRow[] {
 
 // Daily request: only date+spend — Windsor returns ~1 row per day (small row count for chart)
 async function fetchSourceDaily(source: AdSource, params: Record<string, string>): Promise<WindsorRow[]> {
+  const scoped = windsorParams(source, params);
+  if (!scoped) return [];
   try {
     const fields = source === 'facebook' ? 'date,account_id,source,spend' : 'date,source,spend';
-    const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...params });
+    const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...scoped });
     const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = await res.json();

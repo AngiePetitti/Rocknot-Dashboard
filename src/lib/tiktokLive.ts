@@ -2,6 +2,8 @@
 // platforms without (or awaiting) a direct API hookup. The BigQuery tables
 // only update on Windsor's daily sync, so the most recent days understate
 // spend badly — the connector endpoint is fresher.
+import { windsorParams } from '@/src/lib/client';
+
 export interface PlatformDay { date: string; spend: number; revenue: number }
 
 async function fetchWindsorDaily(
@@ -12,11 +14,14 @@ async function fetchWindsorDaily(
 ): Promise<PlatformDay[] | null> {
   const key = (process.env.WINDSOR_API_KEY || '').trim();
   if (!key) return null;
+  // Scope to this client's account in the shared Windsor workspace; skip
+  // entirely when the client has no account of this type.
+  const scoped = windsorParams(source, { date_from: since, date_to: until });
+  if (!scoped) return null;
   try {
     const qs = new URLSearchParams({
       api_key: key,
-      date_from: since,
-      date_to: until,
+      ...scoped,
       fields: ['date', 'spend', ...revenueFields].join(','),
       _renderer: 'json',
     });
