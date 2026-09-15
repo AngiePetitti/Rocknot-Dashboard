@@ -368,7 +368,11 @@ async function fetchFromWindsor(endpoint: string, fields: string, params: Record
     const qs = new URLSearchParams({ api_key: WINDSOR_API_KEY!, fields, _renderer: 'json', ...scoped });
     const url = `https://connectors.windsor.ai/${endpoint}?${qs}`;
     const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) return { rows: [], error: `http_${res.status}`, rowCount: 0 };
+    // Windsor's blended /all endpoint rejects a store filter for Shopify
+    // accounts added via "manual setup" (HTTP 400). Retry on the dedicated
+    // /shopify endpoint with the same scoped params — never unscoped.
+    if (res.status === 400 && endpoint === 'all') return fetchFromWindsor('shopify', fields, params);
+    if (!res.ok) return { rows: [], error: `http_${res.status} from ${endpoint}`, rowCount: 0 };
     const json = await res.json();
     if (json.error) return { rows: [], error: json.error, rowCount: 0 };
     const data = (json.data || []) as WindsorRow[];
@@ -636,6 +640,9 @@ export async function GET(request: NextRequest) {
           current.metrics.totalRevenue = Math.round(liveRevenue);
           current.metrics.netSales = Math.round(liveNetSales || liveRevenue);
           current.metrics.totalOrders = liveOrders;
+          // Live ShopifyQL revenue IS Shopify revenue — without this the UI kept
+          // showing "Shopify hasn't synced" next to real live numbers.
+          current.revenueSource = 'shopify';
           current.metrics.aov = liveOrders > 0 ? Math.round((liveNetSales / liveOrders) * 100) / 100 : 0;
           current.metrics.mer = current.metrics.totalAdSpend > 0
             ? Math.round(((liveNetSales || liveRevenue) / current.metrics.totalAdSpend) * 100) / 100 : 0;
