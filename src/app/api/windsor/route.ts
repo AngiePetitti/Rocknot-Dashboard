@@ -640,6 +640,9 @@ export async function GET(request: NextRequest) {
           current.metrics.totalRevenue = Math.round(liveRevenue);
           current.metrics.netSales = Math.round(liveNetSales || liveRevenue);
           current.metrics.totalOrders = liveOrders;
+          // Live ShopifyQL revenue IS Shopify revenue — without this the UI kept
+          // showing "Shopify hasn't synced" next to real live numbers.
+          current.revenueSource = 'shopify';
           current.metrics.aov = liveOrders > 0 ? Math.round((liveNetSales / liveOrders) * 100) / 100 : 0;
           current.metrics.mer = current.metrics.totalAdSpend > 0
             ? Math.round(((liveNetSales || liveRevenue) / current.metrics.totalAdSpend) * 100) / 100 : 0;
