@@ -76,7 +76,7 @@ export async function fetchMetaToday(): Promise<MetaToday | null> {
 // video source — must come from Meta. Requests exactly the ad ids the page
 // shows (batched ?ids= lookups) instead of paging the whole account, which
 // missed the currently-spending ads.
-export interface MetaAdMedia { thumbnailUrl?: string; videoUrl?: string; previewUrl?: string }
+export interface MetaAdMedia { thumbnailUrl?: string; videoUrl?: string; previewUrl?: string; catalog?: boolean }
 
 // Most recent per-video Graph error (e.g. permission message) — surfaced in
 // the creatives API response for debugging token/asset issues.
@@ -144,8 +144,77 @@ export async function fetchMetaAdMedia(adIds: string[]): Promise<Record<string, 
       }
     }));
 
+    // Catalog / dynamic ads (Advantage+ catalog, DPA) carry no thumbnail_url
+    // or image_url: the creative is a template filled from the product feed.
+    // Second, error-tolerant pass over the ads still without a still image,
+    // reading the places Meta keeps one for those formats. Kept separate so
+    // an unsupported field here can't cost the ordinary ads their thumbnails.
+    const bare = ids.filter(id => !media[id]?.thumbnailUrl);
+    if (bare.length > 0) await fillCatalogThumbnails(bare, token, media);
+
     return Object.keys(media).length > 0 ? media : null;
   } catch {
     return null;
+  }
+}
+
+async function fillCatalogThumbnails(ids: string[], token: string, media: Record<string, MetaAdMedia>): Promise<void> {
+  const fields = 'creative{product_set_id,image_hash,object_story_spec{template_data{picture,image_hash},link_data{picture,image_hash}},asset_feed_spec{images{url,hash}}}';
+  const hashToAds = new Map<string, string[]>();
+  try {
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50);
+      const url = `https://graph.facebook.com/v19.0/?ids=${chunk.join(',')}&fields=${encodeURIComponent(fields)}&access_token=${token}`;
+      const res = await fetch(url, { next: { revalidate: 3600 }, signal: AbortSignal.timeout(8000) });
+      const json: Record<string, {
+        creative?: {
+          product_set_id?: string;
+          image_hash?: string;
+          object_story_spec?: {
+            template_data?: { picture?: string; image_hash?: string };
+            link_data?: { picture?: string; image_hash?: string };
+          };
+          asset_feed_spec?: { images?: Array<{ url?: string; hash?: string }> };
+        };
+      }> & { error?: unknown } = await res.json();
+      if (json.error) return;
+      for (const id of chunk) {
+        const c = json[id]?.creative;
+        if (!c) continue;
+        const m: MetaAdMedia = (media[id] = media[id] || {});
+        if (c.product_set_id) m.catalog = true;
+        const pic = c.object_story_spec?.template_data?.picture
+          || c.object_story_spec?.link_data?.picture
+          || c.asset_feed_spec?.images?.find(im => im.url?.startsWith('http'))?.url
+          || '';
+        if (pic.startsWith('http')) { m.thumbnailUrl = pic; continue; }
+        const hash = c.image_hash
+          || c.object_story_spec?.template_data?.image_hash
+          || c.object_story_spec?.link_data?.image_hash
+          || c.asset_feed_spec?.images?.find(im => im.hash)?.hash;
+        if (hash) {
+          const g = hashToAds.get(hash);
+          if (g) g.push(id); else hashToAds.set(hash, [id]);
+        }
+      }
+    }
+    // Image hashes resolve to URLs through the ad account's image library.
+    const accountId = (process.env.META_AD_ACCOUNT_ID || '').trim().replace('act_', '');
+    if (hashToAds.size === 0 || !accountId) return;
+    const hashes = Array.from(hashToAds.keys());
+    const url = `https://graph.facebook.com/v19.0/act_${accountId}/adimages?hashes=${encodeURIComponent(JSON.stringify(hashes))}&fields=hash,url,permalink_url&access_token=${token}`;
+    const res = await fetch(url, { next: { revalidate: 3600 }, signal: AbortSignal.timeout(8000) });
+    const json: { data?: Array<{ hash?: string; url?: string; permalink_url?: string }>; error?: unknown } = await res.json();
+    if (json.error || !Array.isArray(json.data)) return;
+    for (const im of json.data) {
+      const u = im.url || im.permalink_url || '';
+      if (!im.hash || !u.startsWith('http')) continue;
+      for (const adId of hashToAds.get(im.hash) || []) {
+        const m = media[adId] || (media[adId] = {});
+        if (!m.thumbnailUrl) m.thumbnailUrl = u;
+      }
+    }
+  } catch {
+    /* best effort — cards fall back to the ad-preview embed */
   }
 }
