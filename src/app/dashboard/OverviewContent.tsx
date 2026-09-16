@@ -36,6 +36,7 @@ const EMPTY_METRICS: LiveMetrics = {
 interface LiveMetrics {
   totalRevenue: number;
   netSales?: number;
+  returnFees?: number;
   totalOrders: number;
   totalAdSpend: number;
   aov: number;
@@ -608,13 +609,16 @@ export default function OverviewContent() {
               </div>
             </div>
             <p className="text-sm text-gray-400 mt-1">
-              Net Sales ÷ {metrics.adCreditApplied ? 'Net Ad Spend' : 'Total Ad Spend'} ={' '}
+              {(metrics.returnFees ?? 0) > 0 ? 'Net Sales + Return Fees' : 'Net Sales'} ÷ {metrics.adCreditApplied ? 'Net Ad Spend' : 'Total Ad Spend'} ={' '}
               <span className="font-semibold text-gray-600">
                 {formatCurrency(metrics.netSales ?? metrics.totalRevenue)} ÷ {formatCurrency(metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend)}
               </span>
             </p>
             <p className="text-[11px] text-gray-400 mt-0.5">
               Net sales = after discounts &amp; returns, excl. taxes/shipping (total sales {formatCurrency(metrics.totalRevenue)})
+              {(metrics.returnFees ?? 0) > 0 && (
+                <> · includes {formatCurrency(metrics.returnFees!)} in return fees the store keeps</>
+              )}
             </p>
             {(metrics.adCreditApplied ?? 0) > 0 && (
               <p className="text-[11px] text-emerald-600 mt-0.5">

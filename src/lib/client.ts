@@ -95,6 +95,15 @@ export interface ClientProfile {
     /** Case-insensitive regex source matched against QuickBooks account_name ('' = keep all). */
     qbAccountMatch: string;
   };
+  revenue: {
+    /**
+     * Shopify's net sales subtracts the FULL refund on a return. A store that
+     * charges a return fee keeps that fee, so it is real revenue: when true,
+     * ShopifyQL `return_fees` is added back into net sales for MER/goals.
+     * Only affects the ShopifyQL path (BigQuery order rows carry no fee data).
+     */
+    includeReturnFees: boolean;
+  };
   windsor: {
     /**
      * The agency's Windsor workspace holds EVERY client's connectors, so every
@@ -164,6 +173,7 @@ const ROCKNOT: ClientProfile = {
     metaAccountIdDefault: '165092079662754',
   },
   finance: { qbAccountMatch: 'rocknot' },
+  revenue: { includeReturnFees: false },
   windsor: {
     accounts: {
       // Ids as they appear in Rocknot's Windsor → BigQuery tasks (select_accounts=).
@@ -222,6 +232,7 @@ const KAILEEP: ClientProfile = {
     metaAccountIdDefault: '449159425278819',
   },
   finance: { qbAccountMatch: 'kailee' },
+  revenue: { includeReturnFees: true }, // Kailee P charges a return fee and keeps it
   windsor: {
     accounts: {
       facebook: '449159425278819',
@@ -362,6 +373,11 @@ export function windsorParams(source: string, params: Record<string, string>, pr
 }
 
 /** Case-insensitive QuickBooks entity matcher (null = keep every account). */
+/** Whether Shopify return fees count toward net sales for MER (see ClientProfile.revenue). */
+export function includeReturnFees(profile: ClientProfile = getClient()): boolean {
+  return profile.revenue.includeReturnFees;
+}
+
 export function qbAccountRegex(profile: ClientProfile = getClient()): RegExp | null {
   return profile.finance.qbAccountMatch ? new RegExp(profile.finance.qbAccountMatch, 'i') : null;
 }

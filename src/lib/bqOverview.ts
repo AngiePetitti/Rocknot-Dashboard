@@ -1,12 +1,14 @@
 import { runQuery, getDataset, dedupedOrdersCte, tableExists } from '@/src/lib/bigquery';
 import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
-import { shopifyDomain, metaAccountSql, hasPlatform } from '@/src/lib/client';
+import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees } from '@/src/lib/client';
 
 export interface OverviewResult {
   adsError?: string;
   metrics: {
     totalRevenue: number;
     netSales?: number;
+    /** Return fees folded into netSales (only when the profile's includeReturnFees is on). */
+    returnFees?: number;
     totalOrders: number;
     totalAdSpend: number;
     aov: number;
@@ -58,10 +60,13 @@ interface CustomerRow {
 // figures exactly: returns/refunds are attributed to the original order date by
 // Shopify and are not reconstructable from Windsor's BigQuery order rows (which
 // record refund adjustments on separate rows dated to the refund day).
-interface ShopifyDay {
+export interface ShopifyDay {
   date: string;
   totalSales: number;
+  /** Shopify's net sales, PLUS return fees when the client profile keeps them (see returnFees). */
   netSales: number;
+  /** Return fees included in netSales; 0 unless the profile's includeReturnFees is on. */
+  returnFees: number;
   orders: number;
 }
 
@@ -77,16 +82,21 @@ export async function fetchShopifyDaily(from: string, to: string): Promise<Shopi
   // backoff instead of letting one THROTTLED response zero out revenue.
   // Two attempts max with a short pause — deep retry stacks made the live
   // view hang for a minute when Shopify was down.
+  const withFees = includeReturnFees();
   try {
-    return await fetchShopifyDailyOnce(from, to);
-  } catch {
-    await new Promise(r => setTimeout(r, 800));
-    return await fetchShopifyDailyOnce(from, to);
+    return await fetchShopifyDailyOnce(from, to, withFees);
+  } catch (e) {
+    // If Shopify rejects the return_fees column (parse error), drop it rather
+    // than lose revenue entirely; otherwise a plain retry after a pause.
+    const parseErr = withFees && /return_fees/i.test(String(e instanceof Error ? e.message : e));
+    if (!parseErr) await new Promise(r => setTimeout(r, 800));
+    return await fetchShopifyDailyOnce(from, to, withFees && !parseErr);
   }
 }
 
-async function fetchShopifyDailyOnce(from: string, to: string): Promise<ShopifyDay[]> {
-  const ql = `FROM sales SHOW orders, net_sales, total_sales TIMESERIES day SINCE ${from} UNTIL ${to}`;
+async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean): Promise<ShopifyDay[]> {
+  const fields = withFees ? 'orders, net_sales, return_fees, total_sales' : 'orders, net_sales, total_sales';
+  const ql = `FROM sales SHOW ${fields} TIMESERIES day SINCE ${from} UNTIL ${to}`;
   const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
@@ -117,12 +127,17 @@ async function fetchShopifyDailyOnce(from: string, to: string): Promise<ShopifyD
     }
     return r[name] ?? '';
   };
-  return rows.map(r => ({
-    date: (cell(r, 'day') || '').split('T')[0],
-    orders: Math.round(parseFloat(cell(r, 'orders') || '0')),
-    netSales: parseFloat(cell(r, 'net_sales') || '0'),
-    totalSales: parseFloat(cell(r, 'total_sales') || '0'),
-  }));
+  return rows.map(r => {
+    const returnFees = withFees ? Math.abs(parseFloat(cell(r, 'return_fees') || '0')) || 0 : 0;
+    return {
+      date: (cell(r, 'day') || '').split('T')[0],
+      orders: Math.round(parseFloat(cell(r, 'orders') || '0')),
+      // The fee the store keeps on a returned order is revenue it earned.
+      netSales: (parseFloat(cell(r, 'net_sales') || '0') || 0) + returnFees,
+      returnFees,
+      totalSales: parseFloat(cell(r, 'total_sales') || '0'),
+    };
+  });
 }
 
 // Website conversion rate from ShopifyQL sessions — the same number Shopify's
@@ -408,6 +423,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
         orders: Number(r.orders || 0),
         totalSales: Number(r.total_sales || 0),
         netSales: Number(r.net_sales || 0),
+        returnFees: 0, // Windsor's order rows carry no return-fee data
       })))
       .catch(() => null),
     runQuery<AdsRow>(adsSql, params)
@@ -508,7 +524,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const shopifyByDate: Record<string, ShopifyDay> = {};
   for (const s of shopifyDays) shopifyByDate[s.date] = s;
 
-  let totalRevenue = 0, totalNetSales = 0, totalOrders = 0;
+  let totalRevenue = 0, totalNetSales = 0, totalReturnFees = 0, totalOrders = 0;
   let metaSpend = 0, googleSpend = 0, tiktokSpend = 0, snapchatSpend = 0, pinterestSpend = 0;
   let metaRevenue = 0, googleRevenue = 0, tiktokRevenue = 0, snapchatRevenue = 0, pinterestRevenue = 0;
 
@@ -529,6 +545,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
 
     totalRevenue += revenue;
     totalNetSales += s ? s.netSales : 0;
+    totalReturnFees += s ? s.returnFees : 0;
     totalOrders += orders;
     metaSpend += Number(a?.meta_spend || 0);
     googleSpend += Number(a?.google_spend || 0);
@@ -588,7 +605,9 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       totalOrders,
       totalAdSpend: Math.round(totalAdSpend * 100) / 100,
       netSales: Math.round(totalNetSales),
-      aov: totalOrders > 0 ? Math.round((totalNetSales / totalOrders) * 100) / 100 : 0,
+      returnFees: Math.round(totalReturnFees),
+      // AOV stays on Shopify's own net sales (fees excluded) so it matches Shopify's report.
+      aov: totalOrders > 0 ? Math.round(((totalNetSales - totalReturnFees) / totalOrders) * 100) / 100 : 0,
       // True MER: NET sales (after discounts/returns, excl. taxes+shipping)
       // over net ad spend — total sales flattered the ratio by ~6%.
       mer: netAdSpend > 0 ? Math.round((totalNetSales / netAdSpend) * 100) / 100 : 0,

@@ -112,6 +112,7 @@ interface WindsorRow {
 interface AggregatedMetrics {
   totalRevenue: number;
   netSales?: number;
+  returnFees?: number;
   totalOrders: number;
   totalAdSpend: number;
   aov: number;
@@ -635,15 +636,17 @@ export async function GET(request: NextRequest) {
       if (shopifyLive.length > 0) {
         const liveRevenue = shopifyLive.reduce((s, d) => s + d.totalSales, 0);
         const liveOrders = shopifyLive.reduce((s, d) => s + d.orders, 0);
-        const liveNetSales = shopifyLive.reduce((s, d) => s + d.netSales, 0);
+        const liveNetSales = shopifyLive.reduce((s, d) => s + d.netSales, 0); // incl. return fees when the profile keeps them
+        const liveReturnFees = shopifyLive.reduce((s, d) => s + d.returnFees, 0);
         if (liveRevenue > 0 || liveOrders > 0) {
           current.metrics.totalRevenue = Math.round(liveRevenue);
           current.metrics.netSales = Math.round(liveNetSales || liveRevenue);
+          current.metrics.returnFees = Math.round(liveReturnFees);
           current.metrics.totalOrders = liveOrders;
           // Live ShopifyQL revenue IS Shopify revenue — without this the UI kept
           // showing "Shopify hasn't synced" next to real live numbers.
           current.revenueSource = 'shopify';
-          current.metrics.aov = liveOrders > 0 ? Math.round((liveNetSales / liveOrders) * 100) / 100 : 0;
+          current.metrics.aov = liveOrders > 0 ? Math.round(((liveNetSales - liveReturnFees) / liveOrders) * 100) / 100 : 0;
           current.metrics.mer = current.metrics.totalAdSpend > 0
             ? Math.round(((liveNetSales || liveRevenue) / current.metrics.totalAdSpend) * 100) / 100 : 0;
           if (current.revenueData.length > 0) {
