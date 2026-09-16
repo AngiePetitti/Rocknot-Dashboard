@@ -19,6 +19,7 @@ interface CreativePerformance {
   thumbnailUrl: string | null;
   videoUrl: string | null;
   previewUrl?: string | null;
+  catalog?: boolean;
   adUrl: string | null;
   campaign: string;
   adset: string;
@@ -656,13 +657,32 @@ export default function CreativesContent() {
                       if (fallback) fallback.style.display = 'flex';
                     }}
                   />
+                ) : creative.previewUrl ? (
+                  // Catalog / dynamic ads have no still image of their own —
+                  // show the top of Meta's live ad preview instead. Clicks
+                  // pass through to the card (pointer-events-none).
+                  <iframe
+                    src={creative.previewUrl}
+                    className="w-full border-0 pointer-events-none"
+                    style={{ height: '300%' }}
+                    loading="lazy"
+                    scrolling="no"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    title={creative.name}
+                  />
                 ) : null}
                 <div
                   className="w-full h-full items-center justify-center text-gray-300 text-3xl"
-                  style={{ display: creative.thumbnailUrl ? 'none' : 'flex' }}
+                  style={{ display: creative.thumbnailUrl || creative.previewUrl ? 'none' : 'flex' }}
                 >
                   🎨
                 </div>
+                {creative.catalog && (
+                  <span className="absolute bottom-2 left-2 bg-white/90 text-gray-600 rounded-lg px-2 py-0.5 text-[10px] font-semibold shadow-sm">
+                    Catalog
+                  </span>
+                )}
                 {/* Platform badge overlay */}
                 <div className="absolute top-2 left-2">
                   <PlatformBadge platform={creative.platform} />

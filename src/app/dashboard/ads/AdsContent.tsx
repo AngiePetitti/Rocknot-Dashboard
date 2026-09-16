@@ -299,14 +299,15 @@ export default function AdsContent() {
           )}
 
           {/* Platform cards */}
-          <div className={`grid gap-4 mb-6 ${platforms.length === 1 ? 'grid-cols-1 max-w-sm' : platforms.length === 2 ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'}`}>
+          {/* One card per row on phones: a six-metric grid needs the full width. */}
+          <div className={`grid gap-4 mb-6 ${platforms.length === 1 ? 'grid-cols-1 max-w-sm' : platforms.length === 2 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'}`}>
             {platforms.map(p => (
               <Card key={p.platform} accentColor={p.color}>
                 <div className="flex items-center gap-2 mb-3">
                   <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
                   <span className="font-bold text-gray-800 text-sm">{p.platform}</span>
                 </div>
-                <div className="grid grid-cols-3 gap-3 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                   <div>
                     <p className="text-gray-400 uppercase font-semibold mb-0.5">Spend</p>
                     <p className="font-bold text-gray-800">{formatCurrency(p.spend)}</p>

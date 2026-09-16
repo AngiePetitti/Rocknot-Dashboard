@@ -55,7 +55,7 @@ export default function ROASChart({ data, goalLine = 3.5 }: ROASChartProps) {
           axisLine={false}
           tickLine={false}
           tickFormatter={(v) => v.toFixed(1) + 'x'}
-          domain={[0, 6]}
+          domain={[0, (dataMax: number) => Math.max(dataMax, goalLine + 1)]}
           width={38}
         />
         <Tooltip content={<CustomTooltip />} cursor={{ fill: '#f8fafc' }} />
@@ -64,7 +64,7 @@ export default function ROASChart({ data, goalLine = 3.5 }: ROASChartProps) {
           stroke="#ef4444"
           strokeDasharray="4 4"
           strokeWidth={1.5}
-          label={{ value: 'Goal 3.5x', fill: '#ef4444', fontSize: 10, position: 'right' }}
+          label={{ value: `Goal ${goalLine}x`, fill: '#ef4444', fontSize: 10, position: 'insideTopRight' }}
         />
         <Bar dataKey="roas" radius={[6, 6, 0, 0]}>
           {chartData.map((entry, index) => (

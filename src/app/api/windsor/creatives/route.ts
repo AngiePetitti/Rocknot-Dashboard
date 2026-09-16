@@ -68,6 +68,7 @@ export interface CreativePerformance {
   thumbnailUrl: string | null;
   videoUrl: string | null;
   previewUrl?: string | null; // Meta ad-preview iframe (plays the real creative)
+  catalog?: boolean; // Meta catalog / dynamic product ad (image comes from the product feed)
   adUrl: string | null;
   campaign: string;
   adset: string;
@@ -337,6 +338,7 @@ export async function GET(request: NextRequest) {
       c.thumbnailUrl = metaGraphMedia?.[c.id]?.thumbnailUrl || metaThumbs.urls[c.id] || null;
       c.videoUrl = metaGraphMedia?.[c.id]?.videoUrl || null;
       c.previewUrl = metaGraphMedia?.[c.id]?.previewUrl || null;
+      if (metaGraphMedia?.[c.id]?.catalog) c.catalog = true;
     }
     for (const c of tiktokCreatives) {
       c.thumbnailUrl = tiktokThumbs.urls[c.id] || null;
