@@ -226,9 +226,9 @@ const KAILEEP: ClientProfile = {
     accounts: {
       facebook: '449159425278819',
       shopify: 'kailee-p.myshopify.com',
+      google_ads: '862-657-0919', // Kailee P. Inc. (Windsor task BQ - Google Ads - Kailee P)
       // Not connected yet: REST calls for these are skipped rather than
       // returning another client's data from the shared workspace.
-      google_ads: null,
       pinterest: null,
       tiktok: null,
       snapchat: null,
