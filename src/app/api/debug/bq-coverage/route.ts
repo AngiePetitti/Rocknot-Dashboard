@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { runQuery, getDataset, isBigQueryConfigured } from '@/src/lib/bigquery';
+import { runQuery, getDataset, isBigQueryConfigured, getBigQuery } from '@/src/lib/bigquery';
 import { clientPlatforms } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
@@ -96,31 +96,52 @@ export async function GET() {
   // Expiry settings: a partition/table expiration on the dataset or a table
   // silently deletes rows older than N days — the one thing that makes a
   // successful two-year backfill leave only the last 60 days behind.
-  let expiry: Record<string, unknown> = {};
+  // Each lookup is independent so one permission gap doesn't hide the rest.
+  const expiry: Record<string, unknown> = {};
   try {
-    const dsOpts = await runQuery<{ option_name: string; option_value: string }>(
-      `SELECT option_name, option_value FROM \`${ds}\`.INFORMATION_SCHEMA.SCHEMATA_OPTIONS WHERE schema_name = @ds`,
-      { ds }
-    );
+    // Dataset metadata via the client library (needs bigquery.datasets.get,
+    // which INFORMATION_SCHEMA.SCHEMATA_OPTIONS does not cover).
+    const [meta] = await getBigQuery().dataset(ds).getMetadata();
+    expiry.dataset = {
+      defaultTableExpirationMs: meta.defaultTableExpirationMs ?? null,
+      defaultPartitionExpirationMs: meta.defaultPartitionExpirationMs ?? null,
+      location: meta.location ?? null,
+      created: meta.creationTime ? new Date(Number(meta.creationTime)).toISOString() : null,
+    };
+  } catch (e: unknown) {
+    expiry.dataset = { error: String(e instanceof Error ? e.message : e) };
+  }
+  try {
+    const tableMeta = await Promise.all(tables.map(async ({ table }) => {
+      try {
+        const [m] = await getBigQuery().dataset(ds).table(table).getMetadata();
+        return [table, {
+          expirationTime: m.expirationTime ? new Date(Number(m.expirationTime)).toISOString() : null,
+          timePartitioning: m.timePartitioning ?? null,
+          rangePartitioning: m.rangePartitioning ?? null,
+          numRows: m.numRows ?? null,
+          created: m.creationTime ? new Date(Number(m.creationTime)).toISOString() : null,
+        }] as const;
+      } catch (e: unknown) {
+        return [table, { error: String(e instanceof Error ? e.message : e) }] as const;
+      }
+    }));
+    expiry.tables = Object.fromEntries(tableMeta);
+  } catch (e: unknown) {
+    expiry.tables = { error: String(e instanceof Error ? e.message : e) };
+  }
+  try {
     const tblOpts = await runQuery<{ table_name: string; option_name: string; option_value: string }>(
       `SELECT table_name, option_name, option_value FROM \`${ds}\`.INFORMATION_SCHEMA.TABLE_OPTIONS
        WHERE option_name IN ('partition_expiration_days', 'expiration_timestamp', 'require_partition_filter')`,
       {}
     );
-    const partCols = await runQuery<{ table_name: string; column_name: string }>(
-      `SELECT table_name, column_name FROM \`${ds}\`.INFORMATION_SCHEMA.COLUMNS WHERE is_partitioning_column = 'YES'`,
-      {}
-    );
-    expiry = {
-      dataset: Object.fromEntries(dsOpts.map(o => [o.option_name, o.option_value])),
-      tables: tblOpts.reduce<Record<string, Record<string, string>>>((acc, o) => {
-        (acc[o.table_name] = acc[o.table_name] || {})[o.option_name] = o.option_value;
-        return acc;
-      }, {}),
-      partitionedBy: Object.fromEntries(partCols.map(c => [c.table_name, c.column_name])),
-    };
+    expiry.tableOptions = tblOpts.reduce<Record<string, Record<string, string>>>((acc, o) => {
+      (acc[o.table_name] = acc[o.table_name] || {})[o.option_name] = o.option_value;
+      return acc;
+    }, {});
   } catch (e: unknown) {
-    expiry = { error: String(e instanceof Error ? e.message : e) };
+    expiry.tableOptions = { error: String(e instanceof Error ? e.message : e) };
   }
   return NextResponse.json({ dataset: ds, tables: Object.fromEntries(results), allTables, expiry });
 }
