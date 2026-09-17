@@ -161,9 +161,11 @@ export default function OverviewContent() {
           const overdue = template.filter(t => !checks[t.label]?.done && days <= t.daysBefore).length;
           return { id: e.id, title: e.title, date: e.date, days, done, total: template.length, overdue };
         })
-        .filter(a => a.days >= -1 && a.days <= 7 && a.overdue > 0)
+        // Every launch/sale within the week shows — overdue items just make
+        // it louder. A quiet on-schedule launch still deserves a heads-up.
+        .filter(a => a.days >= -1 && a.days <= 7)
         .sort((a, b) => a.days - b.days)
-        .slice(0, 3);
+        .slice(0, 4);
       setLaunchAlerts(alerts);
     }).catch(() => {});
   }, []);
@@ -418,23 +420,32 @@ export default function OverviewContent() {
         <TimeframeSelector />
       </Header>
 
-      {/* ── Launch readiness alarms ── */}
-      {launchAlerts.map(a => (
+      {/* ── Launch readiness alarms — every launch/sale this week; red when
+          checklist items are past their lead time, green when all done ── */}
+      {launchAlerts.map(a => {
+        const allDone = a.done === a.total;
+        const tone = a.overdue > 0
+          ? { border: 'border-red-300', bg: 'bg-red-50', dot: 'bg-red-500', text: 'text-red-700', sub: 'text-red-600' }
+          : allDone
+          ? { border: 'border-green-300', bg: 'bg-green-50', dot: 'bg-green-500', text: 'text-green-700', sub: 'text-green-600' }
+          : { border: 'border-pink-300', bg: 'bg-pink-50', dot: 'bg-pink-500', text: 'text-pink-700', sub: 'text-pink-600' };
+        return (
         <Link
           key={a.id}
           href="/dashboard/calendar"
-          className="block rounded-2xl border-2 border-pink-300 bg-pink-50 px-4 py-3 mb-4 shadow-sm transition-transform active:scale-[0.99]"
+          className={`block rounded-2xl border-2 ${tone.border} ${tone.bg} px-4 py-3 mb-4 shadow-sm transition-transform active:scale-[0.99]`}
         >
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full animate-pulse bg-pink-500" />
-            <p className="text-sm font-bold text-pink-700">
-              🚀 {a.title} {a.days === 0 ? 'launches TODAY' : a.days < 0 ? 'launched yesterday' : `launches in ${a.days}d`} —{' '}
-              {a.overdue} checklist item{a.overdue > 1 ? 's' : ''} due now
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${tone.dot}`} />
+            <p className={`text-sm font-bold ${tone.text}`}>
+              🚀 {a.title} {a.days === 0 ? 'launches TODAY' : a.days < 0 ? 'launched yesterday' : a.days === 1 ? 'launches TOMORROW' : `launches in ${a.days}d`}
+              {a.overdue > 0 ? ` — ${a.overdue} checklist item${a.overdue > 1 ? 's' : ''} due now` : allDone ? ' — checklist complete ✓' : ' — on schedule'}
             </p>
-            <span className="ml-auto text-xs font-semibold text-pink-600">☑ {a.done}/{a.total} · Open checklist →</span>
+            <span className={`ml-auto text-xs font-semibold ${tone.sub}`}>☑ {a.done}/{a.total} · Open checklist →</span>
           </div>
         </Link>
-      ))}
+        );
+      })}
 
       {/* ── Loud personal task reminder ── */}
       {myTasks.length > 0 && (
