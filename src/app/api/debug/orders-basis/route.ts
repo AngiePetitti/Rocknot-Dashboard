@@ -91,6 +91,37 @@ export async function GET(request: NextRequest) {
     out.sampleOrdersNetOverTotal = sample;
   } catch (e: unknown) { out.sampleOrdersNetOverTotal = { error: String(e instanceof Error ? e.message : e) }; }
 
+  // Candidate per-order net-sales formulas, scored against ShopifyQL below.
+  // Exact-duplicate rows (same order, date and values) are collapsed first.
+  try {
+    const cand = await runQuery<Record<string, unknown>>(
+      `WITH rows_d AS (
+         SELECT DISTINCT CAST(order_id AS STRING) AS order_id, DATE(date) AS d,
+                CAST(order_total_price AS FLOAT64) AS total_price,
+                CAST(order_net_sales AS FLOAT64) AS net_sales
+         FROM \`${ds}.shopify_orders\` WHERE order_id IS NOT NULL
+       ),
+       per_order AS (
+         SELECT order_id, MIN(d) AS order_date,
+                (ARRAY_AGG(net_sales ORDER BY d ASC LIMIT 1))[OFFSET(0)] AS first_net,
+                (ARRAY_AGG(total_price ORDER BY d ASC LIMIT 1))[OFFSET(0)] AS first_total,
+                SUM(net_sales) AS net_after_refunds,
+                SUM(total_price) AS total_after_refunds,
+                COUNT(*) AS distinct_rows
+         FROM rows_d GROUP BY order_id
+       )
+       SELECT COUNT(*) AS orders,
+              SUM(first_net) AS a_first_net,
+              SUM(net_after_refunds) AS b_net_after_refunds,
+              SUM(first_total) AS c_first_total,
+              SUM(total_after_refunds) AS d_total_after_refunds,
+              SUM(distinct_rows) AS distinct_rows
+       FROM per_order WHERE order_date BETWEEN @from AND @to`, params
+    );
+    const r = cand[0] || {};
+    out.candidates = Object.fromEntries(Object.entries(r).map(([k, v]) => [k, num(v)]));
+  } catch (e: unknown) { out.candidates = { error: String(e instanceof Error ? e.message : e) }; }
+
   try {
     const { fetchShopifyDaily } = await import('@/src/lib/bqOverview');
     const days = await fetchShopifyDaily(from, to);
