@@ -238,9 +238,10 @@ const KAILEEP: ClientProfile = {
       facebook: '449159425278819',
       shopify: 'kailee-p.myshopify.com',
       google_ads: '862-657-0919', // Kailee P. Inc. (Windsor task BQ - Google Ads - Kailee P)
+      // Two Pinterest ad accounts under one Pinterest business: Bridal + Kids.
+      pinterest: '549755884097,549768552210',
       // Not connected yet: REST calls for these are skipped rather than
       // returning another client's data from the shared workspace.
-      pinterest: null,
       tiktok: null,
       snapchat: null,
       quickbooks: null,
