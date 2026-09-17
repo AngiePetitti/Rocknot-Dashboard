@@ -16,6 +16,15 @@ new client a configuration task instead of a code change.
    - Dataset ID: `rocknot` / `kaileep` (one dataset per client — use the
      client's profile id from `src/lib/client.ts`)
    - Location: `US` (multi-region)
+   - **Enable table expiration: OFF.** If this box is ticked (the console
+     sometimes pre-fills 60 days), BigQuery gives every table Windsor
+     creates a 60-day partition expiry and silently deletes any row older
+     than that — a two-year backfill leaves exactly 60 days behind. This
+     bit Kailee P's dataset in Sep 2026. To check or undo it later, run:
+     `ALTER SCHEMA \`<project>.<dataset>\` SET OPTIONS (default_table_expiration_days = NULL, default_partition_expiration_days = NULL);`
+     and `ALTER TABLE \`<project>.<dataset>.<table>\` SET OPTIONS (partition_expiration_days = NULL);`
+     per existing table. `/api/debug/bq-coverage` shows the current
+     settings under `expiry`.
    - Leave everything else default → **Create dataset**
 
 ## 2. Service account for the dashboard (~10 min)
@@ -89,8 +98,10 @@ You can verify it switched: the live indicator data source will be
 1. Add (or reuse) a profile in `src/lib/client.ts` — `kaileep` is already
    there for Kailee P.
 2. Create a new dataset in the same project named after the profile id
+   (table expiration OFF — see step 1 above)
 3. Create the Windsor destination tasks for the connectors that client runs
-   → the new dataset
+   → the new dataset, then run each task's 2-year backfill and confirm
+   history landed via `/api/debug/bq-coverage`
 4. Deploy another Vercel instance of this repo (or a per-client subdomain)
    with `CLIENT=<profile id>` and `BQ_DATASET=<dataset>`
 
