@@ -140,34 +140,46 @@ export default function OverviewContent() {
   // ── Launch readiness: any launch/sale within 7 days with unchecked
   //    playbook items past their lead time gets a loud banner ──
   const [launchAlerts, setLaunchAlerts] = useState<{ id: string; title: string; date: string; days: number; done: number; total: number; overdue: number }[]>([]);
+  // Why there are no alerts, when there are none — silence was undebuggable.
+  const [launchAlertNote, setLaunchAlertNote] = useState<string | null>(null);
   useEffect(() => {
     Promise.all([
       fetch('/api/calendar', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
       fetch('/api/launch/checklist', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
     ]).then(([cal, play]) => {
-      const events = ((cal?.events || cal || []) as { id: string; title: string; date: string; type: string; description?: string }[])
-        // Placeholder-dated launches carry no real countdown — never alarm on them.
-        .filter(e => !/tbd|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || ''));
+      const allEvents = ((cal?.events || []) as { id: string; title: string; date: string; type: string; description?: string }[]);
+      const isTbd = (e: { description?: string }) => /tbd|tbc|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || '');
       const template = (play?.template || []) as { label: string; daysBefore: number }[];
       const byEvent = (play?.byEvent || {}) as Record<string, Record<string, { done: boolean }>>;
-      if (!Array.isArray(events) || !template.length) return;
+      if (!Array.isArray(allEvents) || !allEvents.length) {
+        setLaunchAlertNote(cal?.error ? `Launch alerts unavailable — calendar error: ${String(cal.error).slice(0, 120)}` : 'Launch alerts unavailable — calendar failed to load.');
+        return;
+      }
+      if (!template.length) {
+        setLaunchAlertNote('Launch alerts unavailable — playbook template failed to load.');
+        return;
+      }
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-      const alerts = events
+      const inWindow = allEvents
         .filter(e => (e.type === 'launch' || e.type === 'sale'))
-        .map(e => {
-          const days = Math.round((Date.parse(e.date) - Date.parse(today)) / 86400000);
+        .map(e => ({ e, days: Math.round((Date.parse(e.date) - Date.parse(today)) / 86400000) }))
+        .filter(x => x.days >= -1 && x.days <= 7);
+      const tbdCount = inWindow.filter(x => isTbd(x.e)).length;
+      const alerts = inWindow
+        .filter(x => !isTbd(x.e))
+        .map(({ e, days }) => {
           const checks = byEvent[e.id] || {};
           const done = template.filter(t => checks[t.label]?.done).length;
           const overdue = template.filter(t => !checks[t.label]?.done && days <= t.daysBefore).length;
           return { id: e.id, title: e.title, date: e.date, days, done, total: template.length, overdue };
         })
-        // Every launch/sale within the week shows — overdue items just make
-        // it louder. A quiet on-schedule launch still deserves a heads-up.
-        .filter(a => a.days >= -1 && a.days <= 7)
         .sort((a, b) => a.days - b.days)
         .slice(0, 4);
       setLaunchAlerts(alerts);
-    }).catch(() => {});
+      setLaunchAlertNote(alerts.length > 0 ? null
+        : tbdCount > 0 ? `${tbdCount} launch${tbdCount > 1 ? 'es' : ''} this week still marked "date TBD" — confirm the date on the calendar to start the checklist countdown.`
+        : 'No launches or sales with confirmed dates in the next 7 days.');
+    }).catch(e => setLaunchAlertNote(`Launch alerts unavailable — ${String(e).slice(0, 120)}`));
   }, []);
 
   const myOverdue = myTasks.filter(t => t.dueDate && t.dueDate < new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }));
@@ -419,6 +431,14 @@ export default function OverviewContent() {
       >
         <TimeframeSelector />
       </Header>
+
+      {/* Diagnostic line when no launch banners render — silence hid real
+          failures (and TBD-parked launches) from everyone. */}
+      {launchAlerts.length === 0 && launchAlertNote && (
+        <Link href="/dashboard/calendar" className="block rounded-xl border border-gray-200 bg-white px-4 py-2 mb-4 text-xs text-gray-500">
+          🚀 {launchAlertNote} <span className="text-violet-500 font-semibold">Open calendar →</span>
+        </Link>
+      )}
 
       {/* ── Launch readiness alarms — every launch/sale this week; red when
           checklist items are past their lead time, green when all done ── */}
