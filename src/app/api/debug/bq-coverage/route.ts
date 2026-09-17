@@ -77,5 +77,50 @@ export async function GET() {
       return [table, { error: String(e instanceof Error ? e.message : e) }] as const;
     }
   }));
-  return NextResponse.json({ dataset: ds, tables: Object.fromEntries(results) });
+  // Every table in the dataset with its row count — catches a backfill that
+  // Windsor wrote to a differently named table.
+  let allTables: Array<{ table: string; rows: number; lastModified: string | null }> | { error: string };
+  try {
+    const t = await runQuery<{ table_id: string; row_count: number | null; last_modified_time: number | null }>(
+      `SELECT table_id, row_count, last_modified_time FROM \`${ds}.__TABLES__\` ORDER BY table_id`,
+      {}
+    );
+    allTables = t.map(x => ({
+      table: x.table_id,
+      rows: Number(x.row_count || 0),
+      lastModified: x.last_modified_time ? new Date(Number(x.last_modified_time)).toISOString() : null,
+    }));
+  } catch (e: unknown) {
+    allTables = { error: String(e instanceof Error ? e.message : e) };
+  }
+  // Expiry settings: a partition/table expiration on the dataset or a table
+  // silently deletes rows older than N days — the one thing that makes a
+  // successful two-year backfill leave only the last 60 days behind.
+  let expiry: Record<string, unknown> = {};
+  try {
+    const dsOpts = await runQuery<{ option_name: string; option_value: string }>(
+      `SELECT option_name, option_value FROM \`${ds}\`.INFORMATION_SCHEMA.SCHEMATA_OPTIONS WHERE schema_name = @ds`,
+      { ds }
+    );
+    const tblOpts = await runQuery<{ table_name: string; option_name: string; option_value: string }>(
+      `SELECT table_name, option_name, option_value FROM \`${ds}\`.INFORMATION_SCHEMA.TABLE_OPTIONS
+       WHERE option_name IN ('partition_expiration_days', 'expiration_timestamp', 'require_partition_filter')`,
+      {}
+    );
+    const partCols = await runQuery<{ table_name: string; column_name: string }>(
+      `SELECT table_name, column_name FROM \`${ds}\`.INFORMATION_SCHEMA.COLUMNS WHERE is_partitioning_column = 'YES'`,
+      {}
+    );
+    expiry = {
+      dataset: Object.fromEntries(dsOpts.map(o => [o.option_name, o.option_value])),
+      tables: tblOpts.reduce<Record<string, Record<string, string>>>((acc, o) => {
+        (acc[o.table_name] = acc[o.table_name] || {})[o.option_name] = o.option_value;
+        return acc;
+      }, {}),
+      partitionedBy: Object.fromEntries(partCols.map(c => [c.table_name, c.column_name])),
+    };
+  } catch (e: unknown) {
+    expiry = { error: String(e instanceof Error ? e.message : e) };
+  }
+  return NextResponse.json({ dataset: ds, tables: Object.fromEntries(results), allTables, expiry });
 }
