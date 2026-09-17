@@ -41,8 +41,17 @@ export async function GET() {
       let accounts: Array<{ accountId: string; accountName: string; rows: number; spend: number }> | undefined;
       if (spend) {
         try {
+          // Windsor's facebook/google tables carry account_name only; the
+          // pinterest table has both. Use whichever columns exist.
+          const cols = await runQuery<{ column_name: string }>(
+            `SELECT column_name FROM \`${ds}\`.INFORMATION_SCHEMA.COLUMNS WHERE table_name = @t AND column_name IN ('account_id', 'account_name')`,
+            { t: table }
+          );
+          const have = new Set(cols.map(c => c.column_name));
+          const idExpr = have.has('account_id') ? 'CAST(account_id AS STRING)' : "''";
+          const nameExpr = have.has('account_name') ? 'CAST(account_name AS STRING)' : "''";
           const acc = await runQuery<{ account_id: string | null; account_name: string | null; row_count: number; spend: number | null }>(
-            `SELECT CAST(account_id AS STRING) AS account_id, account_name,
+            `SELECT ${idExpr} AS account_id, ${nameExpr} AS account_name,
                     COUNT(*) AS row_count, SUM(CAST(spend AS FLOAT64)) AS spend
              FROM \`${ds}.${table}\`
              GROUP BY account_id, account_name ORDER BY spend DESC LIMIT 20`,
