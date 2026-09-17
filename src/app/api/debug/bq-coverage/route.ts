@@ -77,5 +77,21 @@ export async function GET() {
       return [table, { error: String(e instanceof Error ? e.message : e) }] as const;
     }
   }));
-  return NextResponse.json({ dataset: ds, tables: Object.fromEntries(results) });
+  // Every table in the dataset with its row count — catches a backfill that
+  // Windsor wrote to a differently named table.
+  let allTables: Array<{ table: string; rows: number; lastModified: string | null }> | { error: string };
+  try {
+    const t = await runQuery<{ table_id: string; row_count: number | null; last_modified_time: number | null }>(
+      `SELECT table_id, row_count, last_modified_time FROM \`${ds}.__TABLES__\` ORDER BY table_id`,
+      {}
+    );
+    allTables = t.map(x => ({
+      table: x.table_id,
+      rows: Number(x.row_count || 0),
+      lastModified: x.last_modified_time ? new Date(Number(x.last_modified_time)).toISOString() : null,
+    }));
+  } catch (e: unknown) {
+    allTables = { error: String(e instanceof Error ? e.message : e) };
+  }
+  return NextResponse.json({ dataset: ds, tables: Object.fromEntries(results), allTables });
 }
