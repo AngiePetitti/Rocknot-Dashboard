@@ -1,6 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { TIMEFRAME_LABELS } from '@/src/lib/utils';
+import TimeframeSelector from '@/src/components/ui/TimeframeSelector';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import MetricCard from '@/src/components/ui/MetricCard';
@@ -14,9 +17,11 @@ interface FlowRow { id: string; name: string; status: string; recipients: number
 interface FlowsSummary { revenue: number; flows: number; recipients: number; avgOpenRate: number; avgClickRate: number; items: FlowRow[]; error?: string }
 interface RetentionResponse {
   source?: string; error?: string; statsError?: string;
+  range?: { from: string; to: string };
   overview?: { email: ChannelAgg; sms: ChannelAgg };
   flows?: FlowsSummary;
   recent?: Campaign[]; scheduled?: Campaign[];
+  prior?: { range: { from: string; to: string }; overview: { email: ChannelAgg; sms: ChannelAgg } | null; flowRevenue: number | null; flowRecipients: number | null; error?: string };
 }
 
 interface PlanCampaign {
@@ -34,6 +39,12 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 export default function RetentionContent() {
+  const searchParams = useSearchParams();
+  const tfRaw = searchParams.get('tf') || '30d';
+  const dateFrom = searchParams.get('date_from') || '';
+  const dateTo = searchParams.get('date_to') || '';
+  const compareOn = searchParams.get('compare') === 'true';
+  const rangeLabel = tfRaw === 'custom' && dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : (TIMEFRAME_LABELS[tfRaw] || 'Last 30 Days');
   const [data, setData] = useState<RetentionResponse | null>(null);
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -55,7 +66,14 @@ export default function RetentionContent() {
   }
 
   useEffect(() => {
-    fetch('/api/retention', { cache: 'no-store' }).then(r => r.json()).then(setData).catch(() => setData({ source: 'error', error: 'Failed to load' }));
+    setData(null);
+    const p = new URLSearchParams({ tf: tfRaw });
+    if (dateFrom) p.set('date_from', dateFrom);
+    if (dateTo) p.set('date_to', dateTo);
+    if (compareOn) p.set('compare', 'true');
+    fetch(`/api/retention?${p}`, { cache: 'no-store' }).then(r => r.json()).then(setData).catch(() => setData({ source: 'error', error: 'Failed to load' }));
+  }, [tfRaw, dateFrom, dateTo, compareOn]);
+  useEffect(() => {
     fetch('/api/retention/plan', { cache: 'no-store' }).then(r => r.json()).then(setPlan).catch(() => {});
   }, []);
 
@@ -136,6 +154,10 @@ Design: ${c.designBrief || '—'}`,
   return (
     <div>
       <Header title="Retention" subtitle="Email & SMS · Klaviyo performance + campaign calendar with ready-to-build briefs" />
+      <TimeframeSelector />
+      {!data && (
+        <p className="text-xs text-gray-400 mb-4">Loading Klaviyo for {rangeLabel}…</p>
+      )}
 
       {data?.source === 'error' && (
         <Card accentColor="#fca5a5" className="mb-4">
@@ -153,18 +175,25 @@ Design: ${c.designBrief || '—'}`,
       {ov && (() => {
         const fl = data?.flows;
         const flowRev = fl?.revenue ?? 0;
+        const pr = compareOn && data?.prior?.overview ? data.prior : null;
+        const priorFlow = pr?.flowRevenue ?? 0;
+        const priorTotal = pr ? (pr.overview!.email.revenue + pr.overview!.sms.revenue + priorFlow) : 0;
+        const cmp = (current: number, prior: number | null | undefined) =>
+          pr && prior !== null && prior !== undefined ? { current, prior } : undefined;
+        const priorNote = pr ? ` · vs ${pr.range.from} → ${pr.range.to}` : '';
         return (
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-            <MetricCard title="Campaign Revenue (30d)" value={$(ov.email.revenue)} subtitle={`${ov.email.campaigns} email campaigns · ${ov.email.recipients.toLocaleString()} sends`} accentColor="#c4b5fd" />
+            <MetricCard title="Campaign Revenue" value={$(ov.email.revenue)} subtitle={`${ov.email.campaigns} email campaigns · ${ov.email.recipients.toLocaleString()} sends · ${rangeLabel}`} accentColor="#c4b5fd" comparison={cmp(ov.email.revenue, pr?.overview?.email.revenue)} />
             <MetricCard
-              title="Flow Revenue (30d)"
+              title="Flow Revenue"
               value={fl && !fl.error ? $(flowRev) : '—'}
               subtitle={fl?.error ? `Flows unavailable: ${fl.error}` : fl ? `${fl.flows} flows · ${fl.recipients.toLocaleString()} sends · automated` : 'loading…'}
               accentColor="#fdba74"
+              comparison={fl && !fl.error ? cmp(flowRev, pr?.flowRevenue) : undefined}
             />
-            <MetricCard title="Email Engagement" value={`${ov.email.avgOpenRate}%`} subtitle={`campaign open rate · ${ov.email.avgClickRate}% click`} accentColor="#a5b4fc" />
-            <MetricCard title="SMS Revenue (30d)" value={$(ov.sms.revenue)} subtitle={`${ov.sms.campaigns} campaigns · ${ov.sms.recipients.toLocaleString()} sends`} accentColor="#86efac" />
-            <MetricCard title="Total Owned Revenue" value={$(ov.email.revenue + ov.sms.revenue + flowRev)} subtitle={`Campaigns + flows + SMS, last 30 days${flowRev > 0 ? ` · flows ${Math.round((flowRev / (ov.email.revenue + ov.sms.revenue + flowRev)) * 100)}%` : ''}`} accentColor="#f9a8d4" />
+            <MetricCard title="Email Engagement" value={`${ov.email.avgOpenRate}%`} subtitle={`campaign open rate · ${ov.email.avgClickRate}% click`} accentColor="#a5b4fc" comparison={cmp(ov.email.avgOpenRate, pr?.overview?.email.avgOpenRate)} />
+            <MetricCard title="SMS Revenue" value={$(ov.sms.revenue)} subtitle={`${ov.sms.campaigns} campaigns · ${ov.sms.recipients.toLocaleString()} sends`} accentColor="#86efac" comparison={cmp(ov.sms.revenue, pr?.overview?.sms.revenue)} />
+            <MetricCard title="Total Owned Revenue" value={$(ov.email.revenue + ov.sms.revenue + flowRev)} subtitle={`Campaigns + flows + SMS · ${rangeLabel}${flowRev > 0 ? ` · flows ${Math.round((flowRev / (ov.email.revenue + ov.sms.revenue + flowRev)) * 100)}%` : ''}${priorNote}`} accentColor="#f9a8d4" comparison={cmp(ov.email.revenue + ov.sms.revenue + flowRev, pr ? priorTotal : null)} />
           </div>
         );
       })()}
@@ -172,7 +201,7 @@ Design: ${c.designBrief || '—'}`,
       {/* ── Flows (automations) ── */}
       {(data?.flows?.items?.length ?? 0) > 0 && (
         <Card accentColor="#fdba74" className="mb-4">
-          <h2 className="text-sm font-bold text-gray-700 mb-1">⚙️ Flow Performance — Last 30 Days</h2>
+          <h2 className="text-sm font-bold text-gray-700 mb-1">⚙️ Flow Performance — {rangeLabel}</h2>
           <p className="text-xs text-gray-400 mb-3">Automated emails (welcome, abandoned cart, post-purchase …) · revenue attributed to each flow by Klaviyo</p>
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[560px]">
@@ -206,7 +235,7 @@ Design: ${c.designBrief || '—'}`,
       {/* ── Last 30 days of campaigns ── */}
       {(data?.recent?.length ?? 0) > 0 && (
         <Card accentColor="#c4b5fd" className="mb-4">
-          <h2 className="text-sm font-bold text-gray-700 mb-3">📬 Campaign Performance — Last 30 Days</h2>
+          <h2 className="text-sm font-bold text-gray-700 mb-3">📬 Campaign Performance — {rangeLabel}</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[640px]">
               <thead>
