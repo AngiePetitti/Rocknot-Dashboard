@@ -288,7 +288,7 @@ const KAILEEP: ClientProfile = {
   ],
   // October 2026 brief: blended MER 5–6 (5 = the pass line), Google ROAS ≥ 6x,
   // CPA target < $27–30.
-  goals: { defaultAnnualTarget: 0, targetMer: 5, targetRoas: 6, targetCac: 30 },
+  goals: { defaultAnnualTarget: 4_000_000, targetMer: 5, targetRoas: 6, targetCac: 30 }, // $4M 2026 net-sales target set Sep 2026
   inventory: { mode: 'standard' },
   creatives: {
     founderTrack: { label: 'Kailee', personName: 'Kailee' },
