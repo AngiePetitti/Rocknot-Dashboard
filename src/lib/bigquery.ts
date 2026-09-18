@@ -86,18 +86,24 @@ export async function tableExists(table: string): Promise<boolean> {
 
 // Windsor writes one row per order per sync-relevant date: the original
 // order row (full price, on the order date), plus an extra row on each
-// later date a refund/adjustment was made. Comparing candidate formulas
-// against Shopify's own Orders/Total Sales report (see /api/debug/orders)
-// showed the order's first-synced order_total_price — i.e. its value at
-// placement, before any later refund/adjustment rows — summed across
-// orders and attributed to the order's earliest (placement) date, is the
-// closest match (within ~0.6%). Excluding cancelled orders (via
-// shopify_order_status) made both the order count and revenue total
-// further from Shopify's reported figures, so cancelled orders are
-// included here too. Yields one row per order: order_id,
-// order_customer_id, order_date, total_price, net_sales (also each
-// order's first-synced value — AOV based on net_sales matches Shopify's
-// reported AOV much closer than total_price, within ~0.1%).
+// later date a refund/adjustment was made. Re-run backfills can also leave
+// exact-duplicate rows (same order, date and values), so rows are collapsed
+// with DISTINCT first. Yields one row per order, attributed to the order's
+// earliest (placement) date:
+//   total_price       — first-synced order_total_price (Shopify "total sales"
+//                       basis; matches Shopify's report within ~1%)
+//   net_sales         — order_net_sales SUMMED across all the order's rows,
+//                       so later refund rows subtract. This is Shopify's
+//                       "net sales" (after discounts AND returns): measured
+//                       via /api/debug/orders-basis against ShopifyQL, YTD
+//                       Rocknot +0.4%, Kailee P +1.9%. The old first-synced
+//                       value was +5.5% and +47% respectively — a high-return
+//                       store (Kailee P returns ~40% of gross) blew it up.
+//   net_sales_placed  — first-synced order_net_sales (net BEFORE returns).
+//                       This is exactly Shopify's AOV basis: Shopify AOV ×
+//                       orders matched it within 0.03% on Rocknot.
+// Excluding cancelled orders (via shopify_order_status) made both the order
+// count and revenue further from Shopify's figures, so they stay included.
 //
 // A handful of rows have a null order_id (no duplicate refund rows to
 // match against), so fall back to a per-row key for those rather than
@@ -105,12 +111,21 @@ export async function tableExists(table: string): Promise<boolean> {
 export function dedupedOrdersCte(ds: string): string {
   return `
     SELECT
-      COALESCE(CAST(order_id AS STRING), TO_JSON_STRING(STRUCT(date, order_total_price, order_net_sales, order_customer_id))) AS order_id,
-      ANY_VALUE(CAST(order_customer_id AS STRING)) AS order_customer_id,
-      MIN(DATE(date)) AS order_date,
-      (ARRAY_AGG(COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS total_price,
-      (ARRAY_AGG(COALESCE(CAST(order_net_sales AS FLOAT64), CAST(order_total_price AS FLOAT64), 0) ORDER BY date ASC LIMIT 1))[OFFSET(0)] AS net_sales
-    FROM \`${ds}.shopify_orders\`
+      order_id,
+      ANY_VALUE(cid) AS order_customer_id,
+      MIN(d) AS order_date,
+      (ARRAY_AGG(total ORDER BY d ASC LIMIT 1))[OFFSET(0)] AS total_price,
+      SUM(net) AS net_sales,
+      (ARRAY_AGG(net ORDER BY d ASC LIMIT 1))[OFFSET(0)] AS net_sales_placed
+    FROM (
+      SELECT DISTINCT
+        COALESCE(CAST(order_id AS STRING), TO_JSON_STRING(STRUCT(date, order_total_price, order_net_sales, order_customer_id))) AS order_id,
+        CAST(order_customer_id AS STRING) AS cid,
+        DATE(date) AS d,
+        COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0) AS total,
+        COALESCE(CAST(order_net_sales AS FLOAT64), CAST(order_total_price AS FLOAT64), 0) AS net
+      FROM \`${ds}.shopify_orders\`
+    )
     GROUP BY order_id
   `;
 }

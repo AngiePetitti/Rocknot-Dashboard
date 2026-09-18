@@ -67,6 +67,11 @@ export interface ShopifyDay {
   netSales: number;
   /** Return fees included in netSales; 0 unless the profile's includeReturnFees is on. */
   returnFees: number;
+  /**
+   * Shopify's AOV basis for the day: net sales BEFORE returns (gross −
+   * discounts), i.e. Shopify's average_order_value × orders. AOV = Σ aovBasis ÷ Σ orders.
+   */
+  aovBasis: number;
   orders: number;
 }
 
@@ -95,7 +100,9 @@ export async function fetchShopifyDaily(from: string, to: string): Promise<Shopi
 }
 
 async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean): Promise<ShopifyDay[]> {
-  const fields = withFees ? 'orders, net_sales, return_fees, total_sales' : 'orders, net_sales, total_sales';
+  const fields = withFees
+    ? 'orders, net_sales, return_fees, total_sales, average_order_value'
+    : 'orders, net_sales, total_sales, average_order_value';
   const ql = `FROM sales SHOW ${fields} TIMESERIES day SINCE ${from} UNTIL ${to}`;
   const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
@@ -129,12 +136,15 @@ async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean
   };
   return rows.map(r => {
     const returnFees = withFees ? Math.abs(parseFloat(cell(r, 'return_fees') || '0')) || 0 : 0;
+    const orders = Math.round(parseFloat(cell(r, 'orders') || '0'));
+    const aov = parseFloat(cell(r, 'average_order_value') || '0') || 0;
     return {
       date: (cell(r, 'day') || '').split('T')[0],
-      orders: Math.round(parseFloat(cell(r, 'orders') || '0')),
+      orders,
       // The fee the store keeps on a returned order is revenue it earned.
       netSales: (parseFloat(cell(r, 'net_sales') || '0') || 0) + returnFees,
       returnFees,
+      aovBasis: aov * orders,
       totalSales: parseFloat(cell(r, 'total_sales') || '0'),
     };
   });
@@ -406,7 +416,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     SELECT FORMAT_DATE('%Y-%m-%d', order_date) AS date,
            COUNT(*) AS orders,
            SUM(total_price) AS total_sales,
-           SUM(net_sales) AS net_sales
+           SUM(net_sales) AS net_sales,
+           SUM(net_sales_placed) AS net_sales_placed
     FROM order_revenue
     WHERE order_date BETWEEN @date_from AND @date_to
     GROUP BY date
@@ -417,13 +428,14 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const noPlatformRows = Promise.resolve([] as PlatformDayRow[]);
   const [shopifyDaysQl, shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows, pinterestRows] = await Promise.all([
     fetchShopifyDaily(dateFrom, dateTo).catch(() => null),
-    runQuery<{ date: string; orders: number; total_sales: number | null; net_sales: number | null }>(bqShopifySql, params)
+    runQuery<{ date: string; orders: number; total_sales: number | null; net_sales: number | null; net_sales_placed: number | null }>(bqShopifySql, params)
       .then(rows => rows.map(r => ({
         date: r.date,
         orders: Number(r.orders || 0),
         totalSales: Number(r.total_sales || 0),
         netSales: Number(r.net_sales || 0),
         returnFees: 0, // Windsor's order rows carry no return-fee data
+        aovBasis: Number(r.net_sales_placed || 0),
       })))
       .catch(() => null),
     runQuery<AdsRow>(adsSql, params)
@@ -524,7 +536,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const shopifyByDate: Record<string, ShopifyDay> = {};
   for (const s of shopifyDays) shopifyByDate[s.date] = s;
 
-  let totalRevenue = 0, totalNetSales = 0, totalReturnFees = 0, totalOrders = 0;
+  let totalRevenue = 0, totalNetSales = 0, totalReturnFees = 0, totalAovBasis = 0, totalOrders = 0;
   let metaSpend = 0, googleSpend = 0, tiktokSpend = 0, snapchatSpend = 0, pinterestSpend = 0;
   let metaRevenue = 0, googleRevenue = 0, tiktokRevenue = 0, snapchatRevenue = 0, pinterestRevenue = 0;
 
@@ -546,6 +558,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     totalRevenue += revenue;
     totalNetSales += s ? s.netSales : 0;
     totalReturnFees += s ? s.returnFees : 0;
+    totalAovBasis += s ? s.aovBasis : 0;
     totalOrders += orders;
     metaSpend += Number(a?.meta_spend || 0);
     googleSpend += Number(a?.google_spend || 0);
@@ -606,8 +619,11 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       totalAdSpend: Math.round(totalAdSpend * 100) / 100,
       netSales: Math.round(totalNetSales),
       returnFees: Math.round(totalReturnFees),
-      // AOV stays on Shopify's own net sales (fees excluded) so it matches Shopify's report.
-      aov: totalOrders > 0 ? Math.round(((totalNetSales - totalReturnFees) / totalOrders) * 100) / 100 : 0,
+      // AOV on Shopify's own basis (net before returns ÷ orders) so it matches
+      // Shopify's reported average order value; falls back to net ÷ orders.
+      aov: totalOrders > 0
+        ? Math.round(((totalAovBasis > 0 ? totalAovBasis : totalNetSales - totalReturnFees) / totalOrders) * 100) / 100
+        : 0,
       // True MER: NET sales (after discounts/returns, excl. taxes+shipping)
       // over net ad spend — total sales flattered the ratio by ~6%.
       mer: netAdSpend > 0 ? Math.round((totalNetSales / netAdSpend) * 100) / 100 : 0,
