@@ -43,6 +43,21 @@ export const PLATFORMS: Record<PlatformKey, PlatformDef> = {
 /** Windsor REST connector names the dashboard queries directly. */
 export type WindsorSource = 'facebook' | 'google_ads' | 'tiktok' | 'snapchat' | 'pinterest' | 'shopify' | 'quickbooks';
 
+export interface ProductLine {
+  key: string;
+  label: string;
+  /** Case-insensitive regex source matched against Shopify product_type ('' on the default line). */
+  productMatch: string;
+  /** Case-insensitive regex source matched against ad campaign names ('' on the default line). */
+  campaignMatch: string;
+  /** Cost-per-order target (ad spend ÷ orders), flagged red when exceeded. */
+  targetCpa: number;
+  /** Expected share of revenue (0–1), used to split a month goal across lines. */
+  revenueShare: number;
+  /** Catches everything the other lines don't match. */
+  isDefault?: boolean;
+}
+
 export interface ClientProfile {
   id: ClientId;
   /** Brand name as written in prose: "Kailee P". */
@@ -119,6 +134,13 @@ export interface ClientProfile {
      */
     accounts: Record<WindsorSource, string | null>;
   };
+  /**
+   * Product lines reported separately on the Overview (e.g. women's vs kids):
+   * revenue/orders split by Shopify product_type, ad spend by campaign name,
+   * each with its own cost-per-order target. Omit for a single-line brand.
+   * Exactly one line should be the default (catches everything unmatched).
+   */
+  lines?: ProductLine[];
   goals: {
     /** Starting annual net-sales target shown until an admin saves one (0 = ask). */
     defaultAnnualTarget: number;
@@ -257,6 +279,13 @@ const KAILEEP: ClientProfile = {
   // MER/ROAS bars start from the NP Digital audit's blended Meta ROAS (~15x
   // reported) discounted for the Google tag inflation it found; adjust once
   // the real plan lands.
+  // Two product lines with their own cost-per-order targets (October 2026
+  // brief: women's $30, kids $15; kids ≈ 20% of revenue). Shopify types the
+  // products "Women Shoes" / "Kids Shoes"; NP Digital labels kids campaigns.
+  lines: [
+    { key: 'women', label: "Women's", productMatch: '', campaignMatch: '', targetCpa: 30, revenueShare: 0.8, isDefault: true },
+    { key: 'kids', label: 'Kids', productMatch: 'kid|flower girl|junior', campaignMatch: 'kid|flower girl|junior', targetCpa: 15, revenueShare: 0.2 },
+  ],
   // October 2026 brief: blended MER 5–6 (5 = the pass line), Google ROAS ≥ 6x,
   // CPA target < $27–30.
   goals: { defaultAnnualTarget: 0, targetMer: 5, targetRoas: 6, targetCac: 30 },
@@ -385,6 +414,21 @@ export function windsorParams(source: string, params: Record<string, string>, pr
 /** Whether Shopify return fees count toward net sales for MER (see ClientProfile.revenue). */
 export function includeReturnFees(profile: ClientProfile = getClient()): boolean {
   return profile.revenue.includeReturnFees;
+}
+
+/** Product lines for this client ([] when the brand reports as one line). */
+export function productLines(profile: ClientProfile = getClient()): ProductLine[] {
+  return profile.lines ?? [];
+}
+
+/** Which line a Shopify product_type (or title) belongs to. */
+export function lineForProduct(productType: string, lines: ProductLine[] = productLines()): ProductLine | null {
+  const t = (productType || '').toLowerCase();
+  for (const l of lines) {
+    if (l.isDefault || !l.productMatch) continue;
+    if (new RegExp(l.productMatch, 'i').test(t)) return l;
+  }
+  return lines.find(l => l.isDefault) ?? null;
 }
 
 export function qbAccountRegex(profile: ClientProfile = getClient()): RegExp | null {

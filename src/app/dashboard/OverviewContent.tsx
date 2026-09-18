@@ -32,6 +32,12 @@ const EMPTY_METRICS: LiveMetrics = {
   returns: 0,
 };
 
+interface LineRow {
+  key: string; label: string; netSales: number; totalSales: number; orders: number; shareOfNet: number;
+  spend: number; spendByPlatform: Record<string, number>; mer: number | null; cpa: number | null;
+  targetCpa: number; revenueShare: number;
+}
+
 interface LiveMetrics {
   totalRevenue: number;
   netSales?: number;
@@ -100,6 +106,8 @@ export default function OverviewContent() {
   const [invSnapshot, setInvSnapshot] = useState<any | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [returnsSnapshot, setReturnsSnapshot] = useState<any | null>(null);
+  // Per-product-line split (women's vs kids …) — only for clients whose profile defines lines.
+  const [lineSplit, setLineSplit] = useState<{ lines: LineRow[]; shopifyError?: string; unmatchedProductTypes?: string[] } | null>(null);
   const [revenueSource, setRevenueSource] = useState<'shopify' | 'none' | null>(null);
   const [adsError, setAdsError] = useState<string | null>(null);
   const [shopifyLiveError, setShopifyLiveError] = useState<string | null>(null);
@@ -351,7 +359,11 @@ export default function OverviewContent() {
     if (dateTo) p.set('date_to', dateTo);
     fetch('/api/windsor/inventory').then(r => r.json()).then(setInvSnapshot).catch(() => setInvSnapshot(null));
     fetch(`/api/windsor/returns?${p}`).then(r => r.json()).then(setReturnsSnapshot).catch(() => setReturnsSnapshot(null));
-  }, [tfRaw, dateFrom, dateTo]);
+    if (client.lines && client.lines.length > 0) {
+      setLineSplit(null);
+      fetch(`/api/lines?${p}`).then(r => r.json()).then(setLineSplit).catch(() => setLineSplit(null));
+    }
+  }, [tfRaw, dateFrom, dateTo, client.lines]);
 
   // ── Month-end forecast (MTD pace, independent of the selected timeframe) ──
   const [mtdSnap, setMtdSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
@@ -921,6 +933,66 @@ export default function OverviewContent() {
             accentColor="#a7f3d0"
           />
         </div>
+      )}
+
+      {/* ── By product line (women's vs kids …) ── */}
+      {isLive && client.lines && client.lines.length > 0 && (
+        <Card accentColor="#f9a8d4" className="mb-6">
+          <div className="flex items-baseline justify-between mb-1">
+            <h2 className="text-sm font-bold text-gray-700">By Product Line</h2>
+            {lineSplit?.lines?.length ? (
+              <span className="text-[11px] text-gray-400">
+                Revenue & orders from Shopify by product type · ad spend by campaign name · cost per order vs each line's target
+              </span>
+            ) : null}
+          </div>
+          {!lineSplit ? (
+            <p className="text-xs text-gray-400">Loading…</p>
+          ) : lineSplit.shopifyError ? (
+            <p className="text-xs text-amber-600">Shopify didn't answer the product-type query ({lineSplit.shopifyError}). Try Refresh.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
+              {lineSplit.lines.map(l => {
+                const cpaOk = l.cpa === null || l.cpa <= l.targetCpa;
+                const merOk = l.mer === null || l.mer >= MER_GOAL;
+                const spendParts = Object.entries(l.spendByPlatform).filter(([, v]) => v > 0).map(([k, v]) => `${k} ${formatCurrency(v)}`).join(' · ');
+                return (
+                  <div key={l.key} className="rounded-xl border border-gray-100 p-4">
+                    <div className="flex items-baseline justify-between mb-3">
+                      <span className="font-bold text-gray-800">{l.label}</span>
+                      <span className="text-xs text-gray-400">{Math.round(l.shareOfNet * 100)}% of net sales · plan {Math.round(l.revenueShare * 100)}%</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div>
+                        <p className="text-gray-400 uppercase font-semibold mb-0.5">Net Sales</p>
+                        <p className="font-bold text-gray-800">{formatCurrency(l.netSales)}</p>
+                        <p className="text-gray-400">{l.orders.toLocaleString()} orders</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400 uppercase font-semibold mb-0.5">Ad Spend</p>
+                        <p className="font-bold text-gray-800">{formatCurrency(l.spend)}</p>
+                        <p className="text-gray-400 line-clamp-2">{spendParts || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400 uppercase font-semibold mb-0.5">MER</p>
+                        <p className="font-bold" style={{ color: merOk ? '#22c55e' : '#ef4444' }}>{l.mer !== null ? `${l.mer.toFixed(2)}x` : '—'}</p>
+                        <p className="text-gray-400">goal {MER_GOAL}x</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400 uppercase font-semibold mb-0.5">Cost / Order</p>
+                        <p className="font-bold" style={{ color: cpaOk ? '#22c55e' : '#ef4444' }}>{l.cpa !== null ? formatCurrency(l.cpa) : '—'}</p>
+                        <p className="text-gray-400">target {formatCurrency(l.targetCpa)}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {lineSplit?.unmatchedProductTypes?.length ? (
+            <p className="text-[11px] text-gray-400 mt-2">Product types not assigned to a line: {lineSplit.unmatchedProductTypes.join(', ')}</p>
+          ) : null}
+        </Card>
       )}
 
       {/* ── Month-end forecast (MTD pace) ── */}
