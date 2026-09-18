@@ -14,6 +14,7 @@ const navItems = [
   { href: '/dashboard/inventory', label: 'Inventory', icon: '🏭' },
   { href: '/dashboard/returns', label: 'Returns', icon: '↩️' },
   { href: '/dashboard/retention', label: 'Retention', icon: '💌' },
+  { href: '/dashboard/traffic', label: 'Traffic', icon: '🚦' },
   { href: '/dashboard/attribution', label: 'Attribution', icon: '🔗' },
   { href: '/dashboard/calendar', label: 'Marketing Calendar', icon: '📅' },
   { href: '/dashboard/goals', label: 'Goals', icon: '🏁' },
