@@ -638,6 +638,7 @@ export async function GET(request: NextRequest) {
         const liveOrders = shopifyLive.reduce((s, d) => s + d.orders, 0);
         const liveNetSales = shopifyLive.reduce((s, d) => s + d.netSales, 0); // incl. return fees when the profile keeps them
         const liveReturnFees = shopifyLive.reduce((s, d) => s + d.returnFees, 0);
+        const liveAovBasis = shopifyLive.reduce((s, d) => s + d.aovBasis, 0);
         if (liveRevenue > 0 || liveOrders > 0) {
           current.metrics.totalRevenue = Math.round(liveRevenue);
           current.metrics.netSales = Math.round(liveNetSales || liveRevenue);
@@ -646,7 +647,9 @@ export async function GET(request: NextRequest) {
           // Live ShopifyQL revenue IS Shopify revenue — without this the UI kept
           // showing "Shopify hasn't synced" next to real live numbers.
           current.revenueSource = 'shopify';
-          current.metrics.aov = liveOrders > 0 ? Math.round(((liveNetSales - liveReturnFees) / liveOrders) * 100) / 100 : 0;
+          // Shopify's AOV basis (net before returns) so it matches Shopify's report.
+          current.metrics.aov = liveOrders > 0
+            ? Math.round(((liveAovBasis > 0 ? liveAovBasis : liveNetSales - liveReturnFees) / liveOrders) * 100) / 100 : 0;
           current.metrics.mer = current.metrics.totalAdSpend > 0
             ? Math.round(((liveNetSales || liveRevenue) / current.metrics.totalAdSpend) * 100) / 100 : 0;
           if (current.revenueData.length > 0) {
