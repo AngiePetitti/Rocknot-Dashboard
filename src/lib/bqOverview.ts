@@ -1,6 +1,7 @@
 import { runQuery, getDataset, dedupedOrdersCte, tableExists } from '@/src/lib/bigquery';
 import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
 import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees } from '@/src/lib/client';
+import { fetchHumanConversion } from '@/src/lib/traffic';
 
 export interface OverviewResult {
   adsError?: string;
@@ -34,7 +35,12 @@ export interface OverviewResult {
     pctReturning: number;
     /** Where the new/returning split came from: Shopify's own report, or the BigQuery order history. */
     customerSource?: 'shopify' | 'bigquery';
+    /** Website conversion on likely-human sessions (suspected bots removed — same rule as the Traffic tab). */
     conversionRate: number;
+    /** Shopify's raw conversion rate, all sessions. */
+    conversionRateRaw?: number;
+    humanSessions?: number;
+    botSessions?: number;
   };
   revenueData: Array<{ date: string; revenue: number; netSales?: number; orders: number; adSpend: number; newCustomers: number; totalCustomers: number }>;
   revenueSource: 'shopify' | 'none';
@@ -450,7 +456,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       .catch((err: unknown) => { adsQueryError = String(err); return [] as AdsRow[]; }),
     runQuery<CustomerRow>(customerSql, params).catch(() => [] as CustomerRow[]),
     runQuery<{ date: string; new_customers: number | null; buyers: number | null }>(customerDailySql, params).catch(() => [] as Array<{ date: string; new_customers: number | null; buyers: number | null }>),
-    fetchShopifyConversion(dateFrom, dateTo).catch(() => null),
+    fetchHumanConversion(dateFrom, dateTo).catch(() => null),
     hasPlatform('snapchat')
       ? runQuery<PlatformDayRow>(snapSql, params).catch(() => [] as PlatformDayRow[])
       : noPlatformRows,
@@ -659,7 +665,10 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       pctNew: totalCust > 0 ? Math.round((newCustomers / totalCust) * 1000) / 10 : 0,
       pctReturning: totalCust > 0 ? Math.round((returningCustomers / totalCust) * 1000) / 10 : 0,
       customerSource: useShopifySplit ? 'shopify' : 'bigquery',
-      conversionRate: conversionRate ?? 0,
+      conversionRate: conversionRate?.rate ?? 0,
+      conversionRateRaw: conversionRate?.rawRate,
+      humanSessions: conversionRate?.humanSessions,
+      botSessions: conversionRate?.botSessions,
     },
     revenueData,
     revenueSource: totalRevenue > 0 ? 'shopify' : 'none',

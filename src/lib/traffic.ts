@@ -132,6 +132,8 @@ export interface TrafficQuality {
   /** Sessions after removing the suspected-bot rows. */
   humanSessions: number;
   humanCompleted: number;
+  /** Prior period on the same basis, when compare is on. */
+  priorHumanSessions?: number;
   flags: QualityFlag[];
 }
 
@@ -167,6 +169,54 @@ async function fetchAdLookup(from: string, to: string): Promise<AdLookup> {
   return out;
 }
 
+// ── Bot rule ──────────────────────────────────────────────────────────────
+// Shopify drops the crawlers it recognises before counting a session, and
+// ShopifyQL has no bot flag, so what is left is judged by behaviour: a source
+// that sends a meaningful volume of sessions in which nobody ever adds to
+// cart or checks out is not shopping. Shared by the Traffic tab and the
+// Overview's conversion rate so both agree on what "human" means.
+export const BOT_MIN_SESSIONS = 40;
+export function isBotSource(s: { sessions: number; cartAdds: number; completed: number }): boolean {
+  return s.sessions >= BOT_MIN_SESSIONS && s.cartAdds === 0 && s.completed === 0;
+}
+
+export interface HumanConversion {
+  /** Conversion rate on likely-human sessions, one-decimal percent. */
+  rate: number;
+  /** Shopify's raw rate (all sessions), one-decimal percent. */
+  rawRate: number;
+  sessions: number;
+  humanSessions: number;
+  botSessions: number;
+  completed: number;
+}
+
+const SOURCES_QL = 'FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY referrer_source, referrer_name, utm_medium';
+const TOTALS_QL = 'FROM sessions SHOW sessions, online_store_visitors, sessions_with_cart_additions, sessions_that_reached_checkout, sessions_that_completed_checkout';
+
+function sourceRows(rows: Row[]): SourceRow[] {
+  return rows.map(r => ({
+    source: r.referrer_source || '', name: r.referrer_name || '', medium: r.utm_medium || '',
+    sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout),
+  }));
+}
+
+/** Website conversion rate with suspected-bot sessions removed. Null when Shopify is not connected. */
+export async function fetchHumanConversion(from: string, to: string): Promise<HumanConversion | null> {
+  if (!trafficConfigured()) return null;
+  const [totals, sources] = await Promise.all([
+    shopifyql(`${TOTALS_QL} SINCE ${from} UNTIL ${to}`, 10000),
+    shopifyql(`${SOURCES_QL} SINCE ${from} UNTIL ${to} ORDER BY sessions DESC LIMIT 400`, 10000),
+  ]);
+  const sessions = num(totals[0]?.sessions);
+  const completed = num(totals[0]?.sessions_that_completed_checkout);
+  if (sessions <= 0) return null;
+  const botSessions = sourceRows(sources).filter(isBotSource).reduce((a, s) => a + s.sessions, 0);
+  const humanSessions = Math.max(1, sessions - botSessions);
+  const pct1 = (a: number, b: number) => Math.round((a / b) * 1000) / 10;
+  return { rate: pct1(completed, humanSessions), rawRate: pct1(completed, sessions), sessions, humanSessions, botSessions, completed };
+}
+
 // ── Main fetch ────────────────────────────────────────────────────────────
 export async function fetchTraffic(from: string, to: string, prior?: { from: string; to: string } | null): Promise<TrafficData> {
   const errors: string[] = [];
@@ -179,8 +229,6 @@ export async function fetchTraffic(from: string, to: string, prior?: { from: str
     addedToCart: num(rows[0]?.sessions_with_cart_additions), reachedCheckout: num(rows[0]?.sessions_that_reached_checkout),
     completed: num(rows[0]?.sessions_that_completed_checkout),
   });
-  const TOTALS_QL = 'FROM sessions SHOW sessions, online_store_visitors, sessions_with_cart_additions, sessions_that_reached_checkout, sessions_that_completed_checkout';
-  const SOURCES_QL = 'FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY referrer_source, referrer_name, utm_medium';
   const aiWhere = `WHERE ${['chatgpt', 'openai', 'perplexity', 'gemini', 'copilot', 'claude', 'grok'].map(a => `referrer_name = '${a}'`).join(' OR ')}`;
 
   const [totals, daily, sources, campaigns, referrers, aiPages, landing, orderSources, devices, countries, priorTotals, priorSources, adLookup] = await Promise.all([
@@ -189,9 +237,7 @@ export async function fetchTraffic(from: string, to: string, prior?: { from: str
       const dateKey = Object.keys(r).find(k => !['sessions', 'sessions_that_completed_checkout'].includes(k)) || 'day';
       return { date: String(r[dateKey] || '').slice(0, 10), sessions: num(r.sessions), completed: num(r.sessions_that_completed_checkout) };
     }), [] as DayRow[]),
-    q('sources', `${SOURCES_QL} ${range} ORDER BY sessions DESC LIMIT 400`, rows => rows.map(r => ({
-      source: r.referrer_source || '', name: r.referrer_name || '', medium: r.utm_medium || '', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout),
-    })), [] as SourceRow[]),
+    q('sources', `${SOURCES_QL} ${range} ORDER BY sessions DESC LIMIT 400`, sourceRows, [] as SourceRow[]),
     q('campaigns', `FROM sessions SHOW sessions, sessions_that_completed_checkout GROUP BY utm_medium, utm_campaign, utm_content ${range} ORDER BY sessions DESC LIMIT 400`, rows => rows.map(r => ({
       medium: r.utm_medium || '', campaign: r.utm_campaign || '', content: r.utm_content || '', sessions: num(r.sessions), completed: num(r.sessions_that_completed_checkout),
     })), [] as CampaignRow[]),
@@ -210,15 +256,16 @@ export async function fetchTraffic(from: string, to: string, prior?: { from: str
     q('devices', `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY session_device_type ${range} ORDER BY sessions DESC LIMIT 6`, rows => rows.map(r => ({ device: r.session_device_type || 'Unknown', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout) })), [] as TrafficData['devices']),
     q('countries', `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY session_country ${range} ORDER BY sessions DESC LIMIT 40`, rows => rows.map(r => ({ country: r.session_country || 'Unknown', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout) })), [] as TrafficData['countries']),
     prior ? q('prior totals', `${TOTALS_QL} SINCE ${prior.from} UNTIL ${prior.to}`, totalsOf, null as Totals | null) : Promise.resolve(null),
-    prior ? q('prior sources', `${SOURCES_QL} SINCE ${prior.from} UNTIL ${prior.to} ORDER BY sessions DESC LIMIT 400`, rows => rows.map(r => ({
-      source: r.referrer_source || '', name: r.referrer_name || '', medium: r.utm_medium || '', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout),
-    })), [] as SourceRow[]) : Promise.resolve([] as SourceRow[]),
+    prior ? q('prior sources', `${SOURCES_QL} SINCE ${prior.from} UNTIL ${prior.to} ORDER BY sessions DESC LIMIT 400`, sourceRows, [] as SourceRow[]) : Promise.resolve([] as SourceRow[]),
     fetchAdLookup(from, to),
   ]);
 
   // Channels: roll the (source, name, medium) rows up into channel groups.
+  // Suspected-bot rows (see isBotSource) are left out so every channel's
+  // sessions and CVR are on the human basis; they are reported under quality.
   const chanMap = new Map<Channel, ChannelRow & { srcCount: Record<string, number> }>();
   for (const s of sources) {
+    if (isBotSource(s)) continue;
     const ch = channelOf(s.source, s.name, s.medium);
     const row = chanMap.get(ch) || { channel: ch, sessions: 0, completed: 0, topSources: [], srcCount: {} };
     row.sessions += s.sessions; row.completed += s.completed;
@@ -227,6 +274,7 @@ export async function fetchTraffic(from: string, to: string, prior?: { from: str
     chanMap.set(ch, row);
   }
   for (const s of priorSources) {
+    if (isBotSource(s)) continue;
     const ch = channelOf(s.source, s.name, s.medium);
     const row = chanMap.get(ch) || { channel: ch, sessions: 0, completed: 0, topSources: [], srcCount: {} };
     row.priorSessions = (row.priorSessions || 0) + s.sessions;
@@ -276,11 +324,11 @@ export async function fetchTraffic(from: string, to: string, prior?: { from: str
   // and ShopifyQL has no bot flag, so what is left is judged by behaviour: a
   // source that sends a meaningful volume of sessions in which nobody ever
   // adds to cart or checks out is not shopping. Each flagged row explains why.
-  const MIN = 40;
+  const MIN = BOT_MIN_SESSIONS;
   const flags: QualityFlag[] = [];
   let suspectedBot = 0;
   for (const s of sources) {
-    if (s.sessions >= MIN && s.cartAdds === 0 && s.completed === 0) {
+    if (isBotSource(s)) {
       const label = [s.source || 'direct', s.name, s.medium ? `utm ${s.medium}` : ''].filter(Boolean).join(' · ');
       flags.push({ kind: 'source', label, sessions: s.sessions, reason: `${s.sessions} sessions, nobody added to cart` });
       suspectedBot += s.sessions;
@@ -304,10 +352,12 @@ export async function fetchTraffic(from: string, to: string, prior?: { from: str
   }
   // Landing / device / country flags overlap the source flags, so only the
   // source total is subtracted; the others are shown as evidence.
+  const priorBot = priorSources.filter(isBotSource).reduce((a, s) => a + s.sessions, 0);
   const quality: TrafficQuality = {
     suspectedBot,
     humanSessions: Math.max(0, totals.sessions - suspectedBot),
     humanCompleted: totals.completed,
+    priorHumanSessions: prior && priorTotals ? Math.max(0, priorTotals.sessions - priorBot) : undefined,
     flags: flags.sort((a, b) => b.sessions - a.sessions),
   };
 
