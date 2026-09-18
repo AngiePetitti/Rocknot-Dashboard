@@ -88,9 +88,11 @@ async function spendByLine(from: string, to: string, lines: ProductLine[]): Prom
   return out;
 }
 
-export async function getProductLineSplit(from: string, to: string): Promise<{ lines: LineResult[]; unmatchedProductTypes: string[]; shopifyError?: string }> {
+export interface ProductTypeRow { productType: string; line: string; netSales: number; orders: number }
+
+export async function getProductLineSplit(from: string, to: string): Promise<{ lines: LineResult[]; unmatchedProductTypes: string[]; productTypes: ProductTypeRow[]; shopifyError?: string }> {
   const lines = productLines();
-  if (lines.length === 0) return { lines: [], unmatchedProductTypes: [] };
+  if (lines.length === 0) return { lines: [], unmatchedProductTypes: [], productTypes: [] };
 
   const [shopifyRows, spend] = await Promise.all([
     shopifyByProductType(from, to).catch((e: unknown) => ({ error: String(e instanceof Error ? e.message : e) })),
@@ -100,10 +102,12 @@ export async function getProductLineSplit(from: string, to: string): Promise<{ l
   const acc: Record<string, { netSales: number; totalSales: number; orders: number }> = {};
   for (const l of lines) acc[l.key] = { netSales: 0, totalSales: 0, orders: 0 };
   const unmatched: string[] = [];
+  const productTypes: ProductTypeRow[] = [];
   let shopifyError: string | undefined;
   if (Array.isArray(shopifyRows)) {
     for (const r of shopifyRows) {
       const line = lineForProduct(r.productType, lines);
+      productTypes.push({ productType: r.productType || '(blank)', line: line?.key ?? '(none)', netSales: Math.round(r.netSales), orders: r.orders });
       if (!line) { unmatched.push(r.productType); continue; }
       acc[line.key].netSales += r.netSales;
       acc[line.key].totalSales += r.totalSales;
@@ -133,5 +137,6 @@ export async function getProductLineSplit(from: string, to: string): Promise<{ l
       revenueShare: l.revenueShare,
     };
   });
-  return { lines: result, unmatchedProductTypes: unmatched, ...(shopifyError ? { shopifyError } : {}) };
+  productTypes.sort((a, b) => b.netSales - a.netSales);
+  return { lines: result, unmatchedProductTypes: unmatched, productTypes, ...(shopifyError ? { shopifyError } : {}) };
 }
