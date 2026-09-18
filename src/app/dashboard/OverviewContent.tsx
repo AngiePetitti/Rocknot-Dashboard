@@ -8,7 +8,7 @@ import { buildCallouts } from '@/src/lib/callouts';
 import { cachedJson } from '@/src/lib/clientCache';
 import type { MarketingEvent } from '@/src/app/api/calendar/route';
 import { Timeframe, PlatformSpend, DailyRevenue } from '@/src/lib/mockData';
-import { formatCurrency, formatROAS, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
+import { formatCurrency, formatROAS, TIMEFRAME_LABELS } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import MetricCard from '@/src/components/ui/MetricCard';
 import Card from '@/src/components/ui/Card';
@@ -1267,7 +1267,6 @@ export default function OverviewContent() {
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Spend</th>
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Revenue</th>
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">ROAS</th>
-                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">CTR</th>
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Purchases</th>
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-4">Cost / Purchase</th>
               </tr>
@@ -1294,7 +1293,6 @@ export default function OverviewContent() {
                       {formatROAS(p.roas)}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-right text-gray-600">{p.impressions > 0 ? formatPercent(p.ctr) : '—'}</td>
                   <td className="py-3 px-4 text-right text-gray-600">{p.purchases != null ? p.purchases.toLocaleString() : '—'}</td>
                   <td className="py-3 pl-4 text-right font-semibold" style={{ color: p.cac ? (p.cac > TARGET_CAC ? '#ef4444' : '#22c55e') : undefined }}>
                     {p.cac ? formatCurrency(p.cac) : '—'}
