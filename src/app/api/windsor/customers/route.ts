@@ -129,6 +129,13 @@ export async function GET(request: NextRequest) {
     ltvOneOrder: bq.ltvOneOrder,
     ltvTwoOrders: bq.ltvTwoOrders,
     ltvThreePlus: bq.ltvThreePlus,
+    firstOrderNet: bq.firstOrderNet,
+    secondOrderNet: bq.secondOrderNet,
+    thirdPlusOrderNet: bq.thirdPlusOrderNet,
+    avgLTVNet: bq.avgLTVNet,
+    ltvOneOrderNet: bq.ltvOneOrderNet,
+    ltvTwoOrdersNet: bq.ltvTwoOrdersNet,
+    ltvThreePlusNet: bq.ltvThreePlusNet,
   };
 
   return NextResponse.json(

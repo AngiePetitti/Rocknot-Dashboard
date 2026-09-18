@@ -62,6 +62,15 @@ export interface CustomerMetrics {
   ltvOneOrder: number;
   ltvTwoOrders: number;
   ltvThreePlus: number;
+  // After returns (refunds subtracted): what the store kept. Optional so
+  // mock/legacy payloads still type-check.
+  firstOrderNet?: number;
+  secondOrderNet?: number;
+  thirdPlusOrderNet?: number;
+  avgLTVNet?: number;
+  ltvOneOrderNet?: number;
+  ltvTwoOrdersNet?: number;
+  ltvThreePlusNet?: number;
 }
 
 export interface CohortData {
