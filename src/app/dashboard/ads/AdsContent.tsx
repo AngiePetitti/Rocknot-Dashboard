@@ -83,6 +83,7 @@ export default function AdsContent() {
   const searchParams = useSearchParams();
   const client = useClient();
   const ROAS_GOAL = client.goals.targetRoas;
+  const TARGET_CAC = client.goals.targetCac;
   const tfRaw = searchParams.get('tf') || '30d';
   const tf = (tfRaw === 'custom' ? '30d' : tfRaw) as Timeframe;
   const dateFrom = searchParams.get('date_from') || '';
@@ -281,10 +282,10 @@ export default function AdsContent() {
               <MetricCard
                 title="New Customer CAC"
                 value={cac.newCustomers ? formatCurrency(cac.totalAdSpend / cac.newCustomers) : '—'}
-                subtitle={`Ad spend ÷ ${cac.newCustomers} new customers · target $100`}
+                subtitle={`Ad spend ÷ ${cac.newCustomers} new customers · target $${TARGET_CAC}`}
                 accentColor="#c7d2fe"
                 valueColor={cac.newCustomers
-                  ? (cac.totalAdSpend / cac.newCustomers > 100 ? '#ef4444' : '#22c55e')
+                  ? (cac.totalAdSpend / cac.newCustomers > TARGET_CAC ? '#ef4444' : '#22c55e')
                   : undefined}
               />
               <MetricCard
