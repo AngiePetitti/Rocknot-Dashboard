@@ -14,6 +14,12 @@ interface SummaryRow {
   ltv_one: number | null;
   ltv_two: number | null;
   ltv_three_plus: number | null;
+  first_net: number | null;
+  second_net: number | null;
+  third_plus_net: number | null;
+  ltv_one_net: number | null;
+  ltv_two_net: number | null;
+  ltv_three_plus_net: number | null;
 }
 
 // BigQuery-derived customer metrics for customers ACTIVE in the period.
@@ -32,6 +38,16 @@ export interface BqCustomerMetrics {
   ltvOneOrder: number;
   ltvTwoOrders: number;
   ltvThreePlus: number;
+  // Same figures on net sales AFTER returns (refund rows subtracted) — what the
+  // store actually kept. On a high-return store these sit well below the
+  // ordered values above.
+  firstOrderNet: number;
+  secondOrderNet: number;
+  thirdPlusOrderNet: number;
+  avgLTVNet: number;
+  ltvOneOrderNet: number;
+  ltvTwoOrdersNet: number;
+  ltvThreePlusNet: number;
 }
 
 interface CohortRow {
@@ -60,6 +76,7 @@ export async function getCustomerMetrics(dateFrom: string, dateTo: string): Prom
       ranked AS (
         SELECT order_customer_id AS customer_id,
                total_price AS revenue,
+               net_sales AS kept,
                order_date,
                ROW_NUMBER() OVER (PARTITION BY order_customer_id ORDER BY order_date) AS seq
         FROM order_revenue
@@ -67,7 +84,7 @@ export async function getCustomerMetrics(dateFrom: string, dateTo: string): Prom
       ),
       -- Lifetime totals per customer (across all history, not just the period).
       lifetime AS (
-        SELECT customer_id, COUNT(*) AS lifetime_orders, SUM(revenue) AS lifetime_revenue
+        SELECT customer_id, COUNT(*) AS lifetime_orders, SUM(revenue) AS lifetime_revenue, SUM(kept) AS lifetime_kept
         FROM ranked GROUP BY customer_id
       ),
       -- Customers who placed at least one order within the selected period.
@@ -80,7 +97,10 @@ export async function getCustomerMetrics(dateFrom: string, dateTo: string): Prom
         SELECT
           AVG(IF(seq = 1, revenue, NULL))  AS first_avg,
           AVG(IF(seq = 2, revenue, NULL))  AS second_avg,
-          AVG(IF(seq >= 3, revenue, NULL)) AS third_plus_avg
+          AVG(IF(seq >= 3, revenue, NULL)) AS third_plus_avg,
+          AVG(IF(seq = 1, kept, NULL))     AS first_net,
+          AVG(IF(seq = 2, kept, NULL))     AS second_net,
+          AVG(IF(seq >= 3, kept, NULL))    AS third_plus_net
         FROM ranked
         WHERE order_date BETWEEN @date_from AND @date_to
       ),
@@ -94,23 +114,27 @@ export async function getCustomerMetrics(dateFrom: string, dateTo: string): Prom
           AVG(l.lifetime_revenue) AS avg_ltv,
           AVG(IF(l.lifetime_orders = 1,  l.lifetime_revenue, NULL)) AS ltv_one,
           AVG(IF(l.lifetime_orders = 2,  l.lifetime_revenue, NULL)) AS ltv_two,
-          AVG(IF(l.lifetime_orders >= 3, l.lifetime_revenue, NULL)) AS ltv_three_plus
+          AVG(IF(l.lifetime_orders >= 3, l.lifetime_revenue, NULL)) AS ltv_three_plus,
+          AVG(IF(l.lifetime_orders = 1,  l.lifetime_kept, NULL)) AS ltv_one_net,
+          AVG(IF(l.lifetime_orders = 2,  l.lifetime_kept, NULL)) AS ltv_two_net,
+          AVG(IF(l.lifetime_orders >= 3, l.lifetime_kept, NULL)) AS ltv_three_plus_net
         FROM active a JOIN lifetime l USING (customer_id)
       )
       SELECT * FROM seq_aov, tiers
     `, params),
 
     // All-time avgLTV across every customer ever — not scoped to the period.
-    runQuery<{ avg_ltv: number | null }>(`
+    runQuery<{ avg_ltv: number | null; avg_ltv_net: number | null }>(`
       WITH order_revenue AS (${dedupedOrdersCte(ds)}),
       lifetime AS (
         SELECT order_customer_id AS customer_id,
-               SUM(total_price) AS lifetime_revenue
+               SUM(total_price) AS lifetime_revenue,
+               SUM(net_sales) AS lifetime_kept
         FROM order_revenue
         WHERE order_customer_id IS NOT NULL
         GROUP BY customer_id
       )
-      SELECT AVG(lifetime_revenue) AS avg_ltv FROM lifetime
+      SELECT AVG(lifetime_revenue) AS avg_ltv, AVG(lifetime_kept) AS avg_ltv_net FROM lifetime
     `).catch(() => null),
   ]);
 
@@ -133,6 +157,13 @@ export async function getCustomerMetrics(dateFrom: string, dateTo: string): Prom
     ltvOneOrder: round2(r?.ltv_one),
     ltvTwoOrders: round2(r?.ltv_two),
     ltvThreePlus: round2(r?.ltv_three_plus),
+    firstOrderNet: round2(r?.first_net),
+    secondOrderNet: round2(r?.second_net),
+    thirdPlusOrderNet: round2(r?.third_plus_net),
+    avgLTVNet: round2(allTimeRows?.[0]?.avg_ltv_net),
+    ltvOneOrderNet: round2(r?.ltv_one_net),
+    ltvTwoOrdersNet: round2(r?.ltv_two_net),
+    ltvThreePlusNet: round2(r?.ltv_three_plus_net),
   };
 }
 

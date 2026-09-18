@@ -104,10 +104,15 @@ export default function CustomersContent() {
   }, [tfRaw, dateFrom, dateTo]);
 
   const buybackData = [
-    { order: '1st Order', avg: customerMetrics.firstOrderAvg, fill: '#c4b5fd' },
-    { order: '2nd Order', avg: customerMetrics.secondOrderAvg, fill: '#f9a8d4' },
-    { order: '3rd+ Order', avg: customerMetrics.thirdPlusOrderAvg, fill: '#86efac' },
+    { order: '1st Order', avg: customerMetrics.firstOrderAvg, net: customerMetrics.firstOrderNet ?? 0, fill: '#c4b5fd' },
+    { order: '2nd Order', avg: customerMetrics.secondOrderAvg, net: customerMetrics.secondOrderNet ?? 0, fill: '#f9a8d4' },
+    { order: '3rd+ Order', avg: customerMetrics.thirdPlusOrderAvg, net: customerMetrics.thirdPlusOrderNet ?? 0, fill: '#86efac' },
   ];
+  // Returns matter here: a store that refunds 40% of what it sells keeps far
+  // less per order than the ordered value. Show both whenever they differ.
+  const hasNet = buybackData.some(d => d.net > 0);
+  const kept = (ordered: number, net: number | undefined, base: string): string =>
+    net && ordered > 0 && net < ordered * 0.98 ? `${base} · ${formatCurrency(net)} kept after returns` : base;
 
   return (
     <div>
@@ -133,19 +138,19 @@ export default function CustomersContent() {
         <MetricCard
           title="Avg Lifetime Value"
           value={formatCurrency(customerMetrics.avgLTV)}
-          subtitle="Per customer · all-time spend"
+          subtitle={kept(customerMetrics.avgLTV, customerMetrics.avgLTVNet, 'Per customer · all-time spend')}
           accentColor="#f9a8d4"
         />
         <MetricCard
           title="Avg 1st Order Value"
           value={formatCurrency(customerMetrics.firstOrderAvg)}
-          subtitle="New customer AOV"
+          subtitle={kept(customerMetrics.firstOrderAvg, customerMetrics.firstOrderNet, 'New customer AOV')}
           accentColor="#fde68a"
         />
         <MetricCard
           title="Avg 3rd+ Order Value"
           value={formatCurrency(customerMetrics.thirdPlusOrderAvg)}
-          subtitle="Loyal customer AOV"
+          subtitle={kept(customerMetrics.thirdPlusOrderAvg, customerMetrics.thirdPlusOrderNet, 'Loyal customer AOV')}
           accentColor="#86efac"
         />
       </div>
@@ -177,11 +182,12 @@ export default function CustomersContent() {
                 width={44}
               />
               <Tooltip
-                formatter={(v: unknown) => [formatCurrency(Number(v)), 'Avg Order Value']}
+                formatter={(v: unknown, name: unknown) => [formatCurrency(Number(v)), name === 'net' ? 'Kept after returns' : 'Ordered value']}
                 contentStyle={{ borderRadius: 12, border: '1px solid #f1f5f9', fontSize: 12 }}
                 cursor={{ fill: '#f8fafc' }}
               />
-              <Bar dataKey="avg" radius={[8, 8, 0, 0]}>
+              {hasNet && <Bar dataKey="net" name="net" fill="#94a3b8" radius={[8, 8, 0, 0]} />}
+              <Bar dataKey="avg" name="avg" radius={[8, 8, 0, 0]}>
                 {buybackData.map((entry, i) => (
                   <Cell key={i} fill={entry.fill} />
                 ))}
@@ -221,18 +227,21 @@ export default function CustomersContent() {
               label: 'One-time (1 order)',
               count: customerMetrics.oneOrderCount,
               ltv: customerMetrics.ltvOneOrder,
+              net: customerMetrics.ltvOneOrderNet ?? 0,
               color: '#fde68a',
             },
             {
               label: 'Returning (2 orders)',
               count: customerMetrics.twoOrderCount,
               ltv: customerMetrics.ltvTwoOrders,
+              net: customerMetrics.ltvTwoOrdersNet ?? 0,
               color: '#f9a8d4',
             },
             {
               label: 'Loyal (3+ orders)',
               count: customerMetrics.threePlusCount,
               ltv: customerMetrics.ltvThreePlus,
+              net: customerMetrics.ltvThreePlusNet ?? 0,
               color: '#86efac',
             },
           ].map(tier => (
@@ -243,6 +252,9 @@ export default function CustomersContent() {
             >
               <p className="text-xs font-semibold text-gray-500 mb-2">{tier.label}</p>
               <p className="text-2xl font-bold text-gray-800">{tier.ltv > 0 ? formatCurrency(tier.ltv) : '—'}</p>
+              {tier.net > 0 && tier.net < tier.ltv * 0.98 && (
+                <p className="text-xs font-semibold text-gray-600">{formatCurrency(tier.net)} kept after returns</p>
+              )}
               <p className="text-xs text-gray-400 mt-1">
                 {tier.count.toLocaleString()} customers ·{' '}
                 {customerMetrics.activeCustomers > 0
