@@ -42,10 +42,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [data, priorData] = await Promise.all([
-      fetchRetentionData(from, to),
-      prior ? fetchRetentionData(prior.from, prior.to).catch(() => null) : Promise.resolve(null),
-    ]);
+    // Sequential on purpose: Klaviyo's reporting quota is a few calls a
+    // minute, and the values reports are cached for 10 minutes once fetched.
+    const data = await fetchRetentionData(from, to);
+    const priorData = prior ? await fetchRetentionData(prior.from, prior.to).catch(() => null) : null;
     return NextResponse.json({
       source: 'klaviyo_live',
       range: { from, to },

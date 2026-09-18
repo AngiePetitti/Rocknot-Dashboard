@@ -250,9 +250,6 @@ export default function OverviewContent() {
     const platforms: PlatformSpend[] = [];
     const push = (platform: string, spend: number, revenue: number, color: string) => {
       if (spend <= 0) return;
-      // CAC = spend ÷ attributed purchases, with purchases estimated from the
-      // platform's attributed revenue at the store's blended AOV (= AOV ÷ ROAS).
-      const estOrders = m.aov > 0 ? revenue / m.aov : 0;
       platforms.push({
         platform,
         spend,
@@ -260,7 +257,7 @@ export default function OverviewContent() {
         roas: spend > 0 ? Math.round((revenue / spend) * 100) / 100 : 0,
         ctr: 0,
         impressions: 0,
-        cac: estOrders > 0 ? Math.round(spend / estOrders) : null,
+        cac: null, // filled below, once every platform's claimed revenue is known
         color,
       });
     };
@@ -268,6 +265,18 @@ export default function OverviewContent() {
     push('Google', m.googleSpend ?? 0, m.googleRevenue ?? 0, '#34d399');
     push('TikTok', m.tiktokSpend ?? 0, m.tiktokRevenue ?? 0, '#f472b6');
     push('Snapchat', m.snapchatSpend ?? 0, m.snapchatRevenue ?? 0, '#facc15');
+    push('Pinterest', m.pinterestSpend ?? 0, m.pinterestRevenue ?? 0, '#fb7185');
+    // Cost per order, de-duplicated. Each platform claims credit for orders the
+    // others also claim, so their attributed revenue adds up to more than the
+    // store sold. Use each platform's SHARE of total claimed revenue to split
+    // the store's REAL order count, then spend ÷ that share of orders.
+    // (Dividing spend by claimed revenue ÷ AOV — the old formula — produced a
+    // "$17 CAC" on a platform claiming 8x ROAS.)
+    const claimed = platforms.reduce((sum, p) => sum + p.revenue, 0);
+    for (const p of platforms) {
+      const shareOfOrders = claimed > 0 && m.totalOrders > 0 ? (p.revenue / claimed) * m.totalOrders : 0;
+      p.cac = shareOfOrders > 0 ? Math.round(p.spend / shareOfOrders) : null;
+    }
     push('Pinterest', m.pinterestSpend ?? 0, m.pinterestRevenue ?? 0, PLATFORMS.pinterest.color);
     return platforms.length > 0 ? platforms : null;
   }
@@ -1269,7 +1278,7 @@ export default function OverviewContent() {
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Revenue</th>
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">ROAS</th>
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">CTR</th>
-                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-4">CAC</th>
+                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-4">Cost / Order</th>
               </tr>
             </thead>
             <tbody>
@@ -1294,7 +1303,7 @@ export default function OverviewContent() {
                       {formatROAS(p.roas)}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-right text-gray-600">{formatPercent(p.ctr)}</td>
+                  <td className="py-3 px-4 text-right text-gray-600">{p.impressions > 0 ? formatPercent(p.ctr) : '—'}</td>
                   <td className="py-3 pl-4 text-right font-semibold text-gray-700">
                     {p.cac ? formatCurrency(p.cac) : '—'}
                   </td>
@@ -1304,7 +1313,7 @@ export default function OverviewContent() {
           </table>
         </div>
         <p className="text-[11px] text-gray-400 mt-3">
-          CAC = spend ÷ attributed purchases (platform-attributed revenue at store AOV).
+          Cost / Order = spend ÷ this platform&apos;s share of the store&apos;s actual orders (its share of all platform-claimed revenue, applied to the real order count). ROAS is platform-reported and not de-duplicated across platforms — the claims overlap. Neither is a new-customer CAC; that&apos;s the New Customer CAC card above.
         </p>
       </Card>
     </div>

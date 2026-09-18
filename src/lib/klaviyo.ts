@@ -2,8 +2,40 @@
 // Defensive like the other connectors: every call surfaces its real error so
 // a wrong scope or schema shows up on the tab instead of silent zeros.
 
+import { unstable_cache } from 'next/cache';
+
 const KEY = (process.env.KLAVIYO_API_KEY || '').trim();
 const REVISION = '2024-10-15';
+
+// The two values reports are the rate-limited calls. Cache each (report,
+// metric, range) for 10 minutes across invocations so switching timeframes
+// back and forth, or the prior-period fetch, doesn't burn the quota.
+const REPORT_TTL_SECONDS = 600;
+async function valuesReport(
+  type: 'campaign-values-report' | 'flow-values-report',
+  conversionMetricId: string,
+  from: string,
+  to: string,
+): Promise<unknown[]> {
+  const path = type === 'campaign-values-report' ? '/api/campaign-values-reports/' : '/api/flow-values-reports/';
+  const body = {
+    data: {
+      type,
+      attributes: {
+        timeframe: klaviyoTimeframe(from, to),
+        conversion_metric_id: conversionMetricId,
+        statistics: ['recipients', 'open_rate', 'click_rate', 'conversion_value'],
+      },
+    },
+  };
+  const json = await kfetch(path, { method: 'POST', body: JSON.stringify(body) });
+  return ((json.data as { attributes?: { results?: unknown[] } })?.attributes?.results ?? []) as unknown[];
+}
+const cachedValuesReport = unstable_cache(
+  (type: 'campaign-values-report' | 'flow-values-report', metricId: string, from: string, to: string) => valuesReport(type, metricId, from, to),
+  ['klaviyo-values-report', KEY.slice(-6)],
+  { revalidate: REPORT_TTL_SECONDS },
+);
 
 export function klaviyoConfigured(): boolean {
   return Boolean(KEY);
@@ -27,7 +59,7 @@ function klaviyoTimeframe(from: string, to: string): { start: string; end: strin
   return { start: `${from}T00:00:00${laOffset(from)}`, end: `${to}T23:59:59${laOffset(to)}` };
 }
 
-async function kfetch(path: string, init?: RequestInit): Promise<Record<string, unknown>> {
+async function kfetch(path: string, init?: RequestInit, retried = false): Promise<Record<string, unknown>> {
   const res = await fetch(`https://a.klaviyo.com${path}`, {
     ...(init?.method === 'POST' ? {} : { next: { revalidate: 300 } }),
     ...init,
@@ -43,6 +75,14 @@ async function kfetch(path: string, init?: RequestInit): Promise<Record<string, 
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const detail = (json as { errors?: Array<{ detail?: string }> }).errors?.[0]?.detail || `HTTP ${res.status}`;
+    // The reporting endpoints allow only a few calls a minute. When Klaviyo
+    // names a short wait ("Expected available in 12 seconds"), wait it out
+    // once rather than surfacing $0 cards.
+    const wait = res.status === 429 ? Number(/available in (\d+) second/i.exec(detail)?.[1] ?? NaN) : NaN;
+    if (!retried && Number.isFinite(wait) && wait <= 25) {
+      await new Promise(r => setTimeout(r, (wait + 1) * 1000));
+      return kfetch(path, init, true);
+    }
     throw new Error(`Klaviyo ${path.split('?')[0]}: ${detail}`);
   }
   return json as Record<string, unknown>;
@@ -103,18 +143,7 @@ async function placedOrderMetricId(): Promise<string | null> {
 // Per-campaign stats for the last 30 days via the Campaign Values Report.
 async function campaignValues(conversionMetricId: string, from: string, to: string): Promise<Map<string, { recipients: number; openRate: number; clickRate: number; revenue: number }>> {
   const map = new Map<string, { recipients: number; openRate: number; clickRate: number; revenue: number }>();
-  const body = {
-    data: {
-      type: 'campaign-values-report',
-      attributes: {
-        timeframe: klaviyoTimeframe(from, to),
-        conversion_metric_id: conversionMetricId,
-        statistics: ['recipients', 'open_rate', 'click_rate', 'conversion_value'],
-      },
-    },
-  };
-  const json = await kfetch('/api/campaign-values-reports/', { method: 'POST', body: JSON.stringify(body) });
-  const results = ((json.data as { attributes?: { results?: unknown[] } })?.attributes?.results ?? []) as Array<{
+  const results = (await cachedValuesReport('campaign-values-report', conversionMetricId, from, to)) as Array<{
     groupings?: { campaign_id?: string };
     statistics?: { recipients?: number; open_rate?: number; click_rate?: number; conversion_value?: number };
   }>;
@@ -182,18 +211,7 @@ async function listFlows(): Promise<Map<string, { name: string; status: string }
 // come per flow message; summed up to the flow (rates weighted by recipients).
 async function flowValues(conversionMetricId: string, from: string, to: string): Promise<Map<string, { recipients: number; opens: number; clicks: number; revenue: number }>> {
   const map = new Map<string, { recipients: number; opens: number; clicks: number; revenue: number }>();
-  const body = {
-    data: {
-      type: 'flow-values-report',
-      attributes: {
-        timeframe: klaviyoTimeframe(from, to),
-        conversion_metric_id: conversionMetricId,
-        statistics: ['recipients', 'open_rate', 'click_rate', 'conversion_value'],
-      },
-    },
-  };
-  const json = await kfetch('/api/flow-values-reports/', { method: 'POST', body: JSON.stringify(body) });
-  const results = ((json.data as { attributes?: { results?: unknown[] } })?.attributes?.results ?? []) as Array<{
+  const results = (await cachedValuesReport('flow-values-report', conversionMetricId, from, to)) as Array<{
     groupings?: { flow_id?: string };
     statistics?: { recipients?: number; open_rate?: number; click_rate?: number; conversion_value?: number };
   }>;
@@ -254,7 +272,6 @@ export async function fetchRetentionData(from?: string, to?: string): Promise<Re
   const rangeTo = to || todayStr;
   const rangeFrom = from || new Date(Date.parse(`${rangeTo}T12:00:00Z`) - 30 * 86400000).toISOString().slice(0, 10);
   const metricIdPromise = placedOrderMetricId().catch(() => null);
-  const flowsPromise = fetchFlows(metricIdPromise, rangeFrom, rangeTo);
   const [email, sms] = await Promise.all([listCampaigns('email'), listCampaigns('sms')]);
   const all = [...email, ...sms];
 
@@ -307,9 +324,12 @@ export async function fetchRetentionData(from?: string, to?: string): Promise<Re
   };
 
   const recent = all.filter(sentRecently).sort((a, b) => (b.sendTime || '').localeCompare(a.sendTime || ''));
+  // Flows after campaigns: the two reports share a small per-minute quota.
+  const flows = await fetchFlows(metricIdPromise, rangeFrom, rangeTo);
+
   return {
     overview: { email: agg(email.filter(sentRecently)), sms: agg(sms.filter(sentRecently)) },
-    flows: await flowsPromise,
+    flows,
     recent: recent.slice(0, 40),
     scheduled: all.filter(isScheduled).sort((a, b) => (a.sendTime || '9999').localeCompare(b.sendTime || '9999')).slice(0, 25),
     ...(statsError ? { statsError } : {}),
