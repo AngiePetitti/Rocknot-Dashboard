@@ -201,7 +201,7 @@ export async function fetchShopifyCustomerSplit(from: string, to: string): Promi
   if (!SHOPIFY_TOKEN) return null;
   // ShopifyQL does not support GROUP BY customer_type. Instead, use the
   // built-in returning_customers dimension alongside total customers.
-  const ql = `FROM sales SHOW gross_sales, customers, returning_customers SINCE ${from} UNTIL ${to}`;
+  const ql = `FROM sales SHOW net_sales, customers, returning_customers SINCE ${from} UNTIL ${to}`;
   const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
@@ -233,7 +233,9 @@ export async function fetchShopifyCustomerSplit(from: string, to: string): Promi
   const totalCustomers = Math.round(parseFloat(cell(r, 'customers') || '0'));
   const returningCustomers = Math.round(parseFloat(cell(r, 'returning_customers') || '0'));
   const newCustomers = Math.max(0, totalCustomers - returningCustomers);
-  const totalRevenue = parseFloat(cell(r, 'gross_sales') || '0');
+  // Net sales (after discounts and returns) so the two segments add up to the
+  // net figure on the MER card rather than exceeding total sales.
+  const totalRevenue = parseFloat(cell(r, 'net_sales') || '0');
   if (totalCustomers === 0) return null;
   // Revenue split is proportional to customer count — best available from ShopifyQL.
   const newRevenue = totalCustomers > 0 ? (newCustomers / totalCustomers) * totalRevenue : 0;
