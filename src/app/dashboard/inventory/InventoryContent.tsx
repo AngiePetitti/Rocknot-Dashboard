@@ -866,7 +866,7 @@ export default function InventoryContent() {
       </Collapsible>
 
       <Collapsible icon="🔎" title="All SKUs — Search & Filters"
-        summary={`${items.length.toLocaleString()} SKUs · straps, inserts & every variant`}>
+        summary={`${items.length.toLocaleString()} SKUs · ${client.inventory.mode === 'rocknot-bags' ? 'straps, inserts & every variant' : 'every size & colour variant'}`}>
         <div className="px-3 pt-2">
       <Card accentColor="#fdba74">
         {/* Search + filters */}
