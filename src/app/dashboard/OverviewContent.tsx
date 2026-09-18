@@ -759,7 +759,17 @@ export default function OverviewContent() {
         <MetricCard
           title="Avg Order Value"
           value={formatCurrency(metrics.aov)}
-          subtitle="Per transaction"
+          // AOV is what customers order (net of discounts, before returns —
+          // Shopify's definition). The subtitle adds what the store keeps per
+          // order once returns come off, which for a high-return store is the
+          // number that actually funds the ad spend.
+          subtitle={(() => {
+            const net = (metrics.netSales ?? 0) - (metrics.returnFees ?? 0);
+            const perOrder = metrics.totalOrders > 0 && net > 0 ? net / metrics.totalOrders : 0;
+            return perOrder > 0 && metrics.aov > 0 && perOrder < metrics.aov * 0.98
+              ? `Per order, before returns · ${formatCurrency(perOrder)} kept per order after returns`
+              : 'Per transaction';
+          })()}
           accentColor="#fde68a"
           comparison={compareOn && priorPeriod ? { current: metrics.aov, prior: priorPeriod.aov } : undefined}
         />
