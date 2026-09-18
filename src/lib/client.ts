@@ -126,6 +126,8 @@ export interface ClientProfile {
     targetMer: number;
     /** Per-platform ROAS the Ad Performance recommendations grade against. */
     targetRoas: number;
+    /** New-customer CAC (ad spend ÷ new customers) flagged red when exceeded. */
+    targetCac: number;
   };
   inventory: {
     /**
@@ -192,7 +194,7 @@ const ROCKNOT: ClientProfile = {
       pinterest: null,
     },
   },
-  goals: { defaultAnnualTarget: 4_000_000, targetMer: 3.5, targetRoas: 3.5 },
+  goals: { defaultAnnualTarget: 4_000_000, targetMer: 3.5, targetRoas: 3.5, targetCac: 100 },
   inventory: { mode: 'rocknot-bags' },
   creatives: {
     founderTrack: { label: 'Orly', personName: 'Orly' },
@@ -224,8 +226,8 @@ const KAILEEP: ClientProfile = {
   brand: {
     description: 'Kailee P is a DTC bridal shoe brand (kaileep.com): wedding heels, flats and "something blue" styles for brides, plus flower girl and kids shoes. Purchases are occasion-driven with a long planning window; the core buyer is a woman aged 25-34 planning her wedding, and bridal accessories are natural add-ons.',
     founder: { name: 'Kailee', onCamera: true },
-    aov: null,
-    contentAngles: 'real-bride and wedding-day features, styling the shoe with the dress, comfort and break-in tips, flower girl moments',
+    aov: 150, // October 2026 brief target
+    contentAngles: 'real-bride and wedding-day features, styling the shoe with the dress, comfort and break-in tips, flower girl moments, the second pair for the reception (ceremony look + celebration look), interchangeable ankle straps (plain, pearl, sparkle) via the product customizer, low block heels and closed toes for cooler-season weddings',
   },
   shopify: { defaultDomain: 'kailee-p.myshopify.com' },
   ads: {
@@ -255,7 +257,9 @@ const KAILEEP: ClientProfile = {
   // MER/ROAS bars start from the NP Digital audit's blended Meta ROAS (~15x
   // reported) discounted for the Google tag inflation it found; adjust once
   // the real plan lands.
-  goals: { defaultAnnualTarget: 0, targetMer: 8, targetRoas: 8 },
+  // October 2026 brief: blended MER 5–6 (5 = the pass line), Google ROAS ≥ 6x,
+  // CPA target < $27–30.
+  goals: { defaultAnnualTarget: 0, targetMer: 5, targetRoas: 6, targetCac: 30 },
   inventory: { mode: 'standard' },
   creatives: {
     founderTrack: { label: 'Kailee', personName: 'Kailee' },

@@ -22,7 +22,6 @@ import { PLATFORMS } from '@/src/lib/client';
 // MER runs on NET sales (post-discount/returns, excl. taxes+shipping); the
 // goal is the client profile's targetMer on that basis (Rocknot: 3.5x —
 // Angie's call, a deliberately higher bar).
-const TARGET_CAC = 100; // target New Customer CAC — flagged when exceeded
 
 const EMPTY_METRICS: LiveMetrics = {
   totalRevenue: 0,
@@ -77,6 +76,7 @@ export default function OverviewContent() {
   const searchParams = useSearchParams();
   const client = useClient();
   const MER_GOAL = client.goals.targetMer;
+  const TARGET_CAC = client.goals.targetCac; // New Customer CAC flagged red when exceeded
   const runs = (k: keyof typeof PLATFORMS) => client.ads.platforms.includes(k);
   const tfRaw = searchParams.get('tf') || '30d';
   const isCustom = tfRaw === 'custom';
