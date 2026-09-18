@@ -155,7 +155,9 @@ export default function CustomersContent() {
         <Card accentColor="#f9a8d4">
           <h2 className="text-sm font-bold text-gray-700 mb-1">Buyback Analysis</h2>
           <p className="text-xs text-gray-400 mb-4">
-            Average order value by purchase number — loyal customers spend more
+            Average order value by purchase number — {customerMetrics.thirdPlusOrderAvg >= customerMetrics.firstOrderAvg
+              ? 'loyal customers spend more per order'
+              : 'repeat orders are smaller than the first (add-on and second-pair purchases)'}
           </p>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={buybackData} barSize={64}>
@@ -188,13 +190,20 @@ export default function CustomersContent() {
           </ResponsiveContainer>
           <div className="mt-3 p-3 bg-violet-50 rounded-xl">
             <p className="text-xs text-violet-700 font-medium">
-              💡 Repeat customers spend{' '}
-              <strong>
-                {customerMetrics.firstOrderAvg > 0
-                  ? formatPercent(((customerMetrics.thirdPlusOrderAvg - customerMetrics.firstOrderAvg) / customerMetrics.firstOrderAvg) * 100, 0)
-                  : '—'} more
-              </strong>{' '}
-              by their 3rd order. Focus retention campaigns on 2nd purchase conversion.
+              {(() => {
+                const first = customerMetrics.firstOrderAvg;
+                const third = customerMetrics.thirdPlusOrderAvg;
+                if (first <= 0 || third <= 0) return <>💡 Not enough repeat orders in this period to compare.</>;
+                const pct = Math.abs(((third - first) / first) * 100);
+                // Direction-aware: Rocknot's repeat buyers trade up; a bridal store's
+                // repeat orders are smaller (second pair, kids, accessories), so the
+                // lever is a second purchase at all, not a bigger one.
+                return third >= first ? (
+                  <>💡 Repeat customers spend <strong>{formatPercent(pct, 0)} more</strong> per order by their 3rd order. Focus retention campaigns on 2nd purchase conversion.</>
+                ) : (
+                  <>💡 Repeat orders run <strong>{formatPercent(pct, 0)} smaller</strong> than the first — a second purchase adds {customerMetrics.ltvTwoOrders > 0 && customerMetrics.ltvOneOrder > 0 ? <strong>{formatCurrency(customerMetrics.ltvTwoOrders - customerMetrics.ltvOneOrder)}</strong> : 'value'} of lifetime value even so. Focus retention on getting the 2nd order (second pair, accessories, kids) rather than a bigger basket.</>
+                );
+              })()}
             </p>
           </div>
         </Card>
