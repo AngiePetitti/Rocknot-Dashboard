@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
-import { qbAccountRegex, windsorParams } from '@/src/lib/client';
+import { qbAccountRegex, windsorParams, getClient } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -173,7 +173,12 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       unbookedPastMonths,
-      cogsPct: sumSales > 0 ? Math.round((sumCogs / sumSales) * 1000) / 10 : null,
+      // Booked QuickBooks months set the COGS rate; a client with no books
+      // connected falls back to the gross margin stated in its profile.
+      cogsPct: sumSales > 0
+        ? Math.round((sumCogs / sumSales) * 1000) / 10
+        : (getClient().finance.grossMarginPct !== null ? Math.round((100 - getClient().finance.grossMarginPct!) * 10) / 10 : null),
+      cogsSource: sumSales > 0 ? 'quickbooks' : (getClient().finance.grossMarginPct !== null ? 'profile' : null),
       nonAdOpexPct: sumSales > 0 ? Math.round((sumNonAdOpex / sumSales) * 1000) / 10 : null,
       basisMonths: basisMonths.sort(),
       actual: {

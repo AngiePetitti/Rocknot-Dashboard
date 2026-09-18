@@ -113,18 +113,125 @@ async function campaignValues(conversionMetricId: string): Promise<Map<string, {
   return map;
 }
 
+export interface KlaviyoFlow {
+  id: string;
+  name: string;
+  status: string;
+  recipients: number;
+  openRate: number;
+  clickRate: number;
+  revenue: number;
+}
+
+export interface FlowsSummary {
+  revenue: number;
+  flows: number;        // flows that sent anything in the window
+  recipients: number;
+  avgOpenRate: number;
+  avgClickRate: number;
+  items: KlaviyoFlow[]; // sorted by revenue desc
+  error?: string;       // e.g. key lacks flows:read
+}
+
 export interface RetentionData {
   overview: {
     email: { revenue: number; campaigns: number; recipients: number; avgOpenRate: number; avgClickRate: number };
     sms: { revenue: number; campaigns: number; recipients: number; avgOpenRate: number; avgClickRate: number };
   };
+  // Automated flows (welcome, abandoned cart, post-purchase …) — usually the
+  // larger half of owned revenue, and invisible in the campaign list.
+  flows: FlowsSummary;
   recent: KlaviyoCampaign[];     // sent in ~last 30 days, with stats
   scheduled: KlaviyoCampaign[];  // draft/queued/scheduled upcoming
   statsError?: string;
 }
 
+async function listFlows(): Promise<Map<string, { name: string; status: string }>> {
+  const map = new Map<string, { name: string; status: string }>();
+  let url: string | null = '/api/flows?fields[flow]=name,status';
+  while (url) {
+    const json = await kfetch(url);
+    for (const f of (json.data as Array<{ id: string; attributes?: { name?: string; status?: string } }>) || []) {
+      map.set(f.id, { name: f.attributes?.name || f.id, status: f.attributes?.status || '' });
+    }
+    const next = (json.links as { next?: string } | undefined)?.next;
+    url = next ? next.replace('https://a.klaviyo.com', '') : null;
+  }
+  return map;
+}
+
+// Per-flow stats for the last 30 days via the Flow Values Report. Results
+// come per flow message; summed up to the flow (rates weighted by recipients).
+async function flowValues(conversionMetricId: string): Promise<Map<string, { recipients: number; opens: number; clicks: number; revenue: number }>> {
+  const map = new Map<string, { recipients: number; opens: number; clicks: number; revenue: number }>();
+  const body = {
+    data: {
+      type: 'flow-values-report',
+      attributes: {
+        timeframe: { key: 'last_30_days' },
+        conversion_metric_id: conversionMetricId,
+        statistics: ['recipients', 'open_rate', 'click_rate', 'conversion_value'],
+      },
+    },
+  };
+  const json = await kfetch('/api/flow-values-reports/', { method: 'POST', body: JSON.stringify(body) });
+  const results = ((json.data as { attributes?: { results?: unknown[] } })?.attributes?.results ?? []) as Array<{
+    groupings?: { flow_id?: string };
+    statistics?: { recipients?: number; open_rate?: number; click_rate?: number; conversion_value?: number };
+  }>;
+  for (const r of results) {
+    const id = r.groupings?.flow_id;
+    if (!id) continue;
+    const recipients = Number(r.statistics?.recipients ?? 0);
+    const cur = map.get(id) || { recipients: 0, opens: 0, clicks: 0, revenue: 0 };
+    cur.recipients += recipients;
+    cur.opens += Number(r.statistics?.open_rate ?? 0) * recipients;
+    cur.clicks += Number(r.statistics?.click_rate ?? 0) * recipients;
+    cur.revenue += Number(r.statistics?.conversion_value ?? 0);
+    map.set(id, cur);
+  }
+  return map;
+}
+
+async function fetchFlows(metricIdPromise: Promise<string | null>): Promise<FlowsSummary> {
+  const empty: FlowsSummary = { revenue: 0, flows: 0, recipients: 0, avgOpenRate: 0, avgClickRate: 0, items: [] };
+  try {
+    const [names, metricId] = await Promise.all([listFlows(), metricIdPromise]);
+    if (!metricId) throw new Error("No 'Placed Order' metric found in Klaviyo");
+    const values = await flowValues(metricId);
+    const items: KlaviyoFlow[] = [];
+    for (const [id, v] of Array.from(values.entries())) {
+      if (v.recipients <= 0 && v.revenue <= 0) continue;
+      const meta = names.get(id);
+      items.push({
+        id,
+        name: meta?.name || id,
+        status: meta?.status || '',
+        recipients: v.recipients,
+        openRate: v.recipients > 0 ? Math.round((v.opens / v.recipients) * 1000) / 10 : 0,
+        clickRate: v.recipients > 0 ? Math.round((v.clicks / v.recipients) * 1000) / 10 : 0,
+        revenue: Math.round(v.revenue),
+      });
+    }
+    items.sort((a, b) => b.revenue - a.revenue);
+    const recipients = items.reduce((s, f) => s + f.recipients, 0);
+    const w = (f: (x: KlaviyoFlow) => number) => recipients > 0 ? items.reduce((s, x) => s + f(x) * x.recipients, 0) / recipients : 0;
+    return {
+      revenue: items.reduce((s, f) => s + f.revenue, 0),
+      flows: items.length,
+      recipients,
+      avgOpenRate: Math.round(w(f => f.openRate) * 10) / 10,
+      avgClickRate: Math.round(w(f => f.clickRate) * 10) / 10,
+      items,
+    };
+  } catch (e) {
+    return { ...empty, error: String(e instanceof Error ? e.message : e) };
+  }
+}
+
 export async function fetchRetentionData(): Promise<RetentionData> {
   const metricIdPromise = placedOrderMetricId().catch(() => null);
+  const flowsPromise = fetchFlows(metricIdPromise);
   const [email, sms] = await Promise.all([listCampaigns('email'), listCampaigns('sms')]);
   const all = [...email, ...sms];
 
@@ -171,6 +278,7 @@ export async function fetchRetentionData(): Promise<RetentionData> {
   const recent = all.filter(sentRecently).sort((a, b) => (b.sendTime || '').localeCompare(a.sendTime || ''));
   return {
     overview: { email: agg(email.filter(sentRecently)), sms: agg(sms.filter(sentRecently)) },
+    flows: await flowsPromise,
     recent: recent.slice(0, 40),
     scheduled: all.filter(isScheduled).sort((a, b) => (a.sendTime || '9999').localeCompare(b.sendTime || '9999')).slice(0, 25),
     ...(statsError ? { statsError } : {}),

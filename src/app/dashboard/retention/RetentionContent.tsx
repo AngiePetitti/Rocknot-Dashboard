@@ -10,9 +10,12 @@ interface Campaign {
   recipients?: number; openRate?: number; clickRate?: number; revenue?: number;
 }
 interface ChannelAgg { revenue: number; campaigns: number; recipients: number; avgOpenRate: number; avgClickRate: number }
+interface FlowRow { id: string; name: string; status: string; recipients: number; openRate: number; clickRate: number; revenue: number }
+interface FlowsSummary { revenue: number; flows: number; recipients: number; avgOpenRate: number; avgClickRate: number; items: FlowRow[]; error?: string }
 interface RetentionResponse {
   source?: string; error?: string; statsError?: string;
   overview?: { email: ChannelAgg; sms: ChannelAgg };
+  flows?: FlowsSummary;
   recent?: Campaign[]; scheduled?: Campaign[];
 }
 
@@ -147,13 +150,57 @@ Design: ${c.designBrief || '—'}`,
       )}
 
       {/* ── Overview ── */}
-      {ov && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <MetricCard title="Email Revenue (30d)" value={$(ov.email.revenue)} subtitle={`${ov.email.campaigns} campaigns · ${ov.email.recipients.toLocaleString()} sends`} accentColor="#c4b5fd" />
-          <MetricCard title="Email Engagement" value={`${ov.email.avgOpenRate}%`} subtitle={`open rate · ${ov.email.avgClickRate}% click`} accentColor="#a5b4fc" />
-          <MetricCard title="SMS Revenue (30d)" value={$(ov.sms.revenue)} subtitle={`${ov.sms.campaigns} campaigns · ${ov.sms.recipients.toLocaleString()} sends`} accentColor="#86efac" />
-          <MetricCard title="Total Owned Revenue" value={$(ov.email.revenue + ov.sms.revenue)} subtitle="Email + SMS, last 30 days" accentColor="#f9a8d4" />
-        </div>
+      {ov && (() => {
+        const fl = data?.flows;
+        const flowRev = fl?.revenue ?? 0;
+        return (
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+            <MetricCard title="Campaign Revenue (30d)" value={$(ov.email.revenue)} subtitle={`${ov.email.campaigns} email campaigns · ${ov.email.recipients.toLocaleString()} sends`} accentColor="#c4b5fd" />
+            <MetricCard
+              title="Flow Revenue (30d)"
+              value={fl && !fl.error ? $(flowRev) : '—'}
+              subtitle={fl?.error ? `Flows unavailable: ${fl.error}` : fl ? `${fl.flows} flows · ${fl.recipients.toLocaleString()} sends · automated` : 'loading…'}
+              accentColor="#fdba74"
+            />
+            <MetricCard title="Email Engagement" value={`${ov.email.avgOpenRate}%`} subtitle={`campaign open rate · ${ov.email.avgClickRate}% click`} accentColor="#a5b4fc" />
+            <MetricCard title="SMS Revenue (30d)" value={$(ov.sms.revenue)} subtitle={`${ov.sms.campaigns} campaigns · ${ov.sms.recipients.toLocaleString()} sends`} accentColor="#86efac" />
+            <MetricCard title="Total Owned Revenue" value={$(ov.email.revenue + ov.sms.revenue + flowRev)} subtitle={`Campaigns + flows + SMS, last 30 days${flowRev > 0 ? ` · flows ${Math.round((flowRev / (ov.email.revenue + ov.sms.revenue + flowRev)) * 100)}%` : ''}`} accentColor="#f9a8d4" />
+          </div>
+        );
+      })()}
+
+      {/* ── Flows (automations) ── */}
+      {(data?.flows?.items?.length ?? 0) > 0 && (
+        <Card accentColor="#fdba74" className="mb-4">
+          <h2 className="text-sm font-bold text-gray-700 mb-1">⚙️ Flow Performance — Last 30 Days</h2>
+          <p className="text-xs text-gray-400 mb-3">Automated emails (welcome, abandoned cart, post-purchase …) · revenue attributed to each flow by Klaviyo</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[560px]">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2">Flow</th>
+                  <th className="text-center text-xs font-semibold text-gray-400 uppercase pb-2 px-2">Status</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-2">Sent</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-2">Open</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-2">Click</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data!.flows!.items.map(f => (
+                  <tr key={f.id} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="py-2 pr-2"><span className="font-medium text-gray-700 block break-words">{f.name}</span></td>
+                    <td className="py-2 px-2 text-center"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${f.status === 'live' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>{f.status || '—'}</span></td>
+                    <td className="py-2 px-2 text-right text-gray-600">{f.recipients.toLocaleString()}</td>
+                    <td className="py-2 px-2 text-right text-gray-600">{f.openRate}%</td>
+                    <td className="py-2 px-2 text-right text-gray-600">{f.clickRate}%</td>
+                    <td className="py-2 pl-2 text-right font-semibold text-gray-800">{$(f.revenue)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
 
       {/* ── Last 30 days of campaigns ── */}
