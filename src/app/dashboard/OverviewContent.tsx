@@ -198,7 +198,7 @@ export default function OverviewContent() {
   // actuals for booked months in the range, plus cost rates for estimating
   // only the unbooked remainder.
   const [profitBasis, setProfitBasis] = useState<null | {
-    cogsPct: number | null; nonAdOpexPct: number | null; basisMonths: string[];
+    cogsPct: number | null; cogsSource?: 'quickbooks' | 'profile' | null; nonAdOpexPct: number | null; basisMonths: string[];
     actual: { net: number; revenue: number; adSpend: number; months: string[] };
     unbookedPastMonths?: Array<{ month: string; qbIncome: number; shopifySales: number }>;
   }>(null);
@@ -920,7 +920,7 @@ export default function OverviewContent() {
                       <MetricCard
                         title="COGS (est.)"
                         value={formatCurrency(cogsDollars)}
-                        subtitle={`${profitBasis.cogsPct}% of net sales · rate from booked P&L months`}
+                        subtitle={`${profitBasis.cogsPct}% of net sales · ${profitBasis.cogsSource === 'profile' ? 'from the stated gross margin (no books connected yet)' : 'rate from booked P&L months'}`}
                         accentColor="#fdba74"
                       />
                       <MetricCard

@@ -113,6 +113,12 @@ export interface ClientProfile {
   finance: {
     /** Case-insensitive regex source matched against QuickBooks account_name ('' = keep all). */
     qbAccountMatch: string;
+    /**
+     * Stated gross margin (0–100) used as the COGS basis when no booked
+     * QuickBooks months are available (COGS% = 100 − this). null = no basis:
+     * the COGS / contribution cards stay hidden until books are connected.
+     */
+    grossMarginPct: number | null;
   };
   revenue: {
     /**
@@ -200,7 +206,7 @@ const ROCKNOT: ClientProfile = {
     metaAccountNameMode: 'exact',
     metaAccountIdDefault: '165092079662754',
   },
-  finance: { qbAccountMatch: 'rocknot' },
+  finance: { qbAccountMatch: 'rocknot', grossMarginPct: null }, // QuickBooks connected — booked months set the basis
   revenue: { includeReturnFees: false },
   windsor: {
     accounts: {
@@ -259,7 +265,7 @@ const KAILEEP: ClientProfile = {
     metaAccountNameMode: 'contains',
     metaAccountIdDefault: '449159425278819',
   },
-  finance: { qbAccountMatch: 'kailee' },
+  finance: { qbAccountMatch: 'kailee', grossMarginPct: 89 }, // per Airin, Sep 2026: ~89% gross margin across the board
   revenue: { includeReturnFees: true }, // Kailee P charges a return fee and keeps it
   windsor: {
     accounts: {
