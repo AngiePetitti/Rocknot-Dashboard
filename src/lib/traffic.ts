@@ -92,7 +92,7 @@ export function channelOf(source: string, name: string, medium: string): Channel
 // ── Result shapes ─────────────────────────────────────────────────────────
 export interface Totals { sessions: number; visitors: number; addedToCart: number; reachedCheckout: number; completed: number }
 export interface ChannelRow { channel: Channel; sessions: number; completed: number; priorSessions?: number; topSources: string[] }
-export interface SourceRow { source: string; name: string; medium: string; sessions: number; completed: number }
+export interface SourceRow { source: string; name: string; medium: string; sessions: number; cartAdds: number; completed: number }
 export interface CampaignRow {
   medium: string; campaign: string; content: string; sessions: number; completed: number;
   /** Resolved from the ad platform when utm_content / utm_campaign carry IDs. */
@@ -100,7 +100,7 @@ export interface CampaignRow {
 }
 export interface ReferrerRow { url: string; sessions: number; completed: number }
 export interface AiRow { assistant: string; landingPage: string; sessions: number; completed: number }
-export interface LandingRow { path: string; sessions: number; completed: number }
+export interface LandingRow { path: string; sessions: number; cartAdds: number; completed: number }
 export interface OrderSourceRow { source: string; name: string; orders: number; netSales: number }
 export interface DayRow { date: string; sessions: number; completed: number }
 export interface TrafficData {
@@ -117,10 +117,22 @@ export interface TrafficData {
   blog: LandingRow[];
   landingPages: LandingRow[];
   orderSources: OrderSourceRow[];
-  devices: { device: string; sessions: number }[];
-  countries: { country: string; sessions: number }[];
+  devices: { device: string; sessions: number; cartAdds: number; completed: number }[];
+  countries: { country: string; sessions: number; cartAdds: number; completed: number }[];
+  /** Suspected bot / low-intent traffic, separated out so the human numbers can be read on their own. */
+  quality: TrafficQuality;
   prior?: { range: { from: string; to: string }; totals: Totals } | null;
   errors: string[];
+}
+
+export interface QualityFlag { kind: 'source' | 'country' | 'device' | 'landing'; label: string; sessions: number; reason: string }
+export interface TrafficQuality {
+  /** Sessions Shopify counted that show no human behaviour at all (see reasons). */
+  suspectedBot: number;
+  /** Sessions after removing the suspected-bot rows. */
+  humanSessions: number;
+  humanCompleted: number;
+  flags: QualityFlag[];
 }
 
 // ── Ad-name lookup (Meta / TikTok ad IDs → names + spend) ────────────────
@@ -168,7 +180,7 @@ export async function fetchTraffic(from: string, to: string, prior?: { from: str
     completed: num(rows[0]?.sessions_that_completed_checkout),
   });
   const TOTALS_QL = 'FROM sessions SHOW sessions, online_store_visitors, sessions_with_cart_additions, sessions_that_reached_checkout, sessions_that_completed_checkout';
-  const SOURCES_QL = 'FROM sessions SHOW sessions, sessions_that_completed_checkout GROUP BY referrer_source, referrer_name, utm_medium';
+  const SOURCES_QL = 'FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY referrer_source, referrer_name, utm_medium';
   const aiWhere = `WHERE ${['chatgpt', 'openai', 'perplexity', 'gemini', 'copilot', 'claude', 'grok'].map(a => `referrer_name = '${a}'`).join(' OR ')}`;
 
   const [totals, daily, sources, campaigns, referrers, aiPages, landing, orderSources, devices, countries, priorTotals, priorSources, adLookup] = await Promise.all([
@@ -178,7 +190,7 @@ export async function fetchTraffic(from: string, to: string, prior?: { from: str
       return { date: String(r[dateKey] || '').slice(0, 10), sessions: num(r.sessions), completed: num(r.sessions_that_completed_checkout) };
     }), [] as DayRow[]),
     q('sources', `${SOURCES_QL} ${range} ORDER BY sessions DESC LIMIT 400`, rows => rows.map(r => ({
-      source: r.referrer_source || '', name: r.referrer_name || '', medium: r.utm_medium || '', sessions: num(r.sessions), completed: num(r.sessions_that_completed_checkout),
+      source: r.referrer_source || '', name: r.referrer_name || '', medium: r.utm_medium || '', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout),
     })), [] as SourceRow[]),
     q('campaigns', `FROM sessions SHOW sessions, sessions_that_completed_checkout GROUP BY utm_medium, utm_campaign, utm_content ${range} ORDER BY sessions DESC LIMIT 400`, rows => rows.map(r => ({
       medium: r.utm_medium || '', campaign: r.utm_campaign || '', content: r.utm_content || '', sessions: num(r.sessions), completed: num(r.sessions_that_completed_checkout),
@@ -189,17 +201,17 @@ export async function fetchTraffic(from: string, to: string, prior?: { from: str
     q('ai', `FROM sessions SHOW sessions, sessions_that_completed_checkout GROUP BY referrer_name, landing_page_path ${aiWhere} ${range} ORDER BY sessions DESC LIMIT 100`, rows => rows.map(r => ({
       assistant: r.referrer_name || '', landingPage: r.landing_page_path || '/', sessions: num(r.sessions), completed: num(r.sessions_that_completed_checkout),
     })), [] as AiRow[]),
-    q('landing', `FROM sessions SHOW sessions, sessions_that_completed_checkout GROUP BY landing_page_path ${range} ORDER BY sessions DESC LIMIT 500`, rows => rows.map(r => ({
-      path: r.landing_page_path || '/', sessions: num(r.sessions), completed: num(r.sessions_that_completed_checkout),
+    q('landing', `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY landing_page_path ${range} ORDER BY sessions DESC LIMIT 500`, rows => rows.map(r => ({
+      path: r.landing_page_path || '/', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout),
     })), [] as LandingRow[]),
     q('orders', `FROM sales SHOW orders, net_sales GROUP BY order_referrer_source, order_referrer_name ${range} ORDER BY orders DESC LIMIT 40`, rows => rows.map(r => ({
       source: r.order_referrer_source || '', name: r.order_referrer_name || '', orders: num(r.orders), netSales: num(r.net_sales),
     })), [] as OrderSourceRow[]),
-    q('devices', `FROM sessions SHOW sessions GROUP BY session_device_type ${range} ORDER BY sessions DESC LIMIT 6`, rows => rows.map(r => ({ device: r.session_device_type || 'Unknown', sessions: num(r.sessions) })), [] as { device: string; sessions: number }[]),
-    q('countries', `FROM sessions SHOW sessions GROUP BY session_country ${range} ORDER BY sessions DESC LIMIT 8`, rows => rows.map(r => ({ country: r.session_country || 'Unknown', sessions: num(r.sessions) })), [] as { country: string; sessions: number }[]),
+    q('devices', `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY session_device_type ${range} ORDER BY sessions DESC LIMIT 6`, rows => rows.map(r => ({ device: r.session_device_type || 'Unknown', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout) })), [] as TrafficData['devices']),
+    q('countries', `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY session_country ${range} ORDER BY sessions DESC LIMIT 40`, rows => rows.map(r => ({ country: r.session_country || 'Unknown', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout) })), [] as TrafficData['countries']),
     prior ? q('prior totals', `${TOTALS_QL} SINCE ${prior.from} UNTIL ${prior.to}`, totalsOf, null as Totals | null) : Promise.resolve(null),
     prior ? q('prior sources', `${SOURCES_QL} SINCE ${prior.from} UNTIL ${prior.to} ORDER BY sessions DESC LIMIT 400`, rows => rows.map(r => ({
-      source: r.referrer_source || '', name: r.referrer_name || '', medium: r.utm_medium || '', sessions: num(r.sessions), completed: num(r.sessions_that_completed_checkout),
+      source: r.referrer_source || '', name: r.referrer_name || '', medium: r.utm_medium || '', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout),
     })), [] as SourceRow[]) : Promise.resolve([] as SourceRow[]),
     fetchAdLookup(from, to),
   ]);
@@ -259,6 +271,46 @@ export async function fetchTraffic(from: string, to: string, prior?: { from: str
 
   const blog = landing.filter(l => /^\/blogs\//.test(l.path));
 
+  // ── Bot / low-intent separation ──
+  // Shopify already drops the crawlers it recognises before counting a session,
+  // and ShopifyQL has no bot flag, so what is left is judged by behaviour: a
+  // source that sends a meaningful volume of sessions in which nobody ever
+  // adds to cart or checks out is not shopping. Each flagged row explains why.
+  const MIN = 40;
+  const flags: QualityFlag[] = [];
+  let suspectedBot = 0;
+  for (const s of sources) {
+    if (s.sessions >= MIN && s.cartAdds === 0 && s.completed === 0) {
+      const label = [s.source || 'direct', s.name, s.medium ? `utm ${s.medium}` : ''].filter(Boolean).join(' · ');
+      flags.push({ kind: 'source', label, sessions: s.sessions, reason: `${s.sessions} sessions, nobody added to cart` });
+      suspectedBot += s.sessions;
+    }
+  }
+  const crawlerPath = /\.(json|xml|txt)$|^\/sitemap|^\/cart|^\/account|^\/apps\/|^\/wpm@|^\/\.well-known|^\/admin|^\/checkouts?\/|^\/collections\/all\?|\?page=\d{2,}/i;
+  for (const l of landing) {
+    if (l.sessions >= MIN && (crawlerPath.test(l.path) || (l.cartAdds === 0 && l.completed === 0 && l.sessions >= MIN * 2))) {
+      flags.push({ kind: 'landing', label: l.path, sessions: l.sessions, reason: crawlerPath.test(l.path) ? 'crawler-style entry page' : `${l.sessions} sessions, nobody added to cart` });
+    }
+  }
+  for (const d of devices) {
+    if (d.sessions >= MIN && d.cartAdds === 0 && d.completed === 0) {
+      flags.push({ kind: 'device', label: d.device, sessions: d.sessions, reason: 'device type Shopify could not identify, no cart activity' });
+    }
+  }
+  for (const c of countries) {
+    if (c.sessions >= MIN * 2 && c.completed === 0 && c.cartAdds / c.sessions < 0.01) {
+      flags.push({ kind: 'country', label: c.country, sessions: c.sessions, reason: `${c.sessions} sessions, under 1% added to cart, no orders` });
+    }
+  }
+  // Landing / device / country flags overlap the source flags, so only the
+  // source total is subtracted; the others are shown as evidence.
+  const quality: TrafficQuality = {
+    suspectedBot,
+    humanSessions: Math.max(0, totals.sessions - suspectedBot),
+    humanCompleted: totals.completed,
+    flags: flags.sort((a, b) => b.sessions - a.sessions),
+  };
+
   return {
     range: { from, to },
     totals, daily, channels, sources,
@@ -268,7 +320,8 @@ export async function fetchTraffic(from: string, to: string, prior?: { from: str
     blog,
     landingPages: landing.filter(l => !/^\/blogs\//.test(l.path)).slice(0, 25),
     orderSources,
-    devices, countries,
+    devices, countries: countries.slice(0, 8),
+    quality,
     prior: prior && priorTotals ? { range: prior, totals: priorTotals } : null,
     errors,
   };

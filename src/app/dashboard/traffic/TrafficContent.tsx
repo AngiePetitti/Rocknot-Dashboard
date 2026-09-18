@@ -104,7 +104,7 @@ export default function TrafficContent() {
         <>
           {/* ── Funnel cards ── */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
-            <MetricCard title="Sessions" value={n(totals.sessions)} subtitle={`${n(totals.visitors)} visitors · ${rangeLabel}`} accentColor="#818cf8"
+            <MetricCard title="Sessions" value={n(totals.sessions)} subtitle={`${n(totals.visitors)} visitors · ${data.quality && data.quality.suspectedBot > 0 ? `${n(data.quality.humanSessions)} likely human` : rangeLabel}`} accentColor="#818cf8"
               comparison={prior ? { current: totals.sessions, prior: prior.sessions } : undefined} />
             <MetricCard title="Added to Cart" value={pct(totals.addedToCart, totals.sessions)} subtitle={`${n(totals.addedToCart)} sessions`} accentColor="#f9a8d4"
               comparison={prior ? { current: totals.addedToCart, prior: prior.addedToCart } : undefined} />
@@ -135,6 +135,54 @@ export default function TrafficContent() {
                   <Area type="monotone" dataKey="Sessions" stroke="#818cf8" strokeWidth={2} fill="url(#trafficSessions)" />
                 </AreaChart>
               </ResponsiveContainer>
+            </Card>
+          )}
+
+          {/* ── Bot vs human ── */}
+          {data.quality && (
+            <Card className="mb-6" accentColor={data.quality.suspectedBot > 0 ? '#f59e0b' : '#34d399'}>
+              <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+                <h3 className="text-sm font-bold text-gray-800">Bot &amp; Low-Intent Traffic</h3>
+                <p className="text-[11px] text-gray-400">Shopify drops known crawlers before counting; this catches what slips through</p>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div className="rounded-xl bg-gray-50 p-3">
+                  <p className="text-[11px] text-gray-400 uppercase font-semibold">Shopify sessions</p>
+                  <p className="text-lg font-bold text-gray-800">{n(totals.sessions)}</p>
+                </div>
+                <div className="rounded-xl bg-amber-50 p-3">
+                  <p className="text-[11px] text-amber-600 uppercase font-semibold">Suspected bot</p>
+                  <p className="text-lg font-bold text-amber-700">{n(data.quality.suspectedBot)} <span className="text-xs font-semibold">({share(data.quality.suspectedBot, totals.sessions)})</span></p>
+                </div>
+                <div className="rounded-xl bg-emerald-50 p-3">
+                  <p className="text-[11px] text-emerald-600 uppercase font-semibold">Likely human</p>
+                  <p className="text-lg font-bold text-emerald-700">{n(data.quality.humanSessions)}</p>
+                </div>
+                <div className="rounded-xl bg-emerald-50 p-3">
+                  <p className="text-[11px] text-emerald-600 uppercase font-semibold">Human conversion</p>
+                  <p className="text-lg font-bold text-emerald-700">{pct(data.quality.humanCompleted, data.quality.humanSessions)} <span className="text-xs font-semibold text-emerald-600">vs {pct(totals.completed, totals.sessions)} raw</span></p>
+                </div>
+              </div>
+              {data.quality.flags.length === 0 ? (
+                <p className="text-xs text-gray-400">Nothing looks automated in this period: every source with meaningful volume had shoppers adding to cart.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[520px]">
+                    <thead><tr className="border-b border-gray-100"><TH>Flagged</TH><TH>What</TH><TH>Why it looks automated</TH><TH right>Sessions</TH></tr></thead>
+                    <tbody>
+                      {data.quality.flags.slice(0, 15).map((f, i) => (
+                        <tr key={i} className="border-b border-gray-50">
+                          <TD><span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{f.kind}</span></TD>
+                          <TD mono className="break-all text-gray-700">{f.label}</TD>
+                          <TD className="text-xs text-gray-500">{f.reason}</TD>
+                          <TD right>{n(f.sessions)}</TD>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <p className="text-[11px] text-gray-400 mt-3">How it works: ShopifyQL has no bot flag, so a source is flagged when it sends a real volume of sessions in which nobody ever adds to cart or checks out. Only flagged sources are subtracted from the human count; flagged landing pages, devices and countries overlap them and are shown as evidence. Real people who only browse can be caught too, so treat this as a floor, not an exact split.</p>
             </Card>
           )}
 
