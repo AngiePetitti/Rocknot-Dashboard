@@ -32,6 +32,8 @@ export interface OverviewResult {
     returningCustomerRevenue: number;
     pctNew: number;
     pctReturning: number;
+    /** Where the new/returning split came from: Shopify's own report, or the BigQuery order history. */
+    customerSource?: 'shopify' | 'bigquery';
     conversionRate: number;
   };
   revenueData: Array<{ date: string; revenue: number; netSales?: number; orders: number; adSpend: number; newCustomers: number; totalCustomers: number }>;
@@ -210,10 +212,13 @@ export async function fetchShopifyCustomerSplit(from: string, to: string): Promi
       }}`,
     }),
     cache: 'no-store',
+    signal: AbortSignal.timeout(8000),
   });
   const json = await res.json();
+  const topErrors = (json?.errors as Array<{ message?: string }> | undefined) || [];
+  if (topErrors.length) throw new Error(topErrors.map(e => e.message).join('; ') || 'Shopify GraphQL error');
   const q = json?.data?.shopifyqlQuery;
-  if (typeof q?.parseErrors === 'string' && q.parseErrors) return null;
+  if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
   const cols: { name: string }[] = q?.tableData?.columns || [];
   const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
   if (rows.length === 0) return null;
@@ -426,7 +431,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   let adsQueryError: string | undefined;
   type PlatformDayRow = { date: string; spend: number | null; revenue: number | null };
   const noPlatformRows = Promise.resolve([] as PlatformDayRow[]);
-  const [shopifyDaysQl, shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows, pinterestRows] = await Promise.all([
+  const [shopifyDaysQl, shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows, pinterestRows, shopifySplit] = await Promise.all([
     fetchShopifyDaily(dateFrom, dateTo).catch(() => null),
     runQuery<{ date: string; orders: number; total_sales: number | null; net_sales: number | null; net_sales_placed: number | null }>(bqShopifySql, params)
       .then(rows => rows.map(r => ({
@@ -453,6 +458,10 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
           .catch(() => runQuery<PlatformDayRow>(pinterestSqls[2], params))
           .catch(() => [] as PlatformDayRow[])
       : noPlatformRows,
+    // Shopify's own new/returning customer counts — complete history, guest and
+    // app-created orders included. BigQuery's split (history only as far back
+    // as the Windsor sync, orders without a customer id excluded) is the fallback.
+    fetchShopifyCustomerSplit(dateFrom, dateTo).catch(() => null),
   ]);
 
   const shopifyDays: ShopifyDay[] =
@@ -606,10 +615,11 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   }
   const netAdSpend = Math.max(0, totalAdSpend - adCreditApplied);
 
-  const newCustomers = Number(cust.new_customers || 0);
-  const returningCustomers = Number(cust.returning_customers || 0);
-  const newCustomerRevenue = Number(cust.new_customer_revenue || 0);
-  const returningCustomerRevenue = Number(cust.returning_customer_revenue || 0);
+  const useShopifySplit = Boolean(shopifySplit && shopifySplit.newCustomers + shopifySplit.returningCustomers > 0);
+  const newCustomers = useShopifySplit ? shopifySplit!.newCustomers : Number(cust.new_customers || 0);
+  const returningCustomers = useShopifySplit ? shopifySplit!.returningCustomers : Number(cust.returning_customers || 0);
+  const newCustomerRevenue = useShopifySplit ? shopifySplit!.newRevenue : Number(cust.new_customer_revenue || 0);
+  const returningCustomerRevenue = useShopifySplit ? shopifySplit!.returningRevenue : Number(cust.returning_customer_revenue || 0);
   const totalCust = newCustomers + returningCustomers;
 
   return {
@@ -646,6 +656,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       returningCustomerRevenue: Math.round(returningCustomerRevenue),
       pctNew: totalCust > 0 ? Math.round((newCustomers / totalCust) * 1000) / 10 : 0,
       pctReturning: totalCust > 0 ? Math.round((returningCustomers / totalCust) * 1000) / 10 : 0,
+      customerSource: useShopifySplit ? 'shopify' : 'bigquery',
       conversionRate: conversionRate ?? 0,
     },
     revenueData,
