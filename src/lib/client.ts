@@ -54,7 +54,11 @@ export interface ClientProfile {
   /** Path under /public ('' = no logo yet; the initial is shown instead). */
   logo: string;
   /** Sidebar/login accent gradient (hex, inline-styled so Tailwind purging can't drop it). */
-  theme: { accentFrom: string; accentTo: string; loginMark: string };
+  theme: {
+    accentFrom: string; accentTo: string; loginMark: string;
+    /** Favicon gradient (saturated enough for a white bold letter). */
+    icon: { from: string; to: string };
+  };
   /** Public storefront domain the AI may point designers to. */
   siteDomain: string;
   /** Where this deployment lives — used in alert emails' deep links. */
@@ -154,7 +158,7 @@ const ROCKNOT: ClientProfile = {
   wordmark: 'ROCKNOT',
   initial: 'R',
   logo: '/logo.png',
-  theme: { accentFrom: '#a78bfa', accentTo: '#f472b6', loginMark: '#ec4899' },
+  theme: { accentFrom: '#a78bfa', accentTo: '#f472b6', loginMark: '#ec4899', icon: { from: '#a78bfa', to: '#f472b6' } },
   siteDomain: 'rocknot.com',
   dashboardUrl: 'https://rocknot-dashboard.vercel.app',
   storagePrefix: 'rocknot',
@@ -212,7 +216,7 @@ const KAILEEP: ClientProfile = {
   wordmark: 'KAILEE P',
   initial: 'K',
   logo: '', // drop a file at public/kaileep-logo.png and set this to '/kaileep-logo.png'
-  theme: { accentFrom: '#f9a8d4', accentTo: '#e9d5ff', loginMark: '#f472b6' },
+  theme: { accentFrom: '#f9a8d4', accentTo: '#e9d5ff', loginMark: '#f472b6', icon: { from: '#f472b6', to: '#c084fc' } },
   siteDomain: 'kaileep.com',
   dashboardUrl: 'https://kaileep-dashboard.vercel.app',
   storagePrefix: 'kaileep',
