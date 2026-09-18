@@ -9,6 +9,24 @@ export function klaviyoConfigured(): boolean {
   return Boolean(KEY);
 }
 
+// Klaviyo's reporting API takes a custom timeframe as ISO datetimes with an
+// offset. Both stores report in Pacific time, so a dashboard day runs from
+// 00:00:00 to 23:59:59 America/Los_Angeles (DST-aware).
+function laOffset(dateStr: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', timeZoneName: 'longOffset' })
+      .formatToParts(new Date(`${dateStr}T12:00:00Z`));
+    const v = parts.find(p => p.type === 'timeZoneName')?.value || '';
+    const m = /GMT([+-]\d{2}:\d{2})/.exec(v);
+    if (m) return m[1];
+  } catch { /* fall through */ }
+  const month = Number(dateStr.slice(5, 7));
+  return month >= 4 && month <= 10 ? '-07:00' : '-08:00';
+}
+function klaviyoTimeframe(from: string, to: string): { start: string; end: string } {
+  return { start: `${from}T00:00:00${laOffset(from)}`, end: `${to}T23:59:59${laOffset(to)}` };
+}
+
 async function kfetch(path: string, init?: RequestInit): Promise<Record<string, unknown>> {
   const res = await fetch(`https://a.klaviyo.com${path}`, {
     ...(init?.method === 'POST' ? {} : { next: { revalidate: 300 } }),
@@ -83,13 +101,13 @@ async function placedOrderMetricId(): Promise<string | null> {
 }
 
 // Per-campaign stats for the last 30 days via the Campaign Values Report.
-async function campaignValues(conversionMetricId: string): Promise<Map<string, { recipients: number; openRate: number; clickRate: number; revenue: number }>> {
+async function campaignValues(conversionMetricId: string, from: string, to: string): Promise<Map<string, { recipients: number; openRate: number; clickRate: number; revenue: number }>> {
   const map = new Map<string, { recipients: number; openRate: number; clickRate: number; revenue: number }>();
   const body = {
     data: {
       type: 'campaign-values-report',
       attributes: {
-        timeframe: { key: 'last_30_days' },
+        timeframe: klaviyoTimeframe(from, to),
         conversion_metric_id: conversionMetricId,
         statistics: ['recipients', 'open_rate', 'click_rate', 'conversion_value'],
       },
@@ -162,13 +180,13 @@ async function listFlows(): Promise<Map<string, { name: string; status: string }
 
 // Per-flow stats for the last 30 days via the Flow Values Report. Results
 // come per flow message; summed up to the flow (rates weighted by recipients).
-async function flowValues(conversionMetricId: string): Promise<Map<string, { recipients: number; opens: number; clicks: number; revenue: number }>> {
+async function flowValues(conversionMetricId: string, from: string, to: string): Promise<Map<string, { recipients: number; opens: number; clicks: number; revenue: number }>> {
   const map = new Map<string, { recipients: number; opens: number; clicks: number; revenue: number }>();
   const body = {
     data: {
       type: 'flow-values-report',
       attributes: {
-        timeframe: { key: 'last_30_days' },
+        timeframe: klaviyoTimeframe(from, to),
         conversion_metric_id: conversionMetricId,
         statistics: ['recipients', 'open_rate', 'click_rate', 'conversion_value'],
       },
@@ -193,12 +211,12 @@ async function flowValues(conversionMetricId: string): Promise<Map<string, { rec
   return map;
 }
 
-async function fetchFlows(metricIdPromise: Promise<string | null>): Promise<FlowsSummary> {
+async function fetchFlows(metricIdPromise: Promise<string | null>, from: string, to: string): Promise<FlowsSummary> {
   const empty: FlowsSummary = { revenue: 0, flows: 0, recipients: 0, avgOpenRate: 0, avgClickRate: 0, items: [] };
   try {
     const [names, metricId] = await Promise.all([listFlows(), metricIdPromise]);
     if (!metricId) throw new Error("No 'Placed Order' metric found in Klaviyo");
-    const values = await flowValues(metricId);
+    const values = await flowValues(metricId, from, to);
     const items: KlaviyoFlow[] = [];
     for (const [id, v] of Array.from(values.entries())) {
       if (v.recipients <= 0 && v.revenue <= 0) continue;
@@ -229,9 +247,14 @@ async function fetchFlows(metricIdPromise: Promise<string | null>): Promise<Flow
   }
 }
 
-export async function fetchRetentionData(): Promise<RetentionData> {
+// Campaign + flow performance for a date range (YYYY-MM-DD, inclusive).
+// Defaults to the last 30 days.
+export async function fetchRetentionData(from?: string, to?: string): Promise<RetentionData> {
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const rangeTo = to || todayStr;
+  const rangeFrom = from || new Date(Date.parse(`${rangeTo}T12:00:00Z`) - 30 * 86400000).toISOString().slice(0, 10);
   const metricIdPromise = placedOrderMetricId().catch(() => null);
-  const flowsPromise = fetchFlows(metricIdPromise);
+  const flowsPromise = fetchFlows(metricIdPromise, rangeFrom, rangeTo);
   const [email, sms] = await Promise.all([listCampaigns('email'), listCampaigns('sms')]);
   const all = [...email, ...sms];
 
@@ -239,7 +262,7 @@ export async function fetchRetentionData(): Promise<RetentionData> {
   try {
     const metricId = await metricIdPromise;
     if (!metricId) throw new Error("No 'Placed Order' metric found in Klaviyo");
-    const values = await campaignValues(metricId);
+    const values = await campaignValues(metricId, rangeFrom, rangeTo);
     for (const c of all) {
       const v = values.get(c.id);
       if (v) {
@@ -254,9 +277,17 @@ export async function fetchRetentionData(): Promise<RetentionData> {
   }
 
   const now = Date.now();
-  const cutoff = now - 35 * 86400000;
-  const sentRecently = (c: KlaviyoCampaign) =>
-    c.status === 'sent' && (!c.sendTime || Date.parse(c.sendTime) >= cutoff || c.recipients !== undefined);
+  // A campaign belongs to the range if it was sent inside it. The values
+  // report only returns campaigns that sent in the window, so a campaign
+  // with stats and no send_time is in range too.
+  const sentRecently = (c: KlaviyoCampaign) => {
+    if (c.status !== 'sent') return false;
+    if (c.sendTime) {
+      const d = c.sendTime.slice(0, 10);
+      return d >= rangeFrom && d <= rangeTo;
+    }
+    return c.recipients !== undefined;
+  };
   const isScheduled = (c: KlaviyoCampaign) =>
     ['draft', 'scheduled', 'queued', 'queued without recipients', 'sending'].includes(c.status)
     || (c.sendTime !== null && Date.parse(c.sendTime) > now);
