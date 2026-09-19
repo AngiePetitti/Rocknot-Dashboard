@@ -53,7 +53,7 @@ type AdSource = 'facebook' | 'google_ads' | 'tiktok' | 'snapchat' | 'pinterest';
 async function fetchSourceTotals(source: AdSource, params: Record<string, string>): Promise<WindsorRow[]> {
   const fieldMap: Record<AdSource, string> = {
     facebook:   'account_id,source,spend,impressions,clicks,action_values_omni_purchase,actions_omni_purchase',
-    google_ads: 'source,spend,impressions,clicks,conversion_value,conversions',
+    google_ads: 'source,spend,impressions,clicks,conversions_value,conversion_value,conversions',
     tiktok:     'source,spend,impressions,clicks,complete_payment,total_complete_payment_rate,onsite_total_purchase_value,conversion_value',
     snapchat:   'source,spend,impressions,clicks,conversion_purchases,conversion_purchases_value',
     pinterest:  'source,spend,impressions,clicks,total_checkout,total_checkout_value',
@@ -121,7 +121,8 @@ function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'Ti
       revenue += Number(r.total_complete_payment_rate || r.onsite_total_purchase_value || row.conversion_value || 0);
       conversions += Number(r.complete_payment || r.onsite_total_purchase || row.conversions || 0);
     } else {
-      revenue += Number(row.conversion_value || 0);
+      // Google: Windsor names the purchase value conversions_value (conversion_value is usually empty).
+      revenue += Number(r.conversions_value || row.conversion_value || 0);
       conversions += Number(row.conversions || 0);
     }
   }
@@ -280,6 +281,9 @@ export async function GET(request: NextRequest) {
         metaDailyRowCount: metaDaily.length,
         metaDailySample: metaDaily.slice(0, 5),
         googleTotalsRowCount: googleTotals.length,
+        googleTotalsSample: googleTotals.slice(0, 3),
+        pinterestTotalsRowCount: pinterestTotals.length,
+        pinterestTotalsSample: pinterestTotals.slice(0, 3),
         tiktokTotalsRowCount: tiktokTotals.length,
       });
     }
