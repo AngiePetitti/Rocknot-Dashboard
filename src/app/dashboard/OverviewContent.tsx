@@ -239,12 +239,11 @@ export default function OverviewContent() {
   // Manager / Google Ads / TikTok / Pinterest show, keyed by platform name.
   const [platformPurchases, setPlatformPurchases] = useState<Record<string, { purchases: number; costPerPurchase: number }>>({});
 
-  function buildLivePlatformSpend(m: LiveMetrics, purchases: Record<string, { purchases: number; costPerPurchase: number }> = platformPurchases): PlatformSpend[] | null {
+  function buildLivePlatformSpend(m: LiveMetrics): PlatformSpend[] | null {
     if (!m.metaSpend && !m.googleSpend && !m.tiktokSpend && !m.snapchatSpend && !m.pinterestSpend) return null;
     const platforms: PlatformSpend[] = [];
     const push = (platform: string, spend: number, revenue: number, color: string) => {
       if (spend <= 0) return;
-      const pp = purchases[platform];
       platforms.push({
         platform,
         spend,
@@ -252,10 +251,10 @@ export default function OverviewContent() {
         roas: spend > 0 ? Math.round((revenue / spend) * 100) / 100 : 0,
         ctr: 0,
         impressions: 0,
-        // Cost per purchase exactly as the platform reports it: its spend ÷ its
-        // own purchase count. Not de-duplicated — each platform claims its own.
-        purchases: pp ? pp.purchases : null,
-        cac: pp && pp.purchases > 0 ? pp.costPerPurchase : null,
+        // Purchases + cost per purchase are looked up from platformPurchases at
+        // render time (the two requests race; stamping them here used a stale copy).
+        purchases: null,
+        cac: null,
         color,
       });
     };
@@ -267,13 +266,6 @@ export default function OverviewContent() {
     return platforms.length > 0 ? platforms : null;
   }
 
-  // Once the ads endpoint answers, stamp its purchases onto the platform rows.
-  useEffect(() => {
-    setLivePlatformSpend(prev => prev ? prev.map(p => {
-      const pp = platformPurchases[p.platform];
-      return { ...p, purchases: pp ? pp.purchases : null, cac: pp && pp.purchases > 0 ? pp.costPerPurchase : null };
-    }) : prev);
-  }, [platformPurchases]);
 
   // Guards against out-of-order responses: switching timeframes fast used to
   // let the PREVIOUS timeframe's slower response land last and overwrite the
@@ -1289,7 +1281,12 @@ export default function OverviewContent() {
               </tr>
             </thead>
             <tbody>
-              {(livePlatformSpend ?? []).map((p) => (
+              {(livePlatformSpend ?? []).map((raw) => {
+                // Cost per purchase exactly as the platform reports it: its spend ÷ its
+                // own purchase count. Not de-duplicated — each platform claims its own.
+                const pp = platformPurchases[raw.platform];
+                const p = { ...raw, purchases: pp ? pp.purchases : null, cac: pp && pp.purchases > 0 ? pp.costPerPurchase : null };
+                return (
                 <tr key={p.platform} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                   <td className="py-3 pr-4">
                     <div className="flex items-center gap-2">
@@ -1315,7 +1312,8 @@ export default function OverviewContent() {
                     {p.cac ? formatCurrency(p.cac) : '—'}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
