@@ -114,7 +114,7 @@ export default function OverviewContent() {
   const [revenueSource, setRevenueSource] = useState<'shopify' | 'none' | null>(null);
   const [adsError, setAdsError] = useState<string | null>(null);
   const [shopifyLiveError, setShopifyLiveError] = useState<string | null>(null);
-  const [shopifySource, setShopifySource] = useState<'shopifyql' | 'bigquery' | null>(null);
+  const [shopifySource, setShopifySource] = useState<'shopifyql' | 'shopifyql_totals' | 'bigquery' | null>(null);
   const [health, setHealth] = useState<null | {
     allOk: boolean;
     platforms: Array<{ platform: string; dashboardSpend: number; referenceSpend: number | null; referenceSource: string; diff: number | null; diffPct: number | null; status: string }>;
@@ -350,7 +350,7 @@ export default function OverviewContent() {
         setShopifyLatestDate((data.shopifyLatestDate as string) || null);
         setRevenueSource((data.revenueSource as 'shopify' | 'none') || null);
         setShopifyLiveError((data.shopifyLiveError as string) || null);
-        setShopifySource((data.shopifySource as 'shopifyql' | 'bigquery') || null);
+        setShopifySource((data.shopifySource as 'shopifyql' | 'shopifyql_totals' | 'bigquery') || null);
         setLiveSource(source as typeof liveSource);
         setLastUpdated(new Date().toLocaleTimeString());
       },
@@ -632,7 +632,7 @@ export default function OverviewContent() {
         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-amber-800">
           <span>⚠️</span>
           <span>
-            Shopify&apos;s live report did not answer, so sales below come from the Windsor-synced order rows instead. Those count each order at placement and do not subtract returns processed in this period, so they run higher than Shopify Analytics.
+            Shopify&apos;s report did not answer, so sales below come from the Windsor-synced order rows instead. Total sales, net sales and orders still follow Shopify&apos;s day-by-day rules, but return fees cannot be included because only Shopify reports them, so net sales and MER run slightly low here.
             {shopifyLiveError && <> Shopify said: {shopifyLiveError}.</>} Tap Refresh to retry.
           </span>
         </div>

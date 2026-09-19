@@ -45,7 +45,7 @@ export interface OverviewResult {
   revenueData: Array<{ date: string; revenue: number; netSales?: number; orders: number; adSpend: number; newCustomers: number; totalCustomers: number }>;
   revenueSource: 'shopify' | 'none';
   /** Where the Shopify sales figures came from: Shopify's own report (matches Shopify Analytics) or the Windsor-synced order rows (fallback). */
-  shopifySource?: 'shopifyql' | 'bigquery';
+  shopifySource?: 'shopifyql' | 'shopifyql_totals' | 'bigquery';
   /** Why the live Shopify report was not used, when it was not. */
   shopifyLiveError?: string;
 }
@@ -169,6 +169,62 @@ async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean
       totalSales: parseFloat(cell(r, 'total_sales') || '0'),
     };
   });
+}
+
+// Shopify's totals for the range in ONE row — no TIMESERIES, so it answers in
+// a fraction of the time the per-day query needs. Used when the per-day query
+// fails: the chart then comes from the Windsor rows, but every headline number
+// (net sales incl. return fees, total sales, orders, AOV) is still Shopify's.
+export async function fetchShopifyTotals(from: string, to: string): Promise<ShopifyDay | null> {
+  if (!SHOPIFY_TOKEN) return null;
+  let withFees = includeReturnFees();
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const fields = withFees
+      ? 'orders, net_sales, return_fees, total_sales, average_order_value'
+      : 'orders, net_sales, total_sales, average_order_value';
+    try {
+      const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
+        body: JSON.stringify({
+          query: `{ shopifyqlQuery(query: ${JSON.stringify(`FROM sales SHOW ${fields} SINCE ${from} UNTIL ${to}`)}) { tableData { rows columns { name } } parseErrors } }`,
+        }),
+        cache: 'no-store',
+        signal: AbortSignal.timeout(15000),
+      });
+      const json = await res.json();
+      const topErrors = (json?.errors as Array<{ message?: string }> | undefined) || [];
+      if (topErrors.length) throw new Error(topErrors.map(e => e.message).join('; ') || 'Shopify GraphQL error');
+      const q = json?.data?.shopifyqlQuery;
+      if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
+      const cols: { name: string }[] = q?.tableData?.columns || [];
+      const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
+      if (!rows.length) return null;
+      const r = rows[0];
+      const cell = (name: string): string => {
+        if (Array.isArray(r)) { const i = cols.findIndex(c => c.name === name); return i >= 0 ? (r[i] ?? '') : ''; }
+        return r[name] ?? '';
+      };
+      const returnFees = withFees ? Math.abs(parseFloat(cell('return_fees') || '0')) || 0 : 0;
+      const orders = Math.round(parseFloat(cell('orders') || '0'));
+      const aov = parseFloat(cell('average_order_value') || '0') || 0;
+      return {
+        date: from,
+        netSales: parseFloat(cell('net_sales') || '0') + returnFees,
+        returnFees,
+        aovBasis: aov * orders,
+        orders,
+        totalSales: parseFloat(cell('total_sales') || '0'),
+      };
+    } catch (e) {
+      lastErr = e;
+      const parseErr = withFees && /return_fees/i.test(String(e instanceof Error ? e.message : e));
+      if (parseErr) withFees = false;
+      else await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 // Website conversion rate from ShopifyQL sessions — the same number Shopify's
@@ -482,6 +538,13 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     (shopifyDaysQl && shopifyDaysQl.length > 0 ? shopifyDaysQl : null)
     ?? (shopifyDaysBq && shopifyDaysBq.length > 0 ? shopifyDaysBq : null)
     ?? [];
+  // Per-day Shopify query failed → still get Shopify's TOTALS (incl. return
+  // fees) in one cheap call; the Windsor rows only shape the daily chart.
+  let shopifyTotals: ShopifyDay | null = null;
+  if (!(shopifyDaysQl && shopifyDaysQl.length > 0)) {
+    try { shopifyTotals = await fetchShopifyTotals(dateFrom, dateTo); }
+    catch (e: unknown) { shopifyQlError = `${shopifyQlError ? shopifyQlError + ' / ' : ''}totals: ${e instanceof Error ? e.message : String(e)}`; }
+  }
 
   const snapByDate: Record<string, { spend: number; revenue: number }> = {};
   for (const r of snapRows) snapByDate[r.date] = { spend: Number(r.spend || 0), revenue: Number(r.revenue || 0) };
@@ -636,6 +699,14 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const returningCustomerRevenue = useShopifySplit ? shopifySplit!.returningRevenue : Number(cust.returning_customer_revenue || 0);
   const totalCust = newCustomers + returningCustomers;
 
+  if (shopifyTotals) {
+    totalRevenue = shopifyTotals.totalSales;
+    totalNetSales = shopifyTotals.netSales;
+    totalReturnFees = shopifyTotals.returnFees;
+    totalAovBasis = shopifyTotals.aovBasis;
+    totalOrders = shopifyTotals.orders;
+  }
+
   return {
     metrics: {
       totalRevenue: Math.round(totalRevenue),
@@ -678,7 +749,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     },
     revenueData,
     revenueSource: totalRevenue > 0 ? 'shopify' : 'none',
-    shopifySource: shopifyDaysQl && shopifyDaysQl.length > 0 ? 'shopifyql' : 'bigquery',
+    shopifySource: shopifyDaysQl && shopifyDaysQl.length > 0 ? 'shopifyql' : shopifyTotals ? 'shopifyql_totals' : 'bigquery',
     ...(shopifyQlError ? { shopifyLiveError: shopifyQlError } : {}),
     ...(adsQueryError ? { adsError: adsQueryError } : {}),
   };
