@@ -1,4 +1,4 @@
-import { runQuery, getDataset, dedupedOrdersCte, tableExists } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte, tableExists, dailyShopifySalesSql } from '@/src/lib/bigquery';
 import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
 import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees } from '@/src/lib/client';
 import { fetchHumanConversion } from '@/src/lib/traffic';
@@ -99,16 +99,23 @@ export async function fetchShopifyDaily(from: string, to: string): Promise<Shopi
   // backoff instead of letting one THROTTLED response zero out revenue.
   // Two attempts max with a short pause — deep retry stacks made the live
   // view hang for a minute when Shopify was down.
-  const withFees = includeReturnFees();
-  try {
-    return await fetchShopifyDailyOnce(from, to, withFees);
-  } catch (e) {
-    // If Shopify rejects the return_fees column (parse error), drop it rather
-    // than lose revenue entirely; otherwise a plain retry after a pause.
-    const parseErr = withFees && /return_fees/i.test(String(e instanceof Error ? e.message : e));
-    if (!parseErr) await new Promise(r => setTimeout(r, 800));
-    return await fetchShopifyDailyOnce(from, to, withFees && !parseErr);
+  // Three attempts with a growing pause: this is THE number the dashboard is
+  // judged on, and the fallback (Windsor order rows) is close but not Shopify.
+  let withFees = includeReturnFees();
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await fetchShopifyDailyOnce(from, to, withFees);
+    } catch (e) {
+      lastErr = e;
+      // If Shopify rejects the return_fees column (parse error), drop it rather
+      // than lose revenue entirely; otherwise pause and retry.
+      const parseErr = withFees && /return_fees/i.test(String(e instanceof Error ? e.message : e));
+      if (parseErr) withFees = false;
+      else await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+    }
   }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean): Promise<ShopifyDay[]> {
@@ -126,7 +133,9 @@ async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean
       }}`,
     }),
     cache: 'no-store',
-    signal: AbortSignal.timeout(8000),
+    // ShopifyQL over a long range with many refunds can take well over 8s;
+    // aborting early was the main reason the fallback numbers appeared.
+    signal: AbortSignal.timeout(20000),
   });
   const json = await res.json();
   // Top-level GraphQL errors (throttling, auth, scope) come back OUTSIDE
@@ -428,17 +437,9 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // ShopifyQL stays preferred because it matches Shopify's Analytics reports
   // to the cent; the BQ order sums run a hair different and lag Windsor's
   // last sync for the most recent hours.
-  const bqShopifySql = `
-    WITH order_revenue AS (${dedupedOrdersCte(ds)})
-    SELECT FORMAT_DATE('%Y-%m-%d', order_date) AS date,
-           COUNT(*) AS orders,
-           SUM(total_price) AS total_sales,
-           SUM(net_sales) AS net_sales,
-           SUM(net_sales_placed) AS net_sales_placed
-    FROM order_revenue
-    WHERE order_date BETWEEN @date_from AND @date_to
-    GROUP BY date
-  `;
+  // Shopify-style daily sales (money attributed to the day it moved; refunds
+  // negative on the day processed) — matches Shopify Analytics for the range.
+  const bqShopifySql = dailyShopifySalesSql(ds);
 
   let adsQueryError: string | undefined;
   type PlatformDayRow = { date: string; spend: number | null; revenue: number | null };

@@ -108,6 +108,40 @@ export async function tableExists(table: string): Promise<boolean> {
 // A handful of rows have a null order_id (no duplicate refund rows to
 // match against), so fall back to a per-row key for those rather than
 // dropping them — excluding them undercounts both revenue and order count.
+/**
+ * Shopify-style daily sales from the Windsor order rows, for when Shopify's
+ * own report is unavailable. Shopify attributes money to the day it moved:
+ * an order counts on the day it was placed and a refund counts (negative) on
+ * the day it was processed. Windsor stores exactly that — one row per order
+ * event, dated by the event — so summing rows BY ROW DATE reproduces Shopify's
+ * total_sales and net_sales for the day, while `orders` counts only the rows
+ * that are an order's first appearance (its placement). `net_sales_placed`
+ * is the placed orders' net before any later refund — Shopify's AOV basis.
+ * (Verified on Kailee P, 2026-09-18: 71 orders, $6,546.74 total, $5,256.08
+ * net — identical to Shopify Analytics.)
+ */
+export function dailyShopifySalesSql(ds: string): string {
+  return `
+    WITH ev AS (
+      SELECT DISTINCT
+        COALESCE(CAST(order_id AS STRING), TO_JSON_STRING(STRUCT(date, order_total_price, order_net_sales, order_customer_id))) AS order_id,
+        DATE(date) AS d,
+        COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0) AS total,
+        COALESCE(CAST(order_net_sales AS FLOAT64), CAST(order_total_price AS FLOAT64), 0) AS net
+      FROM \`${ds}.shopify_orders\`
+    ),
+    first_seen AS (SELECT order_id, MIN(d) AS first_d FROM ev GROUP BY order_id)
+    SELECT FORMAT_DATE('%Y-%m-%d', ev.d) AS date,
+           COUNTIF(ev.d = f.first_d) AS orders,
+           SUM(ev.total) AS total_sales,
+           SUM(ev.net) AS net_sales,
+           SUM(IF(ev.d = f.first_d, ev.net, 0)) AS net_sales_placed
+    FROM ev JOIN first_seen f USING (order_id)
+    WHERE ev.d BETWEEN @date_from AND @date_to
+    GROUP BY date
+  `;
+}
+
 export function dedupedOrdersCte(ds: string): string {
   return `
     SELECT

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { runQuery, getDataset, isBigQueryConfigured, dedupedOrdersCte } from '@/src/lib/bigquery';
+import { runQuery, getDataset, isBigQueryConfigured, dedupedOrdersCte, dailyShopifySalesSql } from '@/src/lib/bigquery';
 
 export const dynamic = 'force-dynamic';
 
@@ -121,6 +121,19 @@ export async function GET(request: NextRequest) {
     const r = cand[0] || {};
     out.candidates = Object.fromEntries(Object.entries(r).map(([k, v]) => [k, num(v)]));
   } catch (e: unknown) { out.candidates = { error: String(e instanceof Error ? e.message : e) }; }
+
+  // The Overview's BigQuery fallback (Shopify-style day attribution) — should
+  // match the shopifyql block below for the same range.
+  try {
+    const rows = await runQuery<Record<string, unknown>>(dailyShopifySalesSql(ds), { date_from: from, date_to: to });
+    out.fallbackDaily = {
+      days: rows.length,
+      orders: rows.reduce((s, r) => s + Number(r.orders || 0), 0),
+      totalSales: num(rows.reduce((s, r) => s + Number(r.total_sales || 0), 0)),
+      netSales: num(rows.reduce((s, r) => s + Number(r.net_sales || 0), 0)),
+      netSalesPlaced: num(rows.reduce((s, r) => s + Number(r.net_sales_placed || 0), 0)),
+    };
+  } catch (e: unknown) { out.fallbackDaily = { error: String(e instanceof Error ? e.message : e) }; }
 
   try {
     const { fetchShopifyDaily } = await import('@/src/lib/bqOverview');
