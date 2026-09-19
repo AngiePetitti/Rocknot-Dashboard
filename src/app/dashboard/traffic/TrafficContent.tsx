@@ -108,17 +108,20 @@ export default function TrafficContent() {
             const priorHuman = data.quality?.priorHumanSessions ?? prior?.sessions;
             const botN = data.quality?.suspectedBot ?? 0;
             return (
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mt-4 mb-6">
                 <MetricCard title="Human Sessions" value={n(human)} subtitle={botN > 0 ? `${n(totals.sessions)} raw − ${n(botN)} suspected bot` : `${n(totals.visitors)} visitors · no bots detected`} accentColor="#818cf8"
                   comparison={prior && priorHuman ? { current: human, prior: priorHuman } : undefined} />
-                <MetricCard title="Added to Cart" value={pct(totals.addedToCart, human)} subtitle={`${n(totals.addedToCart)} sessions`} accentColor="#f9a8d4"
+                <MetricCard title="Add to Cart" value={pct(totals.addedToCart, human)} subtitle={`${n(totals.addedToCart)} sessions`} accentColor="#f9a8d4"
                   comparison={prior ? { current: totals.addedToCart, prior: prior.addedToCart } : undefined} />
-                <MetricCard title="Reached Checkout" value={pct(totals.reachedCheckout, human)} subtitle={`${n(totals.reachedCheckout)} sessions`} accentColor="#fbbf24"
+                <MetricCard title="Checkout" value={pct(totals.reachedCheckout, human)} subtitle={`${n(totals.reachedCheckout)} sessions reached it`} accentColor="#fbbf24"
                   comparison={prior ? { current: totals.reachedCheckout, prior: prior.reachedCheckout } : undefined} />
-                <MetricCard title="Conversion Rate" value={pct(totals.completed, human)} subtitle={`${n(totals.completed)} orders · human basis${botN > 0 ? ` (raw ${pct(totals.completed, totals.sessions)})` : ''}`} accentColor="#34d399"
+                <MetricCard title="Conversion" value={pct(totals.completed, human)} subtitle={`${n(totals.completed)} orders · human basis${botN > 0 ? ` (raw ${pct(totals.completed, totals.sessions)})` : ''}`} accentColor="#34d399"
                   comparison={prior ? { current: totals.completed, prior: prior.completed } : undefined} />
-                <MetricCard title="AI Assistant Visits" value={n((data.ai?.assistants || []).reduce((s, a) => s + a.sessions, 0))}
-                  subtitle={(data.ai?.assistants || []).length ? (data.ai!.assistants.map(a => `${a.assistant} ${a.sessions}`).join(' · ')) : 'None in this period'} accentColor="#22d3ee" />
+                {/* Fifth card spans the row on phones so it is not left alone on one side. */}
+                <div className="col-span-2 lg:col-span-1">
+                  <MetricCard title="AI Visits" value={n((data.ai?.assistants || []).reduce((s, a) => s + a.sessions, 0))}
+                    subtitle={(data.ai?.assistants || []).length ? (data.ai!.assistants.map(a => `${a.assistant} ${a.sessions}`).join(' · ')) : 'None in this period'} accentColor="#22d3ee" />
+                </div>
               </div>
             );
           })()}
