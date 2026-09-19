@@ -820,7 +820,7 @@ export default function OverviewContent() {
         <MetricCard
           title="Total Ad Spend"
           value={formatCurrency(metrics.totalAdSpend)}
-          subtitle={`${(metrics.netSales ?? metrics.totalRevenue) > 0 ? `${((metrics.totalAdSpend / (metrics.netSales ?? metrics.totalRevenue)) * 100).toFixed(1)}% of net sales goes to marketing · ` : ''}${metrics.metaSpend ? `Meta ${formatCurrency(metrics.metaSpend)} · Google ${formatCurrency(metrics.googleSpend ?? 0)}${metrics.tiktokSpend ? ` · TikTok ${formatCurrency(metrics.tiktokSpend)}` : ''}${metrics.snapchatSpend ? ` · Snap ${formatCurrency(metrics.snapchatSpend)}` : ''}` : 'All ad platforms'}`}
+          subtitle={`${(metrics.netSales ?? metrics.totalRevenue) > 0 ? `${((metrics.totalAdSpend / (metrics.netSales ?? metrics.totalRevenue)) * 100).toFixed(1)}% of net sales goes to marketing · ` : ''}${metrics.metaSpend ? `Meta ${formatCurrency(metrics.metaSpend)} · Google ${formatCurrency(metrics.googleSpend ?? 0)}${metrics.tiktokSpend ? ` · TikTok ${formatCurrency(metrics.tiktokSpend)}` : ''}${metrics.snapchatSpend ? ` · Snap ${formatCurrency(metrics.snapchatSpend)}` : ''}${metrics.pinterestSpend ? ` · Pinterest ${formatCurrency(metrics.pinterestSpend)}` : ''}` : 'All ad platforms'}`}
           accentColor="#f9a8d4"
           comparison={compareOn && priorPeriod ? { current: metrics.totalAdSpend, prior: priorPeriod.totalAdSpend } : undefined}
         />
