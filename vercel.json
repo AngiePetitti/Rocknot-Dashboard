@@ -1,5 +1,10 @@
 {
   "crons": [
     { "path": "/api/alerts/restock", "schedule": "0 15 * * 1" }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "claude/dreamy-darwin-ggsgla": false
+    }
+  }
 }
