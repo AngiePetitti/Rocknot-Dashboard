@@ -44,6 +44,10 @@ export interface OverviewResult {
   };
   revenueData: Array<{ date: string; revenue: number; netSales?: number; orders: number; adSpend: number; newCustomers: number; totalCustomers: number }>;
   revenueSource: 'shopify' | 'none';
+  /** Where the Shopify sales figures came from: Shopify's own report (matches Shopify Analytics) or the Windsor-synced order rows (fallback). */
+  shopifySource?: 'shopifyql' | 'bigquery';
+  /** Why the live Shopify report was not used, when it was not. */
+  shopifyLiveError?: string;
 }
 
 interface AdsRow {
@@ -439,8 +443,9 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   let adsQueryError: string | undefined;
   type PlatformDayRow = { date: string; spend: number | null; revenue: number | null };
   const noPlatformRows = Promise.resolve([] as PlatformDayRow[]);
+  let shopifyQlError: string | undefined;
   const [shopifyDaysQl, shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows, pinterestRows, shopifySplit] = await Promise.all([
-    fetchShopifyDaily(dateFrom, dateTo).catch(() => null),
+    fetchShopifyDaily(dateFrom, dateTo).catch((e: unknown) => { shopifyQlError = String(e instanceof Error ? e.message : e); return null; }),
     runQuery<{ date: string; orders: number; total_sales: number | null; net_sales: number | null; net_sales_placed: number | null }>(bqShopifySql, params)
       .then(rows => rows.map(r => ({
         date: r.date,
@@ -672,6 +677,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     },
     revenueData,
     revenueSource: totalRevenue > 0 ? 'shopify' : 'none',
+    shopifySource: shopifyDaysQl && shopifyDaysQl.length > 0 ? 'shopifyql' : 'bigquery',
+    ...(shopifyQlError ? { shopifyLiveError: shopifyQlError } : {}),
     ...(adsQueryError ? { adsError: adsQueryError } : {}),
   };
 }

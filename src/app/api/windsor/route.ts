@@ -492,6 +492,8 @@ export async function GET(request: NextRequest) {
         dateFrom: dateFrom || null,
         dateTo: dateTo || null,
         revenueSource: overview.revenueSource,
+        shopifySource: overview.shopifySource,
+        ...(overview.shopifyLiveError ? { shopifyLiveError: overview.shopifyLiveError } : {}),
         metrics: overview.metrics,
         revenueData: overview.revenueData,
         ...(overview.adsError ? { adsError: overview.adsError } : {}),

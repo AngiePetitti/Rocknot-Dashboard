@@ -114,6 +114,7 @@ export default function OverviewContent() {
   const [revenueSource, setRevenueSource] = useState<'shopify' | 'none' | null>(null);
   const [adsError, setAdsError] = useState<string | null>(null);
   const [shopifyLiveError, setShopifyLiveError] = useState<string | null>(null);
+  const [shopifySource, setShopifySource] = useState<'shopifyql' | 'bigquery' | null>(null);
   const [health, setHealth] = useState<null | {
     allOk: boolean;
     platforms: Array<{ platform: string; dashboardSpend: number; referenceSpend: number | null; referenceSource: string; diff: number | null; diffPct: number | null; status: string }>;
@@ -349,6 +350,7 @@ export default function OverviewContent() {
         setShopifyLatestDate((data.shopifyLatestDate as string) || null);
         setRevenueSource((data.revenueSource as 'shopify' | 'none') || null);
         setShopifyLiveError((data.shopifyLiveError as string) || null);
+        setShopifySource((data.shopifySource as 'shopifyql' | 'bigquery') || null);
         setLiveSource(source as typeof liveSource);
         setLastUpdated(new Date().toLocaleTimeString());
       },
@@ -622,6 +624,16 @@ export default function OverviewContent() {
           <span>
             Shopify hasn&apos;t synced revenue for this period yet — revenue and orders will show as 0 until Shopify syncs. Platform-attributed revenue is shown in the platform table below.
             {shopifyLiveError && <> Shopify&apos;s live query also failed: {shopifyLiveError} — tap Refresh to retry.</>}
+          </span>
+        </div>
+      )}
+
+      {shopifySource === 'bigquery' && revenueSource === 'shopify' && isLive && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-amber-800">
+          <span>⚠️</span>
+          <span>
+            Shopify&apos;s live report did not answer, so sales below come from the Windsor-synced order rows instead. Those count each order at placement and do not subtract returns processed in this period, so they run higher than Shopify Analytics.
+            {shopifyLiveError && <> Shopify said: {shopifyLiveError}.</>} Tap Refresh to retry.
           </span>
         </div>
       )}
