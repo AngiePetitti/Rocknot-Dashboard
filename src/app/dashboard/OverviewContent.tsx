@@ -8,7 +8,7 @@ import { buildCallouts } from '@/src/lib/callouts';
 import { cachedJson } from '@/src/lib/clientCache';
 import type { MarketingEvent } from '@/src/app/api/calendar/route';
 import { Timeframe, PlatformSpend, DailyRevenue } from '@/src/lib/mockData';
-import { formatCurrency, formatROAS, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
+import { formatCurrency, formatROAS, TIMEFRAME_LABELS } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import MetricCard from '@/src/components/ui/MetricCard';
 import Card from '@/src/components/ui/Card';
@@ -66,6 +66,9 @@ interface LiveMetrics {
   pctNew?: number;
   pctReturning?: number;
   conversionRate?: number;
+  conversionRateRaw?: number;
+  humanSessions?: number;
+  botSessions?: number;
 }
 
 interface PriorPeriod {
@@ -111,6 +114,7 @@ export default function OverviewContent() {
   const [revenueSource, setRevenueSource] = useState<'shopify' | 'none' | null>(null);
   const [adsError, setAdsError] = useState<string | null>(null);
   const [shopifyLiveError, setShopifyLiveError] = useState<string | null>(null);
+  const [shopifySource, setShopifySource] = useState<'shopifyql' | 'shopifyql_totals' | 'bigquery' | null>(null);
   const [health, setHealth] = useState<null | {
     allOk: boolean;
     platforms: Array<{ platform: string; dashboardSpend: number; referenceSpend: number | null; referenceSource: string; diff: number | null; diffPct: number | null; status: string }>;
@@ -245,11 +249,16 @@ export default function OverviewContent() {
       .catch(() => {});
   }, []);
 
-  function buildLivePlatformSpend(m: LiveMetrics): PlatformSpend[] | null {
+  // Platform-reported purchases and cost per purchase — the same numbers Ads
+  // Manager / Google Ads / TikTok / Pinterest show, keyed by platform name.
+  const [platformPurchases, setPlatformPurchases] = useState<Record<string, { purchases: number; costPerPurchase: number }>>({});
+
+  function buildLivePlatformSpend(m: LiveMetrics, purchases: Record<string, { purchases: number; costPerPurchase: number }> = platformPurchases): PlatformSpend[] | null {
     if (!m.metaSpend && !m.googleSpend && !m.tiktokSpend && !m.snapchatSpend && !m.pinterestSpend) return null;
     const platforms: PlatformSpend[] = [];
     const push = (platform: string, spend: number, revenue: number, color: string) => {
       if (spend <= 0) return;
+      const pp = purchases[platform];
       platforms.push({
         platform,
         spend,
@@ -257,7 +266,10 @@ export default function OverviewContent() {
         roas: spend > 0 ? Math.round((revenue / spend) * 100) / 100 : 0,
         ctr: 0,
         impressions: 0,
-        cac: null, // filled below, once every platform's claimed revenue is known
+        // Cost per purchase exactly as the platform reports it: its spend ÷ its
+        // own purchase count. Not de-duplicated — each platform claims its own.
+        purchases: pp ? pp.purchases : null,
+        cac: pp && pp.purchases > 0 ? pp.costPerPurchase : null,
         color,
       });
     };
@@ -265,21 +277,17 @@ export default function OverviewContent() {
     push('Google', m.googleSpend ?? 0, m.googleRevenue ?? 0, '#34d399');
     push('TikTok', m.tiktokSpend ?? 0, m.tiktokRevenue ?? 0, '#f472b6');
     push('Snapchat', m.snapchatSpend ?? 0, m.snapchatRevenue ?? 0, '#facc15');
-    push('Pinterest', m.pinterestSpend ?? 0, m.pinterestRevenue ?? 0, '#fb7185');
-    // Cost per order, de-duplicated. Each platform claims credit for orders the
-    // others also claim, so their attributed revenue adds up to more than the
-    // store sold. Use each platform's SHARE of total claimed revenue to split
-    // the store's REAL order count, then spend ÷ that share of orders.
-    // (Dividing spend by claimed revenue ÷ AOV — the old formula — produced a
-    // "$17 CAC" on a platform claiming 8x ROAS.)
-    const claimed = platforms.reduce((sum, p) => sum + p.revenue, 0);
-    for (const p of platforms) {
-      const shareOfOrders = claimed > 0 && m.totalOrders > 0 ? (p.revenue / claimed) * m.totalOrders : 0;
-      p.cac = shareOfOrders > 0 ? Math.round(p.spend / shareOfOrders) : null;
-    }
     push('Pinterest', m.pinterestSpend ?? 0, m.pinterestRevenue ?? 0, PLATFORMS.pinterest.color);
     return platforms.length > 0 ? platforms : null;
   }
+
+  // Once the ads endpoint answers, stamp its purchases onto the platform rows.
+  useEffect(() => {
+    setLivePlatformSpend(prev => prev ? prev.map(p => {
+      const pp = platformPurchases[p.platform];
+      return { ...p, purchases: pp ? pp.purchases : null, cac: pp && pp.purchases > 0 ? pp.costPerPurchase : null };
+    }) : prev);
+  }, [platformPurchases]);
 
   // Guards against out-of-order responses: switching timeframes fast used to
   // let the PREVIOUS timeframe's slower response land last and overwrite the
@@ -295,6 +303,7 @@ export default function OverviewContent() {
     setRevenueData([]);
     setPriorPeriod(null);
     setLivePlatformSpend(null);
+    setPlatformPurchases({});
     setDataLag(false);
     setLatestAvailableDate(null);
     setShopifyDataLag(false);
@@ -311,6 +320,22 @@ export default function OverviewContent() {
     // fetch there unless the Compare toggle is on — it nearly doubled the
     // live view's load time.
     if (compareOn || tfRaw !== 'today') params.set('compare', 'true');
+
+    // Platform-reported purchases (Meta purchases, Google conversions …) for the
+    // Cost / Purchase column — same endpoint the Ad Performance tab reads.
+    const adsParams = new URLSearchParams({ tf: tfRaw });
+    if (dateFrom) adsParams.set('date_from', dateFrom);
+    if (dateTo) adsParams.set('date_to', dateTo);
+    cachedJson<{ platforms?: Array<{ platform: string; conversions?: number; costPerConversion?: number }> }>(
+      `/api/windsor/ads?${adsParams}`,
+      d => {
+        if (activeReqKey.current !== reqKey) return;
+        const map: Record<string, { purchases: number; costPerPurchase: number }> = {};
+        for (const p of d.platforms || []) map[p.platform] = { purchases: Number(p.conversions || 0), costPerPurchase: Number(p.costPerConversion || 0) };
+        setPlatformPurchases(map);
+      },
+      () => {},
+    );
 
     // Cached copies (from earlier visits this session) render instantly and
     // are refreshed in the background — switching tabs doesn't restart loads.
@@ -339,6 +364,7 @@ export default function OverviewContent() {
         setShopifyLatestDate((data.shopifyLatestDate as string) || null);
         setRevenueSource((data.revenueSource as 'shopify' | 'none') || null);
         setShopifyLiveError((data.shopifyLiveError as string) || null);
+        setShopifySource((data.shopifySource as 'shopifyql' | 'shopifyql_totals' | 'bigquery') || null);
         setLiveSource(source as typeof liveSource);
         setLastUpdated(new Date().toLocaleTimeString());
       },
@@ -629,6 +655,16 @@ export default function OverviewContent() {
           <span>
             Shopify hasn&apos;t synced revenue for this period yet — revenue and orders will show as 0 until Shopify syncs. Platform-attributed revenue is shown in the platform table below.
             {shopifyLiveError && <> Shopify&apos;s live query also failed: {shopifyLiveError} — tap Refresh to retry.</>}
+          </span>
+        </div>
+      )}
+
+      {shopifySource === 'bigquery' && revenueSource === 'shopify' && isLive && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-amber-800">
+          <span>⚠️</span>
+          <span>
+            Shopify&apos;s report did not answer, so sales below come from the Windsor-synced order rows instead. Total sales, net sales and orders still follow Shopify&apos;s day-by-day rules, but return fees cannot be included because only Shopify reports them, so net sales and MER run slightly low here.
+            {shopifyLiveError && <> Shopify said: {shopifyLiveError}.</>} Tap Refresh to retry.
           </span>
         </div>
       )}
@@ -948,7 +984,9 @@ export default function OverviewContent() {
           <MetricCard
             title="Website Conversion Rate"
             value={metrics.conversionRate ? `${metrics.conversionRate.toFixed(1)}%` : '—'}
-            subtitle="Sessions that checked out"
+            subtitle={metrics.botSessions
+              ? `Human sessions that checked out · ${metrics.botSessions.toLocaleString()} suspected bot sessions removed (raw ${(metrics.conversionRateRaw ?? 0).toFixed(1)}%)`
+              : 'Human sessions that checked out · no bot traffic detected'}
             accentColor="#a7f3d0"
           />
         </div>
@@ -1277,8 +1315,8 @@ export default function OverviewContent() {
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Spend</th>
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Revenue</th>
                 <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">ROAS</th>
-                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">CTR</th>
-                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-4">Cost / Order</th>
+                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-4">Purchases</th>
+                <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-4">Cost / Purchase</th>
               </tr>
             </thead>
             <tbody>
@@ -1303,8 +1341,8 @@ export default function OverviewContent() {
                       {formatROAS(p.roas)}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-right text-gray-600">{p.impressions > 0 ? formatPercent(p.ctr) : '—'}</td>
-                  <td className="py-3 pl-4 text-right font-semibold text-gray-700">
+                  <td className="py-3 px-4 text-right text-gray-600">{p.purchases != null ? p.purchases.toLocaleString() : '—'}</td>
+                  <td className="py-3 pl-4 text-right font-semibold" style={{ color: p.cac ? (p.cac > TARGET_CAC ? '#ef4444' : '#22c55e') : undefined }}>
                     {p.cac ? formatCurrency(p.cac) : '—'}
                   </td>
                 </tr>
@@ -1313,7 +1351,7 @@ export default function OverviewContent() {
           </table>
         </div>
         <p className="text-[11px] text-gray-400 mt-3">
-          Cost / Order = spend ÷ this platform&apos;s share of the store&apos;s actual orders (its share of all platform-claimed revenue, applied to the real order count). ROAS is platform-reported and not de-duplicated across platforms — the claims overlap. Neither is a new-customer CAC; that&apos;s the New Customer CAC card above.
+          {`Cost / Purchase = this platform's spend ÷ the purchases it reports — the same cost per purchase (Meta), cost per conversion (Google) or cost per complete payment (TikTok) shown inside each ads manager, coloured against the $${TARGET_CAC} target. Purchases and ROAS are each platform's own attribution, so they overlap and add up to more than the store's orders. Neither is a new-customer CAC; that's the New Customer CAC card above.`}
         </p>
       </Card>
     </div>

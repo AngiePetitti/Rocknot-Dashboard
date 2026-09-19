@@ -322,11 +322,11 @@ export default function AdsContent() {
                     )}
                   </div>
                   <div>
-                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Conversions</p>
+                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Purchases</p>
                     <p className="font-bold text-gray-800">{(p.conversions ?? 0).toLocaleString()}</p>
                   </div>
                   <div>
-                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Cost / Conv</p>
+                    <p className="text-gray-400 uppercase font-semibold mb-0.5">Cost / Purchase</p>
                     <p className="font-bold text-gray-800">{p.costPerConversion ? formatCurrency(p.costPerConversion) : '—'}</p>
                   </div>
                   <div>
@@ -470,8 +470,8 @@ export default function AdsContent() {
                         { key: 'spend', label: 'Spend' },
                         { key: 'roas', label: 'ROAS' },
                         { key: 'ctr', label: 'CTR' },
-                        { key: 'conversions', label: 'Conv' },
-                        { key: 'costPerConversion', label: 'Cost / Conv' },
+                        { key: 'conversions', label: 'Purchases' },
+                        { key: 'costPerConversion', label: 'Cost / Purchase' },
                         { key: 'clicks', label: 'Clicks' },
                       ] as { key: AdSortKey; label: string }[]).map(h => (
                         <th key={h.key} className={`pb-2 px-3 whitespace-nowrap w-px ${h.key === 'name' ? 'text-left pl-0' : 'text-center'}`}>

@@ -1,6 +1,7 @@
-import { runQuery, getDataset, dedupedOrdersCte, tableExists } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte, tableExists, dailyShopifySalesSql } from '@/src/lib/bigquery';
 import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
 import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees } from '@/src/lib/client';
+import { fetchHumanConversion } from '@/src/lib/traffic';
 
 export interface OverviewResult {
   adsError?: string;
@@ -34,10 +35,19 @@ export interface OverviewResult {
     pctReturning: number;
     /** Where the new/returning split came from: Shopify's own report, or the BigQuery order history. */
     customerSource?: 'shopify' | 'bigquery';
+    /** Website conversion on likely-human sessions (suspected bots removed — same rule as the Traffic tab). */
     conversionRate: number;
+    /** Shopify's raw conversion rate, all sessions. */
+    conversionRateRaw?: number;
+    humanSessions?: number;
+    botSessions?: number;
   };
   revenueData: Array<{ date: string; revenue: number; netSales?: number; orders: number; adSpend: number; newCustomers: number; totalCustomers: number }>;
   revenueSource: 'shopify' | 'none';
+  /** Where the Shopify sales figures came from: Shopify's own report (matches Shopify Analytics) or the Windsor-synced order rows (fallback). */
+  shopifySource?: 'shopifyql' | 'shopifyql_totals' | 'bigquery';
+  /** Why the live Shopify report was not used, when it was not. */
+  shopifyLiveError?: string;
 }
 
 interface AdsRow {
@@ -89,16 +99,23 @@ export async function fetchShopifyDaily(from: string, to: string): Promise<Shopi
   // backoff instead of letting one THROTTLED response zero out revenue.
   // Two attempts max with a short pause — deep retry stacks made the live
   // view hang for a minute when Shopify was down.
-  const withFees = includeReturnFees();
-  try {
-    return await fetchShopifyDailyOnce(from, to, withFees);
-  } catch (e) {
-    // If Shopify rejects the return_fees column (parse error), drop it rather
-    // than lose revenue entirely; otherwise a plain retry after a pause.
-    const parseErr = withFees && /return_fees/i.test(String(e instanceof Error ? e.message : e));
-    if (!parseErr) await new Promise(r => setTimeout(r, 800));
-    return await fetchShopifyDailyOnce(from, to, withFees && !parseErr);
+  // Three attempts with a growing pause: this is THE number the dashboard is
+  // judged on, and the fallback (Windsor order rows) is close but not Shopify.
+  let withFees = includeReturnFees();
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await fetchShopifyDailyOnce(from, to, withFees);
+    } catch (e) {
+      lastErr = e;
+      // If Shopify rejects the return_fees column (parse error), drop it rather
+      // than lose revenue entirely; otherwise pause and retry.
+      const parseErr = withFees && /return_fees/i.test(String(e instanceof Error ? e.message : e));
+      if (parseErr) withFees = false;
+      else await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+    }
   }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean): Promise<ShopifyDay[]> {
@@ -116,7 +133,9 @@ async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean
       }}`,
     }),
     cache: 'no-store',
-    signal: AbortSignal.timeout(8000),
+    // ShopifyQL over a long range with many refunds can take well over 8s;
+    // aborting early was the main reason the fallback numbers appeared.
+    signal: AbortSignal.timeout(20000),
   });
   const json = await res.json();
   // Top-level GraphQL errors (throttling, auth, scope) come back OUTSIDE
@@ -150,6 +169,62 @@ async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean
       totalSales: parseFloat(cell(r, 'total_sales') || '0'),
     };
   });
+}
+
+// Shopify's totals for the range in ONE row — no TIMESERIES, so it answers in
+// a fraction of the time the per-day query needs. Used when the per-day query
+// fails: the chart then comes from the Windsor rows, but every headline number
+// (net sales incl. return fees, total sales, orders, AOV) is still Shopify's.
+export async function fetchShopifyTotals(from: string, to: string): Promise<ShopifyDay | null> {
+  if (!SHOPIFY_TOKEN) return null;
+  let withFees = includeReturnFees();
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const fields = withFees
+      ? 'orders, net_sales, return_fees, total_sales, average_order_value'
+      : 'orders, net_sales, total_sales, average_order_value';
+    try {
+      const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
+        body: JSON.stringify({
+          query: `{ shopifyqlQuery(query: ${JSON.stringify(`FROM sales SHOW ${fields} SINCE ${from} UNTIL ${to}`)}) { tableData { rows columns { name } } parseErrors } }`,
+        }),
+        cache: 'no-store',
+        signal: AbortSignal.timeout(15000),
+      });
+      const json = await res.json();
+      const topErrors = (json?.errors as Array<{ message?: string }> | undefined) || [];
+      if (topErrors.length) throw new Error(topErrors.map(e => e.message).join('; ') || 'Shopify GraphQL error');
+      const q = json?.data?.shopifyqlQuery;
+      if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
+      const cols: { name: string }[] = q?.tableData?.columns || [];
+      const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
+      if (!rows.length) return null;
+      const r = rows[0];
+      const cell = (name: string): string => {
+        if (Array.isArray(r)) { const i = cols.findIndex(c => c.name === name); return i >= 0 ? (r[i] ?? '') : ''; }
+        return r[name] ?? '';
+      };
+      const returnFees = withFees ? Math.abs(parseFloat(cell('return_fees') || '0')) || 0 : 0;
+      const orders = Math.round(parseFloat(cell('orders') || '0'));
+      const aov = parseFloat(cell('average_order_value') || '0') || 0;
+      return {
+        date: from,
+        netSales: parseFloat(cell('net_sales') || '0') + returnFees,
+        returnFees,
+        aovBasis: aov * orders,
+        orders,
+        totalSales: parseFloat(cell('total_sales') || '0'),
+      };
+    } catch (e) {
+      lastErr = e;
+      const parseErr = withFees && /return_fees/i.test(String(e instanceof Error ? e.message : e));
+      if (parseErr) withFees = false;
+      else await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 // Website conversion rate from ShopifyQL sessions — the same number Shopify's
@@ -418,23 +493,16 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // ShopifyQL stays preferred because it matches Shopify's Analytics reports
   // to the cent; the BQ order sums run a hair different and lag Windsor's
   // last sync for the most recent hours.
-  const bqShopifySql = `
-    WITH order_revenue AS (${dedupedOrdersCte(ds)})
-    SELECT FORMAT_DATE('%Y-%m-%d', order_date) AS date,
-           COUNT(*) AS orders,
-           SUM(total_price) AS total_sales,
-           SUM(net_sales) AS net_sales,
-           SUM(net_sales_placed) AS net_sales_placed
-    FROM order_revenue
-    WHERE order_date BETWEEN @date_from AND @date_to
-    GROUP BY date
-  `;
+  // Shopify-style daily sales (money attributed to the day it moved; refunds
+  // negative on the day processed) — matches Shopify Analytics for the range.
+  const bqShopifySql = dailyShopifySalesSql(ds);
 
   let adsQueryError: string | undefined;
   type PlatformDayRow = { date: string; spend: number | null; revenue: number | null };
   const noPlatformRows = Promise.resolve([] as PlatformDayRow[]);
+  let shopifyQlError: string | undefined;
   const [shopifyDaysQl, shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows, pinterestRows, shopifySplit] = await Promise.all([
-    fetchShopifyDaily(dateFrom, dateTo).catch(() => null),
+    fetchShopifyDaily(dateFrom, dateTo).catch((e: unknown) => { shopifyQlError = String(e instanceof Error ? e.message : e); return null; }),
     runQuery<{ date: string; orders: number; total_sales: number | null; net_sales: number | null; net_sales_placed: number | null }>(bqShopifySql, params)
       .then(rows => rows.map(r => ({
         date: r.date,
@@ -450,7 +518,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       .catch((err: unknown) => { adsQueryError = String(err); return [] as AdsRow[]; }),
     runQuery<CustomerRow>(customerSql, params).catch(() => [] as CustomerRow[]),
     runQuery<{ date: string; new_customers: number | null; buyers: number | null }>(customerDailySql, params).catch(() => [] as Array<{ date: string; new_customers: number | null; buyers: number | null }>),
-    fetchShopifyConversion(dateFrom, dateTo).catch(() => null),
+    fetchHumanConversion(dateFrom, dateTo).catch(() => null),
     hasPlatform('snapchat')
       ? runQuery<PlatformDayRow>(snapSql, params).catch(() => [] as PlatformDayRow[])
       : noPlatformRows,
@@ -470,6 +538,13 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     (shopifyDaysQl && shopifyDaysQl.length > 0 ? shopifyDaysQl : null)
     ?? (shopifyDaysBq && shopifyDaysBq.length > 0 ? shopifyDaysBq : null)
     ?? [];
+  // Per-day Shopify query failed → still get Shopify's TOTALS (incl. return
+  // fees) in one cheap call; the Windsor rows only shape the daily chart.
+  let shopifyTotals: ShopifyDay | null = null;
+  if (!(shopifyDaysQl && shopifyDaysQl.length > 0)) {
+    try { shopifyTotals = await fetchShopifyTotals(dateFrom, dateTo); }
+    catch (e: unknown) { shopifyQlError = `${shopifyQlError ? shopifyQlError + ' / ' : ''}totals: ${e instanceof Error ? e.message : String(e)}`; }
+  }
 
   const snapByDate: Record<string, { spend: number; revenue: number }> = {};
   for (const r of snapRows) snapByDate[r.date] = { spend: Number(r.spend || 0), revenue: Number(r.revenue || 0) };
@@ -624,6 +699,14 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const returningCustomerRevenue = useShopifySplit ? shopifySplit!.returningRevenue : Number(cust.returning_customer_revenue || 0);
   const totalCust = newCustomers + returningCustomers;
 
+  if (shopifyTotals) {
+    totalRevenue = shopifyTotals.totalSales;
+    totalNetSales = shopifyTotals.netSales;
+    totalReturnFees = shopifyTotals.returnFees;
+    totalAovBasis = shopifyTotals.aovBasis;
+    totalOrders = shopifyTotals.orders;
+  }
+
   return {
     metrics: {
       totalRevenue: Math.round(totalRevenue),
@@ -659,10 +742,15 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       pctNew: totalCust > 0 ? Math.round((newCustomers / totalCust) * 1000) / 10 : 0,
       pctReturning: totalCust > 0 ? Math.round((returningCustomers / totalCust) * 1000) / 10 : 0,
       customerSource: useShopifySplit ? 'shopify' : 'bigquery',
-      conversionRate: conversionRate ?? 0,
+      conversionRate: conversionRate?.rate ?? 0,
+      conversionRateRaw: conversionRate?.rawRate,
+      humanSessions: conversionRate?.humanSessions,
+      botSessions: conversionRate?.botSessions,
     },
     revenueData,
     revenueSource: totalRevenue > 0 ? 'shopify' : 'none',
+    shopifySource: shopifyDaysQl && shopifyDaysQl.length > 0 ? 'shopifyql' : shopifyTotals ? 'shopifyql_totals' : 'bigquery',
+    ...(shopifyQlError ? { shopifyLiveError: shopifyQlError } : {}),
     ...(adsQueryError ? { adsError: adsQueryError } : {}),
   };
 }

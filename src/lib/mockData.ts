@@ -20,7 +20,9 @@ export interface PlatformSpend {
   roas: number;
   ctr: number;
   impressions: number;
-  // Cost per attributed purchase: spend ÷ (platform revenue ÷ store AOV).
+  /** Purchases the platform itself reports (Meta purchases, Google conversions, TikTok complete payments, Pinterest checkouts). */
+  purchases?: number | null;
+  /** Cost per purchase exactly as the platform's ads manager shows it: spend ÷ its reported purchases. */
   cac?: number | null;
   color: string;
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Timeframe } from '@/src/lib/mockData';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
-import { getOverview, fetchShopifyDaily, fetchShopifyCustomerSplit } from '@/src/lib/bqOverview';
+import { getOverview, fetchShopifyDaily, fetchShopifyTotals, fetchShopifyCustomerSplit } from '@/src/lib/bqOverview';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { fetchMetaToday } from '@/src/lib/metaLive';
@@ -492,6 +492,8 @@ export async function GET(request: NextRequest) {
         dateFrom: dateFrom || null,
         dateTo: dateTo || null,
         revenueSource: overview.revenueSource,
+        shopifySource: overview.shopifySource,
+        ...(overview.shopifyLiveError ? { shopifyLiveError: overview.shopifyLiveError } : {}),
         metrics: overview.metrics,
         revenueData: overview.revenueData,
         ...(overview.adsError ? { adsError: overview.adsError } : {}),
@@ -631,8 +633,16 @@ export async function GET(request: NextRequest) {
     // by up to an hour, while Shopify's own API is always live.
     let shopifyLiveError: string | null = null;
     if (!latestAvailableDate) {
-      const { rows: shopifyLive, err } = await shopifyLivePromise;
+      let { rows: shopifyLive, err } = await shopifyLivePromise;
       shopifyLiveError = err;
+      if (shopifyLive.length === 0) {
+        // Per-day query failed or was empty — one cheap totals call keeps the
+        // headline numbers (net sales incl. return fees) Shopify's own.
+        try {
+          const t = await fetchShopifyTotals(currentParams.date_from, currentParams.date_to);
+          if (t && (t.orders > 0 || t.totalSales > 0)) { shopifyLive = [t]; shopifyLiveError = null; }
+        } catch (e: unknown) { shopifyLiveError = `${err ? err + ' / ' : ''}${e instanceof Error ? e.message : String(e)}`; }
+      }
       if (shopifyLive.length > 0) {
         const liveRevenue = shopifyLive.reduce((s, d) => s + d.totalSales, 0);
         const liveOrders = shopifyLive.reduce((s, d) => s + d.orders, 0);
