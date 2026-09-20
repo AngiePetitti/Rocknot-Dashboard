@@ -395,6 +395,10 @@ export default function OverviewContent() {
   // ── Month-end forecast (MTD pace, independent of the selected timeframe) ──
   const [mtdSnap, setMtdSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
   const [lastMonthSnap, setLastMonthSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
+  // Same days of LAST month (1st → same day-of-month as yesterday) — the
+  // honest pace comparison. Comparing a projected month against last month's
+  // FULL total hides being ahead day-for-day when last month finished strong.
+  const [sameDaysSnap, setSameDaysSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
 
   useEffect(() => {
     // Forecast pace must come from COMPLETE days only — MTD now includes
@@ -409,6 +413,19 @@ export default function OverviewContent() {
         d => {
           if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
             setMtdSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
+          }
+        }
+      );
+      // Last month, same day span (capped at that month's length).
+      const prevLast = new Date(ty, tm - 1, 0); // last day of previous month
+      const prevY = prevLast.getFullYear();
+      const prevM = prevLast.getMonth() + 1;
+      const prevTo = Math.min(td - 1, prevLast.getDate());
+      cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
+        `/api/windsor?tf=custom&date_from=${prevY}-${String(prevM).padStart(2, '0')}-01&date_to=${prevY}-${String(prevM).padStart(2, '0')}-${String(prevTo).padStart(2, '0')}`,
+        d => {
+          if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
+            setSameDaysSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
           }
         }
       );
@@ -1057,6 +1074,16 @@ export default function OverviewContent() {
               </p>
             </div>
           </div>
+          {/* The pace truth: month-to-date vs the SAME days of last month. */}
+          {mtdSnap && sameDaysSnap && sameDaysSnap.revenue > 0 && (() => {
+            const pct = ((mtdSnap.revenue - sameDaysSnap.revenue) / sameDaysSnap.revenue) * 100;
+            return (
+              <p className={`text-sm font-bold mb-3 ${pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                {pct >= 0 ? '▲' : '▼'} {Math.abs(pct).toFixed(0)}% vs the same {forecast.daysElapsed} days of last month
+                <span className="text-xs text-gray-400 font-normal"> ({formatCurrency(mtdSnap.revenue)} vs {formatCurrency(sameDaysSnap.revenue)})</span>
+              </p>
+            );
+          })()}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {([
               {
@@ -1088,7 +1115,7 @@ export default function OverviewContent() {
                   <p className="text-2xl font-bold text-gray-800 mt-0.5">{s.value}</p>
                   {delta !== null && (
                     <p className={`text-xs font-semibold mt-0.5 ${good ? 'text-green-600' : 'text-red-500'}`}>
-                      {delta >= 0 ? '+' : ''}{delta.toFixed(0)}% vs last month{s.isRatio ? `'s ${s.prior!.toFixed(2)}x` : ''}
+                      {delta >= 0 ? '+' : ''}{delta.toFixed(0)}% vs last month&apos;s FULL {s.isRatio ? `${s.prior!.toFixed(2)}x` : 'total'}
                     </p>
                   )}
                 </div>
