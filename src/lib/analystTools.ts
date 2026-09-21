@@ -157,17 +157,31 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'create_task',
-    description: "Create a task on the team's Tasks board. Use when the user asks you to add/create a task or when they agree to your offer to log one. Never create duplicates — call get_tasks first if unsure.",
+    description: "Create one task — or MANY AT ONCE via the `tasks` array — on the team's Tasks board. For multiple tasks (a campaign calendar, a checklist) ALWAYS use ONE call with the `tasks` array, never repeated single calls. Never create duplicates — call get_tasks first if unsure.",
     input_schema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Short task title' },
+        title: { type: 'string', description: 'Short task title (single-task mode)' },
         description: { type: 'string', description: 'Details/context (optional)' },
         assignee: { type: 'string', description: 'Team member name (optional)' },
         due_date: { type: 'string', description: 'YYYY-MM-DD (optional)' },
         priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Default medium' },
+        tasks: {
+          type: 'array',
+          description: 'Batch mode: create all of these in one atomic write. Preferred whenever creating more than one task.',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              description: { type: 'string' },
+              assignee: { type: 'string' },
+              due_date: { type: 'string', description: 'YYYY-MM-DD' },
+              priority: { type: 'string', enum: ['low', 'medium', 'high'] },
+            },
+            required: ['title'],
+          },
+        },
       },
-      required: ['title'],
     },
   },
   {
@@ -370,8 +384,24 @@ By order count: 1 order ${m.oneOrderCount?.toLocaleString?.() ?? '?'} (LTV $${m.
   }
 
   if (name === 'create_task') {
+    // Batch mode: one atomic POST for the whole list.
+    const batch = Array.isArray(input.tasks) ? (input.tasks as Array<Record<string, unknown>>) : null;
+    if (batch && batch.length) {
+      const tasks = batch.map(t => ({
+        title: String(t.title ?? '').trim(),
+        description: String(t.description ?? ''),
+        assignee: String(t.assignee ?? ''),
+        dueDate: DATE_RE.test(String(t.due_date ?? '')) ? String(t.due_date) : '',
+        priority: ['low', 'medium', 'high'].includes(String(t.priority)) ? String(t.priority) : 'medium',
+      })).filter(t => t.title);
+      if (!tasks.length) return 'Error: every task in the batch needs a title.';
+      const d = await get('/api/tasks', { method: 'POST', body: { tasks } });
+      if (!d?.ok) return 'Error: could not create the tasks (are you signed in with task access?).';
+      const created = Number(d.created ?? tasks.length);
+      return `Created ${created} tasks in one write — verify with get_tasks if the count matters. Titles: ${tasks.map(t => t.title).join(' · ')}`;
+    }
     const title = String(input.title ?? '').trim();
-    if (!title) return 'Error: title is required.';
+    if (!title) return 'Error: title is required (or pass a tasks array for batch creation).';
     const due = String(input.due_date ?? '');
     if (due && !DATE_RE.test(due)) return 'Error: due_date must be YYYY-MM-DD.';
     const d = await get('/api/tasks', {
