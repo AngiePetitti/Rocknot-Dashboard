@@ -160,7 +160,15 @@ export default function OverviewContent() {
       fetch('/api/launch/checklist', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
     ]).then(([cal, play]) => {
       const allEvents = ((cal?.events || []) as { id: string; title: string; date: string; type: string; description?: string }[]);
-      const isTbd = (e: { description?: string }) => /tbd|tbc|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || '');
+      // A stale TBD marker must not override a real confirmed date: TBD
+      // placeholders sit on the 1st by convention, so a specific future date
+      // wins even if old marker text survived in the notes.
+      const todayPstStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      const isTbd = (e: { description?: string; date?: string }) => {
+        if (!/tbd|tbc|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || '')) return false;
+        const day = Number((e.date || '').slice(8, 10));
+        return day === 1 || !e.date || e.date < todayPstStr;
+      };
       const template = (play?.template || []) as { label: string; daysBefore: number }[];
       const byEvent = (play?.byEvent || {}) as Record<string, Record<string, { done: boolean }>>;
       if (!Array.isArray(allEvents) || !allEvents.length) {

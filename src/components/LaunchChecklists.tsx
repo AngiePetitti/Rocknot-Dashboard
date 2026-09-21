@@ -39,7 +39,16 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
 
   // Placeholder-dated events ("date TBD", parked on the 1st) get no
   // countdown pressure — lead times are meaningless without a real date.
-  const isTbd = (e: MarketingEvent) => /tbd|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || '');
+  // A stale TBD marker in the notes must not override a real date: events
+  // parked "TBD" sit on the 1st of a month by convention, so a specific
+  // future date means someone confirmed it (even if the old marker text
+  // survived an edit made before the auto-clear fix).
+  const isTbd = (e: MarketingEvent) => {
+    if (!/tbd|tbc|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || '')) return false;
+    const day = Number((e.date || '').slice(8, 10));
+    const today = pstToday();
+    return day === 1 || !e.date || e.date < today;
+  };
 
   // Launches & sales with real dates: from 21 days out through 1 day past
   // (launch-day items can straggle), then gone. Events marked Done are
