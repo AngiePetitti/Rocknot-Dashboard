@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 500 });
   }
 
-  let body: { messages?: ChatMessage[] };
+  let body: { messages?: ChatMessage[]; voiceMode?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -70,12 +70,17 @@ If the operator asks for a report / PDF / shareable document, call create_report
     let answer = '';
     let reportFocus: string | null = null;
 
+    // Voice mode: the answer gets read aloud, so write for the ear.
+    const voiceSystem = body.voiceMode
+      ? `${system}\n\nVOICE MODE: your answer will be READ ALOUD by text-to-speech. Be warm and conversational, like a sharp colleague talking — short sentences, contractions, a little personality. NO tables, NO bullet lists, NO markdown formatting, NO URLs. Round numbers the way people say them ("about five eighty-four thousand", "three and a half x"). Keep it under 120 words unless the question truly needs more; offer to go deeper instead of dumping detail.`
+      : system;
+
     for (let iter = 0; iter < 8; iter++) {
       const response = await client.messages.create({
         model: 'claude-opus-4-8',
         max_tokens: 16000,
         thinking: { type: 'adaptive' },
-        system,
+        system: voiceSystem,
         tools: [...ANALYST_TOOLS, CREATE_REPORT_TOOL],
         messages,
       });

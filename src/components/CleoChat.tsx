@@ -65,11 +65,35 @@ function speakableText(md: string): string {
     .trim()
     .slice(0, 2500);
 }
+// The browser's DEFAULT voice is usually the most robotic one installed.
+// Devices ship far better ones (iOS: Samantha/Ava/Zoe "Enhanced"; Chrome:
+// Google US English) — pick the best available instead of settling.
+let cachedVoice: SpeechSynthesisVoice | null = null;
+function bestVoice(): SpeechSynthesisVoice | null {
+  if (cachedVoice) return cachedVoice;
+  try {
+    const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith('en'));
+    const prefer = ['ava', 'zoe', 'samantha', 'allison', 'joelle', 'google us english', 'aria', 'jenny', 'natural', 'enhanced', 'premium'];
+    for (const p of prefer) {
+      const hit = voices.find(v => v.name.toLowerCase().includes(p));
+      if (hit) { cachedVoice = hit; return hit; }
+    }
+    cachedVoice = voices.find(v => v.localService) || voices[0] || null;
+    return cachedVoice;
+  } catch { return null; }
+}
+// Voice lists load async in some browsers — warm the cache.
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  window.speechSynthesis.onvoiceschanged = () => { cachedVoice = null; bestVoice(); };
+}
 function speak(text: string, onEnd?: () => void): void {
   try {
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(speakableText(text));
-    u.rate = 1.05;
+    const v = bestVoice();
+    if (v) u.voice = v;
+    u.rate = 1.02;
+    u.pitch = 1.02;
     if (onEnd) u.onend = onEnd;
     window.speechSynthesis.speak(u);
   } catch { onEnd?.(); }
@@ -144,6 +168,12 @@ export default function CleoChat() {
   const recRef = useRef<{ stop: () => void } | null>(null);
   // Set when the current question came in by voice — the answer then speaks.
   const voiceAskRef = useRef(false);
+  // Voice mode: every answer speaks, and the mic re-opens after Cleo finishes
+  // — a hands-free loop, ChatGPT-voice style. Persisted per device.
+  const [voiceMode, setVoiceMode] = useState(false);
+  useEffect(() => { try { setVoiceMode(localStorage.getItem('rk_voice_mode') === '1'); } catch { /* ignore */ } }, []);
+  const voiceModeRef = useRef(false);
+  useEffect(() => { voiceModeRef.current = voiceMode; try { localStorage.setItem('rk_voice_mode', voiceMode ? '1' : '0'); } catch { /* ignore */ } }, [voiceMode]);
   useEffect(() => {
     const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
     setVoiceSupported(Boolean(w.SpeechRecognition || w.webkitSpeechRecognition));
@@ -174,7 +204,15 @@ export default function CleoChat() {
       setQuestion((finalText + interim).trim());
       voiceAskRef.current = true;
     };
-    rec.onend = () => { setListening(false); recRef.current = null; };
+    rec.onend = () => {
+      setListening(false); recRef.current = null;
+      // Voice mode: dictation ending sends the question automatically —
+      // no button press, a true back-and-forth.
+      if (voiceModeRef.current && finalText.trim()) {
+        voiceAskRef.current = true;
+        askRef.current?.(finalText.trim());
+      }
+    };
     rec.onerror = () => { setListening(false); recRef.current = null; };
     recRef.current = rec;
     setListening(true);
@@ -249,6 +287,10 @@ export default function CleoChat() {
     return () => { cancelled = true; };
   }, [chatKey, sessionStatus]);
 
+  // Stable handle so speech callbacks (created before ask) can invoke it.
+  const askRef = useRef<((q?: string) => void) | null>(null);
+  useEffect(() => { askRef.current = ask; });
+
   async function ask(q?: string) {
     const text = (q ?? question).trim();
     if (!text || asking) return;
@@ -261,14 +303,22 @@ export default function CleoChat() {
       const res = await fetch('/api/insights/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: next }),
+        body: JSON.stringify({ messages: next, voiceMode: voiceModeRef.current || voiceAskRef.current }),
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || 'Something went wrong');
       const withAnswer: ChatMsg[] = [...next, { role: 'assistant', content: data.answer }];
       setChat(withAnswer);
       // Voice conversation: a dictated question gets a spoken answer.
-      if (voiceAskRef.current) { voiceAskRef.current = false; speak(String(data.answer || '')); }
+      // Voice conversation: dictated question or voice mode → spoken answer;
+      // in voice mode the mic re-opens when she finishes, closing the loop.
+      const spokenAsk = voiceAskRef.current || voiceModeRef.current;
+      if (spokenAsk) {
+        voiceAskRef.current = false;
+        speak(String(data.answer || ''), () => {
+          if (voiceModeRef.current && !recRef.current) toggleVoice();
+        });
+      }
       try { localStorage.setItem(chatKey, JSON.stringify(withAnswer.slice(-24))); } catch { /* ignore */ }
       // Back up to the server (keyed to the login) — best-effort.
       fetch('/api/insights/chat', {
@@ -461,6 +511,21 @@ export default function CleoChat() {
               disabled={asking}
               className="flex-1 min-w-0 px-3.5 py-2.5 text-base md:text-sm border border-gray-200 rounded-xl bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-60"
             />
+            {voiceSupported && (
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !voiceMode;
+                  setVoiceMode(next);
+                  if (!next) { stopSpeaking(); recRef.current?.stop(); }
+                  else if (!listening && !asking) toggleVoice();
+                }}
+                title={voiceMode ? 'Voice mode ON — Cleo speaks her answers and listens after. Tap to turn off.' : 'Voice mode: talk with Cleo hands-free'}
+                className={`px-3 py-2.5 rounded-xl border text-base transition-colors ${voiceMode ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
+              >
+                💬
+              </button>
+            )}
             {voiceSupported && (
               <button
                 type="button"
