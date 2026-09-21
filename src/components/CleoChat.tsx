@@ -53,7 +53,19 @@ function AnswerMarkdown({ text }: { text: string }) {
   );
 }
 
+// Generic, rotating working states — "crunching the numbers" read oddly on
+// non-numeric asks (task creation, briefs).
+const THINKING_PHRASES = ['thinking…', 'putting that together…', 'on it…', 'working on it…', 'one sec…'];
+
 function ConversationView({ chat, asking, endRef }: { chat: ChatMsg[]; asking: boolean; endRef: React.RefObject<HTMLDivElement> }) {
+  // Pick a phrase per ask, and rotate if it runs long.
+  const [thinkingPhrase, setThinkingPhrase] = useState(0);
+  useEffect(() => {
+    if (!asking) return;
+    setThinkingPhrase(Math.floor(Math.random() * THINKING_PHRASES.length));
+    const t = setInterval(() => setThinkingPhrase(p => (p + 1) % THINKING_PHRASES.length), 6000);
+    return () => clearInterval(t);
+  }, [asking]);
   return (
     <>
       {chat.map((msg, i) => (
@@ -73,7 +85,7 @@ function ConversationView({ chat, asking, endRef }: { chat: ChatMsg[]; asking: b
               <span className="animate-bounce" style={{ animationDelay: '0.15s' }}>·</span>
               <span className="animate-bounce" style={{ animationDelay: '0.3s' }}>·</span>
             </span>
-            <span className="ml-2">crunching the numbers…</span>
+            <span className="ml-2">{THINKING_PHRASES[thinkingPhrase]}</span>
           </div>
         </div>
       )}
@@ -88,6 +100,46 @@ export default function CleoChat() {
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
+
+  // ── Voice input (browser speech recognition, where supported) ──
+  const [listening, setListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const recRef = useRef<{ stop: () => void } | null>(null);
+  useEffect(() => {
+    const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
+    setVoiceSupported(Boolean(w.SpeechRecognition || w.webkitSpeechRecognition));
+  }, []);
+  function toggleVoice() {
+    if (listening) { recRef.current?.stop(); return; }
+    const w = window as unknown as { SpeechRecognition?: new () => SpeechRec; webkitSpeechRecognition?: new () => SpeechRec };
+    interface SpeechRec {
+      lang: string; interimResults: boolean; continuous: boolean;
+      onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null;
+      onend: (() => void) | null; onerror: (() => void) | null;
+      start: () => void; stop: () => void;
+    }
+    const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!Ctor) return;
+    const rec = new Ctor();
+    rec.lang = 'en-US';
+    rec.interimResults = true;
+    rec.continuous = false;
+    let finalText = '';
+    rec.onresult = e => {
+      let interim = '';
+      for (let i = 0; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) finalText += r[0].transcript;
+        else interim += r[0].transcript;
+      }
+      setQuestion((finalText + interim).trim());
+    };
+    rec.onend = () => { setListening(false); recRef.current = null; };
+    rec.onerror = () => { setListening(false); recRef.current = null; };
+    recRef.current = rec;
+    setListening(true);
+    rec.start();
+  }
   const [reportMenu, setReportMenu] = useState(false);
   const [reportLink, setReportLink] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -367,6 +419,17 @@ export default function CleoChat() {
               disabled={asking}
               className="flex-1 min-w-0 px-3.5 py-2.5 text-base md:text-sm border border-gray-200 rounded-xl bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-60"
             />
+            {voiceSupported && (
+              <button
+                type="button"
+                onClick={toggleVoice}
+                disabled={asking}
+                aria-label={listening ? 'Stop dictation' : 'Dictate your question'}
+                className={`px-3 py-2.5 rounded-xl border text-base transition-colors ${listening ? 'bg-red-50 border-red-300 animate-pulse' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
+              >
+                {listening ? '🔴' : '🎤'}
+              </button>
+            )}
             <button
               type="submit"
               disabled={asking || !question.trim()}
