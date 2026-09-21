@@ -43,6 +43,25 @@ export const PLATFORMS: Record<PlatformKey, PlatformDef> = {
 /** Windsor REST connector names the dashboard queries directly. */
 export type WindsorSource = 'facebook' | 'google_ads' | 'tiktok' | 'snapchat' | 'pinterest' | 'shopify' | 'quickbooks';
 
+/**
+ * A wholesale / marketplace channel that lands in Shopify as its own sales
+ * channel (e.g. Nordstrom dropship via the Dscopify app). Gets its own tab.
+ */
+export interface MarketplaceChannel {
+  /** URL slug, e.g. 'nordstrom'. */
+  key: string;
+  /** Tab + card label, e.g. 'Nordstrom'. */
+  label: string;
+  /** Exact `sales_channel` value in Shopify Analytics, e.g. 'Dscopify Dropship'. */
+  shopifyChannel: string;
+  /** Commission the marketplace keeps, % of retail. null = not set yet (contribution shows without it). */
+  commissionPct: number | null;
+  /** Customer return window in days — sales younger than this are still "open" for returns. */
+  returnWindowDays: number;
+  /** One line for the tab subtitle. */
+  description: string;
+}
+
 export interface ProductLine {
   key: string;
   label: string;
@@ -147,6 +166,8 @@ export interface ClientProfile {
    * Exactly one line should be the default (catches everything unmatched).
    */
   lines?: ProductLine[];
+  /** Marketplace channels reported on their own tab (Shopify sales_channel filter). */
+  marketplaces?: MarketplaceChannel[];
   goals: {
     /** Starting annual net-sales target shown until an admin saves one (0 = ask). */
     defaultAnnualTarget: number;
@@ -292,6 +313,14 @@ const KAILEEP: ClientProfile = {
     { key: 'women', label: "Women's", productMatch: '', campaignMatch: '', targetCpa: 30, revenueShare: 0.8, isDefault: true },
     { key: 'kids', label: 'Kids', productMatch: 'kid|flower girl|junior', campaignMatch: 'kid|flower girl|junior', targetCpa: 15, revenueShare: 0.2 },
   ],
+  // Nordstrom dropship (Sep 2026, per Angie): Kailee ships each pair, Shopify
+  // records the order at full retail under the Dscopify app's channel, and
+  // Nordstrom keeps a commission that never appears in Shopify. Nordstrom's
+  // 90-day return policy runs far longer than the store's.
+  marketplaces: [
+    { key: 'nordstrom', label: 'Nordstrom', shopifyChannel: 'Dscopify Dropship', commissionPct: null, returnWindowDays: 90,
+      description: 'Nordstrom Marketplace dropship · Shopify sales channel "Dscopify Dropship" · orders at full retail, commission not in Shopify' },
+  ],
   // October 2026 brief: blended MER 5–6 (5 = the pass line), Google ROAS ≥ 6x,
   // CPA target < $27–30.
   goals: { defaultAnnualTarget: 4_000_000, targetMer: 5, targetRoas: 6, targetCac: 30 }, // $4M 2026 net-sales target set Sep 2026
@@ -425,6 +454,14 @@ export function includeReturnFees(profile: ClientProfile = getClient()): boolean
 /** Product lines for this client ([] when the brand reports as one line). */
 export function productLines(profile: ClientProfile = getClient()): ProductLine[] {
   return profile.lines ?? [];
+}
+
+/** Marketplace channels with their own tab ([] for a store-only brand). */
+export function marketplaces(profile: ClientProfile = getClient()): MarketplaceChannel[] {
+  return profile.marketplaces ?? [];
+}
+export function marketplaceByKey(key: string, profile: ClientProfile = getClient()): MarketplaceChannel | null {
+  return marketplaces(profile).find(m => m.key === key) ?? null;
 }
 
 /** Which line a Shopify product_type (or title) belongs to. */

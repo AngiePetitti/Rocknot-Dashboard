@@ -10,13 +10,13 @@ import { runQuery, getDataset } from '@/src/lib/bigquery';
 const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 const SHOPIFY_DOMAIN = shopifyDomain();
 
-type Row = Record<string, string>;
+export type Row = Record<string, string>;
 
 export function trafficConfigured(): boolean {
   return Boolean(SHOPIFY_TOKEN && SHOPIFY_DOMAIN);
 }
 
-async function shopifyql(ql: string, timeoutMs = 20000): Promise<Row[]> {
+export async function shopifyql(ql: string, timeoutMs = 20000): Promise<Row[]> {
   const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },

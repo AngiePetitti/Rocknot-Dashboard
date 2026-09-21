@@ -40,6 +40,9 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   // Hide admin-only items unless the user is an admin. When auth isn't wired up
   // (unauthenticated session), show everything so the pre-auth site is intact.
   const visibleNav = navItems.filter(i => !i.adminOnly || isAdmin || status === 'unauthenticated');
+  // Marketplace channels (e.g. Nordstrom) get their own tab, right after Overview.
+  const marketplaceNav = (client.marketplaces || []).map(m => ({ href: `/dashboard/channel/${m.key}`, label: m.label, icon: '🏬' }));
+  const nav = marketplaceNav.length ? [visibleNav[0], ...marketplaceNav, ...visibleNav.slice(1)] : visibleNav;
 
   function buildHref(href: string) {
     return `${href}?tf=${tf}`;
@@ -96,7 +99,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       {/* Nav */}
       {/* Scrolls internally on phones — the list is taller than the screen. */}
       <nav className="flex-1 overflow-y-auto px-3 py-3 md:py-4 space-y-0.5 overscroll-contain">
-        {visibleNav.map(item => {
+        {nav.map(item => {
           const isActive = pathname === item.href;
           return (
             <Link
