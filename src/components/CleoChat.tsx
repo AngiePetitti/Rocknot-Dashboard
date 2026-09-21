@@ -53,6 +53,31 @@ function AnswerMarkdown({ text }: { text: string }) {
   );
 }
 
+// Text-to-speech for Cleo's replies (browser/Siri voices — no external
+// service). Markdown is flattened first: tables and symbols read terribly.
+function speakableText(md: string): string {
+  return md
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/\|[^\n]*\|/g, ' ')            // table rows
+    .replace(/[#*_`>\[\]()]/g, ' ')
+    .replace(/https?:\/\/\S+/g, ' link ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 2500);
+}
+function speak(text: string, onEnd?: () => void): void {
+  try {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(speakableText(text));
+    u.rate = 1.05;
+    if (onEnd) u.onend = onEnd;
+    window.speechSynthesis.speak(u);
+  } catch { onEnd?.(); }
+}
+function stopSpeaking(): void {
+  try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+}
+
 // Generic, rotating working states — "crunching the numbers" read oddly on
 // non-numeric asks (task creation, briefs).
 const THINKING_PHRASES = ['thinking…', 'putting that together…', 'on it…', 'working on it…', 'one sec…'];
@@ -60,6 +85,8 @@ const THINKING_PHRASES = ['thinking…', 'putting that together…', 'on it…',
 function ConversationView({ chat, asking, endRef }: { chat: ChatMsg[]; asking: boolean; endRef: React.RefObject<HTMLDivElement> }) {
   // Pick a phrase per ask, and rotate if it runs long.
   const [thinkingPhrase, setThinkingPhrase] = useState(0);
+  const [speakingIdx, setSpeakingIdx] = useState<number | null>(null);
+  useEffect(() => () => stopSpeaking(), []); // stop TTS when chat closes
   useEffect(() => {
     if (!asking) return;
     setThinkingPhrase(Math.floor(Math.random() * THINKING_PHRASES.length));
@@ -73,7 +100,17 @@ function ConversationView({ chat, asking, endRef }: { chat: ChatMsg[]; asking: b
           <div className={`max-w-[92%] sm:max-w-[85%] min-w-0 rounded-2xl px-3.5 py-2.5 text-sm break-words ${
             msg.role === 'user' ? 'bg-violet-600 text-white leading-relaxed' : 'bg-gray-50 text-gray-700 border border-gray-100'
           }`}>
-            {msg.role === 'assistant' ? <AnswerMarkdown text={msg.content} /> : msg.content}
+            {msg.role === 'assistant' ? (
+              <>
+                <AnswerMarkdown text={msg.content} />
+                <button
+                  onClick={() => (speakingIdx === i ? (stopSpeaking(), setSpeakingIdx(null)) : (setSpeakingIdx(i), speak(msg.content, () => setSpeakingIdx(null))))}
+                  className={`mt-1.5 text-[11px] font-semibold ${speakingIdx === i ? 'text-red-500' : 'text-violet-500 hover:text-violet-700'}`}
+                >
+                  {speakingIdx === i ? '⏹ Stop' : '🔊 Read aloud'}
+                </button>
+              </>
+            ) : msg.content}
           </div>
         </div>
       ))}
@@ -105,6 +142,8 @@ export default function CleoChat() {
   const [listening, setListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const recRef = useRef<{ stop: () => void } | null>(null);
+  // Set when the current question came in by voice — the answer then speaks.
+  const voiceAskRef = useRef(false);
   useEffect(() => {
     const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
     setVoiceSupported(Boolean(w.SpeechRecognition || w.webkitSpeechRecognition));
@@ -133,6 +172,7 @@ export default function CleoChat() {
         else interim += r[0].transcript;
       }
       setQuestion((finalText + interim).trim());
+      voiceAskRef.current = true;
     };
     rec.onend = () => { setListening(false); recRef.current = null; };
     rec.onerror = () => { setListening(false); recRef.current = null; };
@@ -227,6 +267,8 @@ export default function CleoChat() {
       if (!res.ok || data.error) throw new Error(data.error || 'Something went wrong');
       const withAnswer: ChatMsg[] = [...next, { role: 'assistant', content: data.answer }];
       setChat(withAnswer);
+      // Voice conversation: a dictated question gets a spoken answer.
+      if (voiceAskRef.current) { voiceAskRef.current = false; speak(String(data.answer || '')); }
       try { localStorage.setItem(chatKey, JSON.stringify(withAnswer.slice(-24))); } catch { /* ignore */ }
       // Back up to the server (keyed to the login) — best-effort.
       fetch('/api/insights/chat', {
