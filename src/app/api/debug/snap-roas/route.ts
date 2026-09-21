@@ -55,6 +55,48 @@ export async function GET() {
     out.windsorLiveError = String(e);
   }
 
+  // Which Windsor revenue field matches Snap Ads Manager? Try every likely
+  // candidate and report each total — Ads Manager showed ~half our number,
+  // so the field we sum may lump attribution types (or count both click and
+  // view) that the Ads Manager column does not.
+  try {
+    const key = (process.env.WINDSOR_API_KEY || '').trim();
+    const { windsorParams } = await import('@/src/lib/client');
+    const scoped = windsorParams('snapchat', { date_from: from, date_to: today });
+    if (key && scoped) {
+      const candidates = [
+        'conversion_purchases_value',
+        'conversion_purchases_value_swipe_up',
+        'conversion_purchases_value_view',
+        'conversion_purchases_value_web',
+        'conversion_purchases_value_app',
+        'conversion_purchases_value_offline',
+        'total_conversion_purchases_value',
+        'purchases_value',
+        'roas',
+        'conversion_purchases',
+        'conversion_purchases_swipe_up',
+        'conversion_purchases_view',
+      ];
+      const fieldTotals: Record<string, number | string> = {};
+      for (const f of candidates) {
+        try {
+          const qs = new URLSearchParams({ api_key: key, ...scoped, fields: `date,${f}`, _renderer: 'json' });
+          const res = await fetch(`https://connectors.windsor.ai/snapchat?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+          const json = await res.json();
+          if (json.error || !Array.isArray(json.data)) { fieldTotals[f] = `unavailable (${String(json.error || 'no data').slice(0, 60)})`; continue; }
+          fieldTotals[f] = Math.round((json.data as Array<Record<string, unknown>>).reduce((s, r) => s + Number(r[f] || 0), 0) * 100) / 100;
+        } catch (e) {
+          fieldTotals[f] = `error (${String(e).slice(0, 60)})`;
+        }
+      }
+      out.windsorFieldTotals7d = fieldTotals;
+      out.hint = 'Compare each total against Snap Ads Manager purchase value for the same 7 days — the matching field is the one the dashboard should sum.';
+    }
+  } catch (e) {
+    out.fieldProbeError = String(e);
+  }
+
   try {
     const { fetchSnapDaily } = await import('@/src/lib/snapLive');
     out.snapApi = (await fetchSnapDaily(from, today)) ?? 'not configured (SNAP_* env vars missing)';
