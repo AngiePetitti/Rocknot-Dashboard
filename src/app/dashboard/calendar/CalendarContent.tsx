@@ -94,9 +94,11 @@ const EMPTY_FORM: FormState = { title: '', date: '', endDate: '', type: 'launch'
 // The TBD convention lives in the description text (which also syncs to the
 // Sheet) — the toggle just writes/strips it so nobody has to remember the
 // magic words.
-const TBD_RE = /\s*\(?date tbd\)?\s*/gi;
+// Strip EVERY phrase the TBD detector matches — stripping only "date TBD"
+// left "TBC"/"no confirmation" behind, so events never left the waiting list.
+const TBD_RE = /\(?\s*(date\s*)?(tbd|tbc)(\s*:\s*[^.]*)?\)?|no confirmation( yet)?|not confirmed|to be confirmed|placeholder( date)?(\s*—\s*set exact release date)?/gi;
 function descIsTbd(desc: string): boolean {
-  return /tbd|placeholder|to be confirmed|not confirmed|no confirmation/i.test(desc || '');
+  return /tbd|tbc|placeholder|to be confirmed|not confirmed|no confirmation/i.test(desc || '');
 }
 
 export default function CalendarContent() {
@@ -877,7 +879,9 @@ export default function CalendarContent() {
                     <input
                       type="date"
                       value={form.date}
-                      onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                      // Picking a real date IS confirming it — clear TBD
+                      // automatically instead of requiring a second toggle tap.
+                      onChange={e => setForm(f => ({ ...f, date: e.target.value, dateTbd: f.dateTbd && !e.target.value ? f.dateTbd : false }))}
                       className="w-full px-3 py-2.5 text-sm text-gray-800 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400"
                     />
                     {(form.type === 'launch' || form.type === 'sale') && (
