@@ -504,32 +504,39 @@ export default function OverviewContent() {
         </Link>
       )}
 
-      {/* ── Launch readiness alarms — every launch/sale this week; red when
-          checklist items are past their lead time, green when all done ── */}
-      {launchAlerts.map(a => {
-        const allDone = a.done === a.total;
-        const tone = a.overdue > 0
-          ? { border: 'border-red-300', bg: 'bg-red-50', dot: 'bg-red-500', text: 'text-red-700', sub: 'text-red-600' }
-          : allDone
-          ? { border: 'border-green-300', bg: 'bg-green-50', dot: 'bg-green-500', text: 'text-green-700', sub: 'text-green-600' }
-          : { border: 'border-pink-300', bg: 'bg-pink-50', dot: 'bg-pink-500', text: 'text-pink-700', sub: 'text-pink-600' };
+      {/* ── Launch readiness — ONE compact card, a slim row per launch.
+          Multiple full-height banners buried the actual dashboard. ── */}
+      {launchAlerts.length > 0 && (() => {
+        const anyOverdue = launchAlerts.some(a => a.overdue > 0);
         return (
-        <Link
-          key={a.id}
-          href="/dashboard/calendar"
-          className={`block rounded-2xl border-2 ${tone.border} ${tone.bg} px-4 py-3 mb-4 shadow-sm transition-transform active:scale-[0.99]`}
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${tone.dot}`} />
-            <p className={`text-sm font-bold ${tone.text}`}>
-              🚀 {a.title} {a.days === 0 ? 'launches TODAY' : a.days < 0 ? 'launched yesterday' : a.days === 1 ? 'launches TOMORROW' : `launches in ${a.days}d`}
-              {a.overdue > 0 ? ` — ${a.overdue} checklist item${a.overdue > 1 ? 's' : ''} due now` : allDone ? ' — checklist complete ✓' : ' — on schedule'}
-            </p>
-            <span className={`ml-auto text-xs font-semibold ${tone.sub}`}>☑ {a.done}/{a.total} · Open checklist →</span>
-          </div>
-        </Link>
+          <Link
+            href="/dashboard/calendar"
+            className={`block rounded-2xl border-2 px-4 py-2.5 mb-4 shadow-sm transition-transform active:scale-[0.99] ${anyOverdue ? 'border-red-300 bg-red-50' : 'border-pink-300 bg-pink-50'}`}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <span className={`w-2 h-2 rounded-full animate-pulse ${anyOverdue ? 'bg-red-500' : 'bg-pink-500'}`} />
+              <p className={`text-xs font-bold uppercase tracking-wide ${anyOverdue ? 'text-red-700' : 'text-pink-700'}`}>
+                🚀 {launchAlerts.length} launch{launchAlerts.length > 1 ? 'es' : ''} this week
+              </p>
+              <span className={`ml-auto text-[11px] font-semibold ${anyOverdue ? 'text-red-600' : 'text-pink-600'}`}>Open checklists →</span>
+            </div>
+            <div className="space-y-0.5">
+              {launchAlerts.map(a => {
+                const allDone = a.done === a.total;
+                return (
+                  <div key={a.id} className="flex items-baseline gap-2 text-xs">
+                    <span className="font-semibold text-gray-700 truncate">{a.title}</span>
+                    <span className="text-gray-400 whitespace-nowrap">{a.days === 0 ? 'TODAY' : a.days === 1 ? 'tomorrow' : `in ${a.days}d`}</span>
+                    <span className={`ml-auto whitespace-nowrap font-semibold ${a.overdue > 0 ? 'text-red-600' : allDone ? 'text-green-600' : 'text-gray-400'}`}>
+                      {a.overdue > 0 ? `⚠ ${a.overdue} due` : allDone ? '✓ ready' : 'on track'} · ☑ {a.done}/{a.total}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </Link>
         );
-      })}
+      })()}
 
       {/* ── Loud personal task reminder ── */}
       {myTasks.length > 0 && (
@@ -550,14 +557,14 @@ export default function OverviewContent() {
             </p>
             <span className={`ml-auto text-xs font-semibold ${myOverdue.length ? 'text-red-600' : 'text-amber-600'}`}>Open board →</span>
           </div>
-          <ul className="mt-1.5 space-y-0.5 pl-4">
-            {[...myOverdue, ...myDueToday, ...myTasks.filter(t => !myOverdue.includes(t) && !myDueToday.includes(t))].slice(0, 4).map((t, i) => (
+          <ul className="mt-1 space-y-0.5 pl-4">
+            {/* Only URGENT tasks get itemized — the rest is just the count. */}
+            {[...myOverdue, ...myDueToday.filter(t => !myOverdue.includes(t))].slice(0, 3).map((t, i) => (
               <li key={i} className="text-xs text-gray-600 list-disc">
                 {t.title}
                 {t.dueDate && <span className={t.dueDate < todayPst ? 'text-red-600 font-semibold' : 'text-gray-400'}> · due {t.dueDate.slice(5)}</span>}
               </li>
             ))}
-            {myTasks.length > 4 && <li className="text-xs text-gray-400 list-disc">+{myTasks.length - 4} more…</li>}
           </ul>
         </Link>
       )}
