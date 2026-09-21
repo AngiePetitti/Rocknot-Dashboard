@@ -40,6 +40,30 @@ export async function GET() {
   }
 }
 
+// Skip / restore a single planned campaign — regenerating the whole plan just
+// to drop one off-brand send was the only option before.
+export async function PATCH(req: NextRequest) {
+  if (authConfigured()) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user) return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
+  }
+  const body = await req.json().catch(() => ({}));
+  const key = String(body.key || '');
+  if (!key) return NextResponse.json({ error: 'key required' }, { status: 400 });
+  try {
+    const raw = await loadLarge('retention_plan');
+    if (!raw) return NextResponse.json({ error: 'No plan saved yet' }, { status: 404 });
+    const payload = JSON.parse(raw) as { skippedKeys?: string[] } & Record<string, unknown>;
+    const set = new Set(payload.skippedKeys || []);
+    if (body.skipped) set.add(key); else set.delete(key);
+    payload.skippedKeys = Array.from(set);
+    await saveLarge('retention_plan', JSON.stringify(payload));
+    return NextResponse.json({ ok: true, skippedKeys: payload.skippedKeys });
+  } catch (e) {
+    return NextResponse.json({ error: String(e instanceof Error ? e.message : e) }, { status: 500 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   if (authConfigured()) {
     const session = await getServerSession(authOptions);
