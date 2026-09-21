@@ -53,55 +53,6 @@ function AnswerMarkdown({ text }: { text: string }) {
   );
 }
 
-// Text-to-speech for Cleo's replies (browser/Siri voices — no external
-// service). Markdown is flattened first: tables and symbols read terribly.
-function speakableText(md: string): string {
-  return md
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/\|[^\n]*\|/g, ' ')            // table rows
-    .replace(/[#*_`>\[\]()]/g, ' ')
-    .replace(/https?:\/\/\S+/g, ' link ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 2500);
-}
-// The browser's DEFAULT voice is usually the most robotic one installed.
-// Devices ship far better ones (iOS: Samantha/Ava/Zoe "Enhanced"; Chrome:
-// Google US English) — pick the best available instead of settling.
-let cachedVoice: SpeechSynthesisVoice | null = null;
-function bestVoice(): SpeechSynthesisVoice | null {
-  if (cachedVoice) return cachedVoice;
-  try {
-    const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith('en'));
-    const prefer = ['ava', 'zoe', 'samantha', 'allison', 'joelle', 'google us english', 'aria', 'jenny', 'natural', 'enhanced', 'premium'];
-    for (const p of prefer) {
-      const hit = voices.find(v => v.name.toLowerCase().includes(p));
-      if (hit) { cachedVoice = hit; return hit; }
-    }
-    cachedVoice = voices.find(v => v.localService) || voices[0] || null;
-    return cachedVoice;
-  } catch { return null; }
-}
-// Voice lists load async in some browsers — warm the cache.
-if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-  window.speechSynthesis.onvoiceschanged = () => { cachedVoice = null; bestVoice(); };
-}
-function speak(text: string, onEnd?: () => void): void {
-  try {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(speakableText(text));
-    const v = bestVoice();
-    if (v) u.voice = v;
-    u.rate = 1.02;
-    u.pitch = 1.02;
-    if (onEnd) u.onend = onEnd;
-    window.speechSynthesis.speak(u);
-  } catch { onEnd?.(); }
-}
-function stopSpeaking(): void {
-  try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
-}
-
 // Generic, rotating working states — "crunching the numbers" read oddly on
 // non-numeric asks (task creation, briefs).
 const THINKING_PHRASES = ['thinking…', 'putting that together…', 'on it…', 'working on it…', 'one sec…'];
@@ -109,8 +60,6 @@ const THINKING_PHRASES = ['thinking…', 'putting that together…', 'on it…',
 function ConversationView({ chat, asking, endRef }: { chat: ChatMsg[]; asking: boolean; endRef: React.RefObject<HTMLDivElement> }) {
   // Pick a phrase per ask, and rotate if it runs long.
   const [thinkingPhrase, setThinkingPhrase] = useState(0);
-  const [speakingIdx, setSpeakingIdx] = useState<number | null>(null);
-  useEffect(() => () => stopSpeaking(), []); // stop TTS when chat closes
   useEffect(() => {
     if (!asking) return;
     setThinkingPhrase(Math.floor(Math.random() * THINKING_PHRASES.length));
@@ -124,17 +73,7 @@ function ConversationView({ chat, asking, endRef }: { chat: ChatMsg[]; asking: b
           <div className={`max-w-[92%] sm:max-w-[85%] min-w-0 rounded-2xl px-3.5 py-2.5 text-sm break-words ${
             msg.role === 'user' ? 'bg-violet-600 text-white leading-relaxed' : 'bg-gray-50 text-gray-700 border border-gray-100'
           }`}>
-            {msg.role === 'assistant' ? (
-              <>
-                <AnswerMarkdown text={msg.content} />
-                <button
-                  onClick={() => (speakingIdx === i ? (stopSpeaking(), setSpeakingIdx(null)) : (setSpeakingIdx(i), speak(msg.content, () => setSpeakingIdx(null))))}
-                  className={`mt-1.5 text-[11px] font-semibold ${speakingIdx === i ? 'text-red-500' : 'text-violet-500 hover:text-violet-700'}`}
-                >
-                  {speakingIdx === i ? '⏹ Stop' : '🔊 Read aloud'}
-                </button>
-              </>
-            ) : msg.content}
+            {msg.role === 'assistant' ? <AnswerMarkdown text={msg.content} /> : msg.content}
           </div>
         </div>
       ))}
@@ -166,14 +105,6 @@ export default function CleoChat() {
   const [listening, setListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const recRef = useRef<{ stop: () => void } | null>(null);
-  // Set when the current question came in by voice — the answer then speaks.
-  const voiceAskRef = useRef(false);
-  // Voice mode: every answer speaks, and the mic re-opens after Cleo finishes
-  // — a hands-free loop, ChatGPT-voice style. Persisted per device.
-  const [voiceMode, setVoiceMode] = useState(false);
-  useEffect(() => { try { setVoiceMode(localStorage.getItem('rk_voice_mode') === '1'); } catch { /* ignore */ } }, []);
-  const voiceModeRef = useRef(false);
-  useEffect(() => { voiceModeRef.current = voiceMode; try { localStorage.setItem('rk_voice_mode', voiceMode ? '1' : '0'); } catch { /* ignore */ } }, [voiceMode]);
   useEffect(() => {
     const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
     setVoiceSupported(Boolean(w.SpeechRecognition || w.webkitSpeechRecognition));
@@ -202,17 +133,8 @@ export default function CleoChat() {
         else interim += r[0].transcript;
       }
       setQuestion((finalText + interim).trim());
-      voiceAskRef.current = true;
     };
-    rec.onend = () => {
-      setListening(false); recRef.current = null;
-      // Voice mode: dictation ending sends the question automatically —
-      // no button press, a true back-and-forth.
-      if (voiceModeRef.current && finalText.trim()) {
-        voiceAskRef.current = true;
-        askRef.current?.(finalText.trim());
-      }
-    };
+    rec.onend = () => { setListening(false); recRef.current = null; };
     rec.onerror = () => { setListening(false); recRef.current = null; };
     recRef.current = rec;
     setListening(true);
@@ -264,32 +186,50 @@ export default function CleoChat() {
     } catch { /* ignore */ }
     if (local.length) setChat(local);
 
-    // Server copy (keyed to the login) wins when it's ahead of this device;
-    // otherwise push the local copy up so it's backed up and synced.
+    // Server copy (keyed to the login) is the source of truth across devices.
+    // The old rule was "longer copy wins", which let a STALE-but-longer local
+    // history overwrite the server and destroy a newer conversation from
+    // another device. Now: the server wins whenever this device has nothing
+    // unsynced (tracked via a synced-snapshot hash); genuinely-new local
+    // messages are pushed up only when the server has nothing newer.
+    const syncKey = `${chatKey}:synced`;
+    let lastSynced = '';
+    try { lastSynced = localStorage.getItem(syncKey) || ''; } catch { /* ignore */ }
+    const localStr = JSON.stringify(local);
     let cancelled = false;
     fetch('/api/insights/chat', { cache: 'no-store' })
       .then(r => r.json())
       .then((d: { configured?: boolean; messages?: ChatMsg[] }) => {
         if (cancelled || !d?.configured) return;
         const server = Array.isArray(d.messages) ? d.messages : [];
-        if (server.length > local.length) {
-          setChat(server);
-          try { localStorage.setItem(chatKey, JSON.stringify(server)); } catch { /* ignore */ }
-        } else if (local.length > server.length) {
+        const serverStr = JSON.stringify(server);
+        const localUnsynced = localStr !== lastSynced && local.length > 0;
+        if (serverStr !== localStr && (server.length > 0 || !localUnsynced)) {
+          if (!localUnsynced || server.length >= local.length) {
+            // Adopt the server copy — this device has nothing newer.
+            setChat(server);
+            try {
+              localStorage.setItem(chatKey, serverStr);
+              localStorage.setItem(syncKey, serverStr);
+            } catch { /* ignore */ }
+            return;
+          }
+        }
+        if (localUnsynced && local.length > server.length) {
+          // This device holds messages the server never got (e.g. the backup
+          // request died mid-session) — push them up.
           fetch('/api/insights/chat', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ messages: local }),
-          }).catch(() => {});
+          }).then(() => { try { localStorage.setItem(syncKey, localStr); } catch { /* ignore */ } }).catch(() => {});
+        } else {
+          try { localStorage.setItem(syncKey, localStr); } catch { /* ignore */ }
         }
       })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [chatKey, sessionStatus]);
-
-  // Stable handle so speech callbacks (created before ask) can invoke it.
-  const askRef = useRef<((q?: string) => void) | null>(null);
-  useEffect(() => { askRef.current = ask; });
 
   async function ask(q?: string) {
     const text = (q ?? question).trim();
@@ -303,23 +243,18 @@ export default function CleoChat() {
       const res = await fetch('/api/insights/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: next, voiceMode: voiceModeRef.current || voiceAskRef.current }),
+        body: JSON.stringify({ messages: next }),
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || 'Something went wrong');
       const withAnswer: ChatMsg[] = [...next, { role: 'assistant', content: data.answer }];
       setChat(withAnswer);
       // Voice conversation: a dictated question gets a spoken answer.
-      // Voice conversation: dictated question or voice mode → spoken answer;
-      // in voice mode the mic re-opens when she finishes, closing the loop.
-      const spokenAsk = voiceAskRef.current || voiceModeRef.current;
-      if (spokenAsk) {
-        voiceAskRef.current = false;
-        speak(String(data.answer || ''), () => {
-          if (voiceModeRef.current && !recRef.current) toggleVoice();
-        });
-      }
-      try { localStorage.setItem(chatKey, JSON.stringify(withAnswer.slice(-24))); } catch { /* ignore */ }
+      try {
+        const snap = JSON.stringify(withAnswer.slice(-24));
+        localStorage.setItem(chatKey, snap);
+        localStorage.setItem(`${chatKey}:synced`, snap);
+      } catch { /* ignore */ }
       // Back up to the server (keyed to the login) — best-effort.
       fetch('/api/insights/chat', {
         method: 'PUT',
@@ -341,6 +276,7 @@ export default function CleoChat() {
   }
 
   function clearChat() {
+    if (!confirm('Clear this conversation everywhere? It syncs across your devices, so this deletes it on all of them.')) return;
     setChat([]);
     setAskError(null);
     try { localStorage.removeItem(chatKey); } catch { /* ignore */ }
@@ -511,21 +447,6 @@ export default function CleoChat() {
               disabled={asking}
               className="flex-1 min-w-0 px-3.5 py-2.5 text-base md:text-sm border border-gray-200 rounded-xl bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-60"
             />
-            {voiceSupported && (
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !voiceMode;
-                  setVoiceMode(next);
-                  if (!next) { stopSpeaking(); recRef.current?.stop(); }
-                  else if (!listening && !asking) toggleVoice();
-                }}
-                title={voiceMode ? 'Voice mode ON — Cleo speaks her answers and listens after. Tap to turn off.' : 'Voice mode: talk with Cleo hands-free'}
-                className={`px-3 py-2.5 rounded-xl border text-base transition-colors ${voiceMode ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
-              >
-                💬
-              </button>
-            )}
             {voiceSupported && (
               <button
                 type="button"
