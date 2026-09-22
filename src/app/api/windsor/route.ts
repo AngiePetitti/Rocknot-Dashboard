@@ -186,8 +186,12 @@ function aggregateRows(rows: WindsorRow[]) {
       const rev = Number(row.order_total_price || row.order_current_total_price || row.order_subtotal_price || row.order_gross_sales || row.order_net_sales || row.revenue || 0);
       byDate[date].shopifyRevenue += rev;
       // Net sales (post-discount/returns, pre-tax/shipping) for true MER;
-      // subtotal is the closest proxy when Windsor omits net_sales.
-      byDate[date].shopifyNetSales += Number(row.order_net_sales || row.order_subtotal_price || 0) || rev;
+      // subtotal is the closest proxy when Windsor omits net_sales. Clamped
+      // to the order's total: on refund-touched orders Windsor's total_price
+      // reflects the refund while net_sales may not, which summed up put
+      // "net sales" ABOVE total sales on the Overview.
+      const netRaw = Number(row.order_net_sales || row.order_subtotal_price || 0) || rev;
+      byDate[date].shopifyNetSales += rev > 0 ? Math.min(netRaw, rev) : netRaw;
       byDate[date].orders += Math.round(Number(row.order_count || 0));
     } else {
       if (src.includes('facebook') || src.includes('meta')) {
