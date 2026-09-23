@@ -54,6 +54,8 @@ export interface MarketplaceChannel {
   label: string;
   /** Exact `sales_channel` value in Shopify Analytics, e.g. 'Dscopify Dropship'. */
   shopifyChannel: string;
+  /** Case-insensitive regex matched against Windsor's `order_source_name` (BigQuery rows), e.g. 'dscopify'. */
+  sourceMatch: string;
   /** Commission the marketplace keeps, % of retail. null = not set yet (contribution shows without it). */
   commissionPct: number | null;
   /** Customer return window in days — sales younger than this are still "open" for returns. */
@@ -318,7 +320,7 @@ const KAILEEP: ClientProfile = {
   // Nordstrom keeps a commission that never appears in Shopify. Nordstrom's
   // 90-day return policy runs far longer than the store's.
   marketplaces: [
-    { key: 'nordstrom', label: 'Nordstrom', shopifyChannel: 'Dscopify Dropship', commissionPct: null, returnWindowDays: 90,
+    { key: 'nordstrom', label: 'Nordstrom', shopifyChannel: 'Dscopify Dropship', sourceMatch: 'dscopify', commissionPct: null, returnWindowDays: 90,
       description: 'Nordstrom Marketplace dropship · Shopify sales channel "Dscopify Dropship" · orders at full retail, commission not in Shopify' },
   ],
   // October 2026 brief: blended MER 5–6 (5 = the pass line), Google ROAS ≥ 6x,
@@ -470,6 +472,19 @@ export function storeOnlyWhere(profile: ClientProfile = getClient()): string {
   const list = marketplaces(profile);
   if (!list.length) return '';
   return 'WHERE ' + list.map(m => `sales_channel != '${m.shopifyChannel.replace(/'/g, "\\'")}'`).join(' AND ');
+}
+/**
+ * BigQuery predicate (no leading AND) that drops marketplace-channel rows from
+ * the Windsor `shopify_orders` table, using its `order_source_name` column.
+ * '' when the client has no marketplaces. Callers must first confirm the
+ * column exists (older syncs predate it) — see shopifyOrdersFilter() in bigquery.ts.
+ */
+export function marketplaceExclusionPredicate(profile: ClientProfile = getClient()): string {
+  const list = marketplaces(profile);
+  if (!list.length) return '';
+  const rx = list.map(m => m.sourceMatch.replace(/[^a-z0-9_|.-]/gi, '')).filter(Boolean).join('|');
+  if (!rx) return '';
+  return `NOT REGEXP_CONTAINS(LOWER(IFNULL(CAST(order_source_name AS STRING), '')), r'${rx}')`;
 }
 export function marketplaceByKey(key: string, profile: ClientProfile = getClient()): MarketplaceChannel | null {
   return marketplaces(profile).find(m => m.key === key) ?? null;

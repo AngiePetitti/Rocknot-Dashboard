@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { runQuery, getDataset, isBigQueryConfigured, dedupedOrdersCte, dailyShopifySalesSql } from '@/src/lib/bigquery';
+import { runQuery, getDataset, isBigQueryConfigured, dedupedOrdersCte, dailyShopifySalesSql, shopifyOrdersFilter } from '@/src/lib/bigquery';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'BigQuery not configured in this environment' });
   }
   const ds = getDataset();
+  const rowFilter = await shopifyOrdersFilter();
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const from = request.nextUrl.searchParams.get('from') || `${todayStr.slice(0, 4)}-01-01`;
   const to = request.nextUrl.searchParams.get('to') || todayStr;
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const d = await runQuery<Record<string, unknown>>(
-      `WITH o AS (${dedupedOrdersCte(ds)})
+      `WITH o AS (${dedupedOrdersCte(ds, rowFilter)})
        SELECT COUNT(*) AS orders,
               SUM(total_price) AS total_sales,
               SUM(net_sales) AS net_sales,
@@ -76,7 +77,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const sample = await runQuery<Record<string, unknown>>(
-      `WITH o AS (${dedupedOrdersCte(ds)}),
+      `WITH o AS (${dedupedOrdersCte(ds, rowFilter)}),
        bad AS (SELECT order_id FROM o WHERE order_date BETWEEN @from AND @to AND net_sales > total_price + 0.01 ORDER BY net_sales - total_price DESC LIMIT 3)
        SELECT CAST(s.order_id AS STRING) AS order_id, FORMAT_DATE('%Y-%m-%d', DATE(s.date)) AS date,
               ${has('order_total_price') ? 'CAST(s.order_total_price AS FLOAT64)' : 'NULL'} AS total_price,
@@ -122,10 +123,20 @@ export async function GET(request: NextRequest) {
     out.candidates = Object.fromEntries(Object.entries(r).map(([k, v]) => [k, num(v)]));
   } catch (e: unknown) { out.candidates = { error: String(e instanceof Error ? e.message : e) }; }
 
+  // Which sales channels Windsor's rows carry (to confirm the marketplace match).
+  try {
+    const rows = await runQuery<{ source: string; rows: number; orders: number }>(
+      `SELECT IFNULL(CAST(order_source_name AS STRING), '(null)') AS source, COUNT(*) AS rows, COUNT(DISTINCT order_id) AS orders
+       FROM \`${ds}.shopify_orders\` WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY source ORDER BY rows DESC LIMIT 20`,
+      { date_from: from, date_to: to });
+    out.sourceNames = rows.map(r => ({ source: r.source, rows: Number(r.rows), orders: Number(r.orders) }));
+    out.marketplaceFilter = rowFilter || '(none — no marketplaces, or order_source_name not synced yet)';
+  } catch (e: unknown) { out.sourceNames = { error: String(e instanceof Error ? e.message : e) }; }
+
   // The Overview's BigQuery fallback (Shopify-style day attribution) — should
   // match the shopifyql block below for the same range.
   try {
-    const rows = await runQuery<Record<string, unknown>>(dailyShopifySalesSql(ds), { date_from: from, date_to: to });
+    const rows = await runQuery<Record<string, unknown>>(dailyShopifySalesSql(ds, rowFilter), { date_from: from, date_to: to });
     out.fallbackDaily = {
       days: rows.length,
       orders: rows.reduce((s, r) => s + Number(r.orders || 0), 0),
