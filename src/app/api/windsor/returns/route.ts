@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { shopifyDomain } from '@/src/lib/client';
+import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 
@@ -107,10 +107,10 @@ export async function GET(request: NextRequest) {
     const tsField = tsTz === 'month' ? 'month' : 'day';
 
     const [summary, trend, byProduct, byCategory] = await Promise.all([
-      runShopifyQL(`FROM sales SHOW gross_sales, returns, net_sales SINCE ${from} UNTIL ${to}`),
-      runShopifyQL(`FROM sales SHOW returns TIMESERIES ${tsTz} SINCE ${from} UNTIL ${to}`),
-      runShopifyQL(`FROM sales SHOW gross_sales, returns, net_sales GROUP BY product_title, product_type SINCE ${from} UNTIL ${to} ORDER BY returns ASC LIMIT 50`),
-      runShopifyQL(`FROM sales SHOW gross_sales, returns GROUP BY product_type SINCE ${from} UNTIL ${to} ORDER BY returns ASC`),
+      runShopifyQL(`FROM sales SHOW gross_sales, returns, net_sales ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`),
+      runShopifyQL(`FROM sales SHOW returns TIMESERIES ${tsTz} ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`),
+      runShopifyQL(`FROM sales SHOW gross_sales, returns, net_sales GROUP BY product_title, product_type ${storeOnlyWhere()} SINCE ${from} UNTIL ${to} ORDER BY returns ASC LIMIT 50`),
+      runShopifyQL(`FROM sales SHOW gross_sales, returns GROUP BY product_type ${storeOnlyWhere()} SINCE ${from} UNTIL ${to} ORDER BY returns ASC`),
     ]);
 
     // Summary

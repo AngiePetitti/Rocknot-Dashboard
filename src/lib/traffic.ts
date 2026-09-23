@@ -4,7 +4,7 @@
 //
 // The organic-post half of the tab (Instagram / Pinterest / TikTok post
 // performance) is not in here yet: it needs the Windsor organic tables.
-import { shopifyDomain, hasPlatform, metaAccountSql, getClient } from '@/src/lib/client';
+import { shopifyDomain, hasPlatform, metaAccountSql, getClient, storeOnlyWhere } from '@/src/lib/client';
 import { runQuery, getDataset } from '@/src/lib/bigquery';
 
 const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
@@ -250,7 +250,7 @@ export async function fetchTraffic(from: string, to: string, prior?: { from: str
     q('landing', `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY landing_page_path ${range} ORDER BY sessions DESC LIMIT 500`, rows => rows.map(r => ({
       path: r.landing_page_path || '/', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout),
     })), [] as LandingRow[]),
-    q('orders', `FROM sales SHOW orders, net_sales GROUP BY order_referrer_source, order_referrer_name ${range} ORDER BY orders DESC LIMIT 40`, rows => rows.map(r => ({
+    q('orders', `FROM sales SHOW orders, net_sales GROUP BY order_referrer_source, order_referrer_name ${storeOnlyWhere()} ${range} ORDER BY orders DESC LIMIT 40`, rows => rows.map(r => ({
       source: r.order_referrer_source || '', name: r.order_referrer_name || '', orders: num(r.orders), netSales: num(r.net_sales),
     })), [] as OrderSourceRow[]),
     q('devices', `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY session_device_type ${range} ORDER BY sessions DESC LIMIT 6`, rows => rows.map(r => ({ device: r.session_device_type || 'Unknown', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout) })), [] as TrafficData['devices']),

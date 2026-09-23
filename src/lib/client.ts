@@ -460,6 +460,17 @@ export function productLines(profile: ClientProfile = getClient()): ProductLine[
 export function marketplaces(profile: ClientProfile = getClient()): MarketplaceChannel[] {
   return profile.marketplaces ?? [];
 }
+/**
+ * ShopifyQL WHERE clause that keeps STORE sales only — marketplace channels
+ * (e.g. Nordstrom dropship) are excluded from every Overview / product /
+ * customer / returns figure, because ads and email drive the store, not the
+ * marketplace. '' when the client has no marketplace channels (Rocknot).
+ */
+export function storeOnlyWhere(profile: ClientProfile = getClient()): string {
+  const list = marketplaces(profile);
+  if (!list.length) return '';
+  return 'WHERE ' + list.map(m => `sales_channel != '${m.shopifyChannel.replace(/'/g, "\\'")}'`).join(' AND ');
+}
 export function marketplaceByKey(key: string, profile: ClientProfile = getClient()): MarketplaceChannel | null {
   return marketplaces(profile).find(m => m.key === key) ?? null;
 }

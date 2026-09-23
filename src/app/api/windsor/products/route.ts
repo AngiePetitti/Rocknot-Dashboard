@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { shopifyDomain } from '@/src/lib/client';
+import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
 import { isBigQueryConfigured, tableExists } from '@/src/lib/bigquery';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
@@ -208,14 +208,14 @@ export async function GET(request: NextRequest) {
     // the top 50 shown in the table.
     const [result, totalsResult, variantsResult] = await Promise.all([
       runShopifyQL(
-        `FROM sales SHOW net_sales, orders, cost_of_goods_sold, gross_profit GROUP BY product_title, product_type SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 50`
+        `FROM sales SHOW net_sales, orders, cost_of_goods_sold, gross_profit GROUP BY product_title, product_type ${storeOnlyWhere()} SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 50`
       ),
       runShopifyQL(
-        `FROM sales SHOW net_sales, orders, gross_profit SINCE ${from} UNTIL ${to}`
+        `FROM sales SHOW net_sales, orders, gross_profit ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`
       ),
       // Variant-level (size/color) performance for the drill-down.
       runShopifyQL(
-        `FROM sales SHOW net_sales, orders GROUP BY product_title, product_variant_title SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 300`
+        `FROM sales SHOW net_sales, orders GROUP BY product_title, product_variant_title ${storeOnlyWhere()} SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 300`
       ).catch(() => null),
     ]);
 

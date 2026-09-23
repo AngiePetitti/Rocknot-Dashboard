@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Timeframe } from '@/src/lib/mockData';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getOverview, fetchShopifyDaily, fetchShopifyTotals, fetchShopifyCustomerSplit } from '@/src/lib/bqOverview';
+import { fetchMarketplaceTotals } from '@/src/lib/channel';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { fetchMetaToday } from '@/src/lib/metaLive';
@@ -678,6 +679,13 @@ export async function GET(request: NextRequest) {
         }
       }
     }
+
+    // Marketplace channels (Nordstrom) are excluded from every Shopify query
+    // above; fetch their totals so the Overview can say what was left out.
+    try {
+      const mk = await fetchMarketplaceTotals(currentParams.date_from, currentParams.date_to);
+      if (mk.length) (current.metrics as unknown as Record<string, unknown>).marketplaces = mk;
+    } catch { /* note simply stays hidden */ }
 
     // For "today", overlay live Meta spend from the Graph API — Windsor's
     // intraday sync lags by up to an hour, so the Overview otherwise shows a

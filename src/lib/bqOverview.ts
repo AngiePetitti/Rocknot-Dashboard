@@ -1,7 +1,8 @@
 import { runQuery, getDataset, dedupedOrdersCte, tableExists, dailyShopifySalesSql } from '@/src/lib/bigquery';
 import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
-import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees } from '@/src/lib/client';
+import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees, storeOnlyWhere } from '@/src/lib/client';
 import { fetchHumanConversion } from '@/src/lib/traffic';
+import { fetchMarketplaceTotals, MarketplaceTotals } from '@/src/lib/channel';
 
 export interface OverviewResult {
   adsError?: string;
@@ -41,6 +42,8 @@ export interface OverviewResult {
     conversionRateRaw?: number;
     humanSessions?: number;
     botSessions?: number;
+    /** Marketplace channels (e.g. Nordstrom) EXCLUDED from every figure above — shown so the exclusion is visible. */
+    marketplaces?: MarketplaceTotals[];
   };
   revenueData: Array<{ date: string; revenue: number; netSales?: number; orders: number; adSpend: number; newCustomers: number; totalCustomers: number }>;
   revenueSource: 'shopify' | 'none';
@@ -122,7 +125,7 @@ async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean
   const fields = withFees
     ? 'orders, net_sales, return_fees, total_sales, average_order_value'
     : 'orders, net_sales, total_sales, average_order_value';
-  const ql = `FROM sales SHOW ${fields} TIMESERIES day SINCE ${from} UNTIL ${to}`;
+  const ql = `FROM sales SHOW ${fields} TIMESERIES day ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
   const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
@@ -188,7 +191,7 @@ export async function fetchShopifyTotals(from: string, to: string): Promise<Shop
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
         body: JSON.stringify({
-          query: `{ shopifyqlQuery(query: ${JSON.stringify(`FROM sales SHOW ${fields} SINCE ${from} UNTIL ${to}`)}) { tableData { rows columns { name } } parseErrors } }`,
+          query: `{ shopifyqlQuery(query: ${JSON.stringify(`FROM sales SHOW ${fields} ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`)}) { tableData { rows columns { name } } parseErrors } }`,
         }),
         cache: 'no-store',
         signal: AbortSignal.timeout(15000),
@@ -276,7 +279,7 @@ export async function fetchShopifyCustomerSplit(from: string, to: string): Promi
   if (!SHOPIFY_TOKEN) return null;
   // ShopifyQL does not support GROUP BY customer_type. Instead, use the
   // built-in returning_customers dimension alongside total customers.
-  const ql = `FROM sales SHOW net_sales, customers, returning_customers SINCE ${from} UNTIL ${to}`;
+  const ql = `FROM sales SHOW net_sales, customers, returning_customers ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
   const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
@@ -501,7 +504,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   type PlatformDayRow = { date: string; spend: number | null; revenue: number | null };
   const noPlatformRows = Promise.resolve([] as PlatformDayRow[]);
   let shopifyQlError: string | undefined;
-  const [shopifyDaysQl, shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows, pinterestRows, shopifySplit] = await Promise.all([
+  const [shopifyDaysQl, shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows, pinterestRows, shopifySplit, marketplaceTotals] = await Promise.all([
     fetchShopifyDaily(dateFrom, dateTo).catch((e: unknown) => { shopifyQlError = String(e instanceof Error ? e.message : e); return null; }),
     runQuery<{ date: string; orders: number; total_sales: number | null; net_sales: number | null; net_sales_placed: number | null }>(bqShopifySql, params)
       .then(rows => rows.map(r => ({
@@ -532,6 +535,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     // app-created orders included. BigQuery's split (history only as far back
     // as the Windsor sync, orders without a customer id excluded) is the fallback.
     fetchShopifyCustomerSplit(dateFrom, dateTo).catch(() => null),
+    fetchMarketplaceTotals(dateFrom, dateTo).catch(() => [] as MarketplaceTotals[]),
   ]);
 
   const shopifyDays: ShopifyDay[] =
@@ -746,6 +750,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       conversionRateRaw: conversionRate?.rawRate,
       humanSessions: conversionRate?.humanSessions,
       botSessions: conversionRate?.botSessions,
+      ...(marketplaceTotals.length ? { marketplaces: marketplaceTotals } : {}),
     },
     revenueData,
     revenueSource: totalRevenue > 0 ? 'shopify' : 'none',
