@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRevenueForTimeframe, getMetricsForTimeframe, shopifyLast30Days } from '@/src/lib/mockData';
 import { Timeframe } from '@/src/lib/mockData';
-import { shopifyDomain } from '@/src/lib/client';
+import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
 
 const TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const DOMAIN = shopifyDomain();
@@ -67,13 +67,13 @@ export async function GET(request: NextRequest) {
 
     // Summary metrics
     const summary = await runShopifyQL(
-      `FROM sales SHOW gross_sales, discounts, returns, net_sales, orders, average_order_value SINCE ${since} UNTIL ${until}`
+      `FROM sales SHOW gross_sales, discounts, returns, net_sales, orders, average_order_value ${storeOnlyWhere()} SINCE ${since} UNTIL ${until}`
     );
 
     // Daily trend (cap at 30 days for chart)
     const trendDays = ['today', 'yesterday'].includes(tf) ? 1 : 30;
     const trend = await runShopifyQL(
-      `FROM sales SHOW net_sales, orders TIMESERIES day SINCE -${trendDays}d UNTIL today`
+      `FROM sales SHOW net_sales, orders TIMESERIES day ${storeOnlyWhere()} SINCE -${trendDays}d UNTIL today`
     );
 
     if (typeof summary?.parseErrors === 'string' && summary.parseErrors) {

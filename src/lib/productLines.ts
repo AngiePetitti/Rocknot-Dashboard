@@ -1,5 +1,5 @@
 import { runQuery, getDataset, isBigQueryConfigured, tableExists } from '@/src/lib/bigquery';
-import { productLines, lineForProduct, shopifyDomain, metaAccountSql, hasPlatform, PLATFORMS, ProductLine } from '@/src/lib/client';
+import { productLines, lineForProduct, shopifyDomain, metaAccountSql, hasPlatform, PLATFORMS, ProductLine, storeOnlyWhere } from '@/src/lib/client';
 
 // Per-product-line split of the Overview (e.g. women's vs kids):
 //   revenue + orders  — ShopifyQL grouped by product_type (Shopify's own numbers)
@@ -27,7 +27,7 @@ const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 
 async function shopifyByProductType(from: string, to: string): Promise<Array<{ productType: string; netSales: number; totalSales: number; orders: number }>> {
   if (!SHOPIFY_TOKEN) throw new Error('SHOPIFY_ACCESS_TOKEN not set');
-  const ql = `FROM sales SHOW net_sales, total_sales, orders GROUP BY product_type SINCE ${from} UNTIL ${to}`;
+  const ql = `FROM sales SHOW net_sales, total_sales, orders GROUP BY product_type ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
   const res = await fetch(`https://${shopifyDomain()}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },

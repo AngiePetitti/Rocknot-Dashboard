@@ -4,7 +4,7 @@ import { getCustomerMetrics, getCohortData } from '@/src/lib/bqCustomers';
 import { CustomerMetrics } from '@/src/lib/mockData';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
-import { shopifyDomain } from '@/src/lib/client';
+import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,7 +53,7 @@ interface ShopifyCustomerTotals {
 // Shopify's own Customers report for the selected timeframe exactly.
 async function fetchShopifyCustomers(from: string, to: string): Promise<ShopifyCustomerTotals | null> {
   if (!SHOPIFY_TOKEN) return null;
-  const ql = `FROM sales SHOW customers, returning_customers, returning_customer_rate SINCE ${from} UNTIL ${to}`;
+  const ql = `FROM sales SHOW customers, returning_customers, returning_customer_rate ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
   const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },

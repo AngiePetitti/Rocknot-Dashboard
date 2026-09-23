@@ -1,7 +1,7 @@
 // Marketplace channel tab (e.g. Nordstrom dropship): everything Shopify's
 // sales report knows about ONE sales_channel, next to the online store for
 // context. All figures are Shopify Analytics' own, filtered by channel.
-import { getClient, marketplaceByKey, MarketplaceChannel } from '@/src/lib/client';
+import { getClient, marketplaceByKey, marketplaces, MarketplaceChannel } from '@/src/lib/client';
 import { shopifyql, trafficConfigured, Row } from '@/src/lib/traffic';
 import { addDays, todayPst } from '@/src/lib/timeframes';
 
@@ -104,4 +104,22 @@ export async function fetchChannel(key: string, from: string, to: string, prior?
     prior: prior && priorTotals && priorStore ? { range: prior, totals: priorTotals, store: priorStore } : null,
     errors,
   };
+}
+
+/** Net / total sales and orders per marketplace channel for the range — what the
+ *  store-only MER card subtracts from the all-channel figures. [] when none. */
+export interface MarketplaceTotals { key: string; label: string; netSales: number; totalSales: number; orders: number; returnFees: number }
+export async function fetchMarketplaceTotals(from: string, to: string): Promise<MarketplaceTotals[]> {
+  const list = marketplaces();
+  if (!list.length || !trafficConfigured()) return [];
+  const out = await Promise.all(list.map(async m => {
+    try {
+      const rows = await shopifyql(`FROM sales SHOW orders, net_sales, total_sales, return_fees WHERE sales_channel = ${lit(m.shopifyChannel)} SINCE ${from} UNTIL ${to}`, 12000);
+      const r = rows[0] || {};
+      return { key: m.key, label: m.label, netSales: num(r.net_sales), totalSales: num(r.total_sales), orders: Math.round(num(r.orders)), returnFees: Math.abs(num(r.return_fees)) };
+    } catch {
+      return null;
+    }
+  }));
+  return out.filter((x): x is MarketplaceTotals => x !== null);
 }

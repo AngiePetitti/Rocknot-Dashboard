@@ -69,6 +69,8 @@ interface LiveMetrics {
   conversionRateRaw?: number;
   humanSessions?: number;
   botSessions?: number;
+  /** Marketplace channels excluded from every figure on this page (they have their own tab). */
+  marketplaces?: Array<{ key: string; label: string; netSales: number; totalSales: number; orders: number; returnFees: number }>;
 }
 
 interface PriorPeriod {
@@ -669,6 +671,13 @@ export default function OverviewContent() {
                 <> · includes {formatCurrency(metrics.returnFees!)} in return fees the store keeps</>
               )}
             </p>
+            {metrics.marketplaces && metrics.marketplaces.length > 0 && (
+              <p className="text-[11px] text-amber-600 mt-1">
+                Online store only · {metrics.marketplaces.map(m => (
+                  <span key={m.key}>{m.label} ({m.orders.toLocaleString()} orders · {formatCurrency(m.netSales)} net) is not in any figure on this page — see the <Link href={`/dashboard/channel/${m.key}?tf=${tfRaw}`} className="underline">{m.label} tab</Link></span>
+                ))}
+              </p>
+            )}
             {(metrics.adCreditApplied ?? 0) > 0 && (
               <p className="text-[11px] text-emerald-600 mt-0.5">
                 🎁 {formatCurrency(metrics.adCreditApplied!)} Snapchat ad credit deducted (gross spend {formatCurrency(metrics.totalAdSpend)})
