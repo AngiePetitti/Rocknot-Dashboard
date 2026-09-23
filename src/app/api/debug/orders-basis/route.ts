@@ -124,13 +124,14 @@ export async function GET(request: NextRequest) {
   } catch (e: unknown) { out.candidates = { error: String(e instanceof Error ? e.message : e) }; }
 
   // Which sales channels Windsor's rows carry (to confirm the marketplace match).
+  out.marketplaceFilter = rowFilter || '(none — no marketplaces, or order_source_name not synced yet)';
   try {
-    const rows = await runQuery<{ source: string; rows: number; orders: number }>(
-      `SELECT IFNULL(CAST(order_source_name AS STRING), '(null)') AS source, COUNT(*) AS rows, COUNT(DISTINCT order_id) AS orders
-       FROM \`${ds}.shopify_orders\` WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY source ORDER BY rows DESC LIMIT 20`,
+    // (`rows` is a reserved word in BigQuery — hence row_count.)
+    const rows = await runQuery<{ source: string; row_count: number; orders: number }>(
+      `SELECT IFNULL(CAST(order_source_name AS STRING), '(null)') AS source, COUNT(*) AS row_count, COUNT(DISTINCT order_id) AS orders
+       FROM \`${ds}.shopify_orders\` WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY source ORDER BY row_count DESC LIMIT 20`,
       { date_from: from, date_to: to });
-    out.sourceNames = rows.map(r => ({ source: r.source, rows: Number(r.rows), orders: Number(r.orders) }));
-    out.marketplaceFilter = rowFilter || '(none — no marketplaces, or order_source_name not synced yet)';
+    out.sourceNames = rows.map(r => ({ source: r.source, rows: Number(r.row_count), orders: Number(r.orders) }));
   } catch (e: unknown) { out.sourceNames = { error: String(e instanceof Error ? e.message : e) }; }
 
   // The Overview's BigQuery fallback (Shopify-style day attribution) — should
