@@ -1,4 +1,4 @@
-import { runQuery, getDataset, dedupedOrdersCte, tableExists, dailyShopifySalesSql } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte, tableExists, dailyShopifySalesSql, shopifyOrdersFilter } from '@/src/lib/bigquery';
 import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
 import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees, storeOnlyWhere } from '@/src/lib/client';
 import { fetchHumanConversion } from '@/src/lib/traffic';
@@ -323,6 +323,7 @@ export async function fetchShopifyCustomerSplit(from: string, to: string): Promi
 
 export async function getOverview(dateFrom: string, dateTo: string): Promise<OverviewResult> {
   const ds = getDataset();
+  const rowFilter = await shopifyOrdersFilter();
   const params = { date_from: dateFrom, date_to: dateTo };
 
   // A platform the client runs may not have synced its first table yet (a new
@@ -387,7 +388,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
 
   // New vs returning customer split (placement-date attribution from BigQuery).
   const customerSql = `
-    WITH order_revenue AS (${dedupedOrdersCte(ds)}),
+    WITH order_revenue AS (${dedupedOrdersCte(ds, rowFilter)}),
     firsts AS (
       SELECT order_customer_id AS cid,
              MIN(order_date) AS first_order,
@@ -418,7 +419,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // who ordered that day). Combined with daily ad spend, the frontend derives
   // New CAC (spend / new) and Blended CAC (spend / all buyers) per day.
   const customerDailySql = `
-    WITH order_revenue AS (${dedupedOrdersCte(ds)}),
+    WITH order_revenue AS (${dedupedOrdersCte(ds, rowFilter)}),
     firsts AS (
       SELECT order_customer_id AS cid, MIN(order_date) AS first_order
       FROM order_revenue WHERE order_customer_id IS NOT NULL GROUP BY cid
@@ -498,7 +499,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // last sync for the most recent hours.
   // Shopify-style daily sales (money attributed to the day it moved; refunds
   // negative on the day processed) — matches Shopify Analytics for the range.
-  const bqShopifySql = dailyShopifySalesSql(ds);
+  const bqShopifySql = dailyShopifySalesSql(ds, rowFilter);
 
   let adsQueryError: string | undefined;
   type PlatformDayRow = { date: string; spend: number | null; revenue: number | null };

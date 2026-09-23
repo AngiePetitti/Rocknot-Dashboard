@@ -1,4 +1,5 @@
 import { BigQuery } from '@google-cloud/bigquery';
+import { marketplaceExclusionPredicate } from '@/src/lib/client';
 
 // BigQuery is the data layer: Windsor syncs each client's connectors into a
 // per-client dataset, and the dashboard queries those tables directly.
@@ -120,7 +121,7 @@ export async function tableExists(table: string): Promise<boolean> {
  * (Verified on Kailee P, 2026-09-18: 71 orders, $6,546.74 total, $5,256.08
  * net — identical to Shopify Analytics.)
  */
-export function dailyShopifySalesSql(ds: string): string {
+export function dailyShopifySalesSql(ds: string, rowFilter = ''): string {
   return `
     WITH ev AS (
       SELECT DISTINCT
@@ -128,7 +129,7 @@ export function dailyShopifySalesSql(ds: string): string {
         DATE(date) AS d,
         COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0) AS total,
         COALESCE(CAST(order_net_sales AS FLOAT64), CAST(order_total_price AS FLOAT64), 0) AS net
-      FROM \`${ds}.shopify_orders\`
+      FROM \`${ds}.shopify_orders\`${rowFilter ? ` WHERE ${rowFilter}` : ''}
     ),
     first_seen AS (SELECT order_id, MIN(d) AS first_d FROM ev GROUP BY order_id)
     SELECT FORMAT_DATE('%Y-%m-%d', ev.d) AS date,
@@ -142,7 +143,7 @@ export function dailyShopifySalesSql(ds: string): string {
   `;
 }
 
-export function dedupedOrdersCte(ds: string): string {
+export function dedupedOrdersCte(ds: string, rowFilter = ''): string {
   return `
     SELECT
       order_id,
@@ -158,8 +159,24 @@ export function dedupedOrdersCte(ds: string): string {
         DATE(date) AS d,
         COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0) AS total,
         COALESCE(CAST(order_net_sales AS FLOAT64), CAST(order_total_price AS FLOAT64), 0) AS net
-      FROM \`${ds}.shopify_orders\`
+      FROM \`${ds}.shopify_orders\`${rowFilter ? ` WHERE ${rowFilter}` : ''}
     )
     GROUP BY order_id
   `;
+}
+
+/**
+ * Row filter that keeps STORE orders only in `shopify_orders` (marketplace
+ * channels such as Nordstrom dropped), or '' when there are no marketplaces or
+ * the Windsor sync does not carry `order_source_name` yet. Cached per instance
+ * once the column is seen.
+ */
+let ordersFilterCache: string | null = null;
+export async function shopifyOrdersFilter(): Promise<string> {
+  const pred = marketplaceExclusionPredicate();
+  if (!pred) return '';
+  if (ordersFilterCache !== null) return ordersFilterCache;
+  const has = await columnExists('shopify_orders', 'order_source_name');
+  if (has) ordersFilterCache = pred;
+  return has ? pred : '';
 }

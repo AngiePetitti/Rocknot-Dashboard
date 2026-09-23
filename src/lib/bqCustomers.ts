@@ -1,4 +1,4 @@
-import { runQuery, getDataset, dedupedOrdersCte } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte, shopifyOrdersFilter } from '@/src/lib/bigquery';
 import { CohortData } from '@/src/lib/mockData';
 import { metaAccountSql } from '@/src/lib/client';
 
@@ -68,11 +68,12 @@ function monthLabel(isoDate: string): string {
 
 export async function getCustomerMetrics(dateFrom: string, dateTo: string): Promise<BqCustomerMetrics> {
   const ds = getDataset();
+  const rowFilter = await shopifyOrdersFilter();
   const params = { date_from: dateFrom, date_to: dateTo };
 
   const [rows, allTimeRows] = await Promise.all([
     runQuery<SummaryRow>(`
-      WITH order_revenue AS (${dedupedOrdersCte(ds)}),
+      WITH order_revenue AS (${dedupedOrdersCte(ds, rowFilter)}),
       ranked AS (
         SELECT order_customer_id AS customer_id,
                total_price AS revenue,
@@ -125,7 +126,7 @@ export async function getCustomerMetrics(dateFrom: string, dateTo: string): Prom
 
     // All-time avgLTV across every customer ever — not scoped to the period.
     runQuery<{ avg_ltv: number | null; avg_ltv_net: number | null }>(`
-      WITH order_revenue AS (${dedupedOrdersCte(ds)}),
+      WITH order_revenue AS (${dedupedOrdersCte(ds, rowFilter)}),
       lifetime AS (
         SELECT order_customer_id AS customer_id,
                SUM(total_price) AS lifetime_revenue,
@@ -182,9 +183,10 @@ export interface PaybackCohort {
 
 export async function getPaybackLtv(): Promise<PaybackCohort[]> {
   const ds = getDataset();
+  const rowFilter = await shopifyOrdersFilter();
 
   const cohortSql = `
-    WITH order_revenue AS (${dedupedOrdersCte(ds)}),
+    WITH order_revenue AS (${dedupedOrdersCte(ds, rowFilter)}),
     orders AS (
       SELECT order_customer_id AS cid, order_date AS d, net_sales AS rev
       FROM order_revenue WHERE order_customer_id IS NOT NULL
@@ -260,12 +262,13 @@ export async function getPaybackLtv(): Promise<PaybackCohort[]> {
 
 export async function getCohortData(dateFrom: string, dateTo: string): Promise<CohortData[]> {
   const ds = getDataset();
+  const rowFilter = await shopifyOrdersFilter();
   const params = { date_from: dateFrom, date_to: dateTo };
 
   // Cohorts are defined by first-order month; we show cohorts whose first
   // order falls within the selected period so the chart reflects the timeframe.
   const rows = await runQuery<CohortRow>(`
-    WITH order_revenue AS (${dedupedOrdersCte(ds)}),
+    WITH order_revenue AS (${dedupedOrdersCte(ds, rowFilter)}),
     orders AS (
       SELECT order_customer_id AS customer_id, order_date AS d
       FROM order_revenue
