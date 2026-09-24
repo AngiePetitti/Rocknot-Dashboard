@@ -29,7 +29,7 @@ interface PlanCampaign {
   subjectLines: string[]; previewText?: string; heroHeadline?: string; bodyCopy?: string;
   cta?: string; designBrief?: string; bestPractice?: string;
 }
-interface PlanResponse { plan?: { monthOverview?: string; campaigns?: PlanCampaign[] } | null; generatedAt?: string; error?: string }
+interface PlanResponse { plan?: { monthOverview?: string; campaigns?: PlanCampaign[] } | null; generatedAt?: string; error?: string; skippedKeys?: string[] }
 
 const $ = (n: number) => `$${Math.round(n).toLocaleString()}`;
 const CHANNEL_BADGE: Record<string, string> = { email: 'bg-violet-100 text-violet-700', sms: 'bg-emerald-100 text-emerald-700' };
@@ -115,6 +115,18 @@ ${c.designBrief || '—'}`;
   }
 
   const [taskCreated, setTaskCreated] = useState<Record<string, boolean>>({});
+  const [skippedKeys, setSkippedKeys] = useState<Set<string>>(new Set());
+  const [showSkippedPlan, setShowSkippedPlan] = useState(false);
+  const [showPastPlan, setShowPastPlan] = useState(false);
+  useEffect(() => { if (plan?.skippedKeys) setSkippedKeys(new Set(plan.skippedKeys)); }, [plan]);
+  async function setCampaignSkipped(key: string, skipped: boolean) {
+    setSkippedKeys(prev => { const n = new Set(prev); if (skipped) n.add(key); else n.delete(key); return n; });
+    await fetch('/api/retention/plan', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, skipped }),
+    }).catch(() => {});
+  }
 
   // One tap: campaign brief → card on the Tasks board, due 2 days before the
   // send so design + build time is baked in. Full copy travels in the task
@@ -341,8 +353,13 @@ Design: ${c.designBrief || '—'}`,
 
         {(plan?.plan?.campaigns?.length ?? 0) > 0 ? (
           <div className="flex flex-col gap-2">
-            {plan!.plan!.campaigns!.map((c, i) => {
-              const key = `${c.date}-${i}`;
+            {(() => {
+              const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+              const all = plan!.plan!.campaigns!.map((c, i) => ({ c, key: `${c.date}-${i}` }));
+              const active = all.filter(x => !skippedKeys.has(x.key) && (!x.c.date || x.c.date >= todayStr));
+              const past = all.filter(x => !skippedKeys.has(x.key) && x.c.date && x.c.date < todayStr);
+              const skipped = all.filter(x => skippedKeys.has(x.key));
+              const renderRow = ({ c, key }: { c: PlanCampaign; key: string }) => {
               const open = openBrief === key;
               return (
                 <div key={key} className="border border-gray-100 rounded-xl overflow-hidden">
@@ -351,6 +368,15 @@ Design: ${c.designBrief || '—'}`,
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${CHANNEL_BADGE[c.channel?.toLowerCase().includes('sms') ? 'sms' : 'email']}`}>{c.channel}</span>
                     <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full text-gray-700" style={{ backgroundColor: TYPE_COLORS[c.type] || '#e5e7eb' }}>{c.type}</span>
                     <span className="text-sm font-semibold text-gray-800 flex-1 min-w-0 break-words">{c.title}</span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={e => { e.stopPropagation(); setCampaignSkipped(key, !skippedKeys.has(key)); }}
+                      title={skippedKeys.has(key) ? 'Restore this send to the plan' : "Skip — off-brand or no longer relevant (doesn't regenerate anything)"}
+                      className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-gray-50 border border-gray-200 text-gray-400 hover:text-gray-600"
+                    >
+                      {skippedKeys.has(key) ? '↺ Restore' : 'Skip ✕'}
+                    </span>
                     <span className="text-gray-400 text-sm">{open ? '▾' : '▸'}</span>
                   </button>
                   {open && (
@@ -382,7 +408,30 @@ Design: ${c.designBrief || '—'}`,
                   )}
                 </div>
               );
-            })}
+              };
+              return (
+                <>
+                  {active.map(renderRow)}
+                  {active.length === 0 && <p className="text-xs text-gray-400 py-1">Nothing upcoming — regenerate the plan or check the calendar.</p>}
+                  {past.length > 0 && (
+                    <div>
+                      <button onClick={() => setShowPastPlan(o => !o)} className="text-[11px] font-semibold text-gray-400 hover:text-gray-600">
+                        {showPastPlan ? '▾' : '▸'} Past sends ({past.length})
+                      </button>
+                      {showPastPlan && <div className="flex flex-col gap-2 mt-1.5">{past.map(renderRow)}</div>}
+                    </div>
+                  )}
+                  {skipped.length > 0 && (
+                    <div>
+                      <button onClick={() => setShowSkippedPlan(o => !o)} className="text-[11px] font-semibold text-gray-400 hover:text-gray-600">
+                        {showSkippedPlan ? '▾' : '▸'} Skipped ({skipped.length})
+                      </button>
+                      {showSkippedPlan && <div className="flex flex-col gap-2 mt-1.5">{skipped.map(renderRow)}</div>}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         ) : (
           !generating && <p className="text-sm text-gray-400 text-center py-6">No plan yet — tap ✨ Generate plan and Cleo drafts the next 30 days.</p>

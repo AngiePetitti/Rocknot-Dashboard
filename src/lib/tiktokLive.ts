@@ -18,11 +18,11 @@ async function fetchWindsorDaily(
   // entirely when the client has no account of this type.
   const scoped = windsorParams(source, { date_from: since, date_to: until });
   if (!scoped) return null;
-  try {
+  const attempt = async (fields: string[]): Promise<PlatformDay[] | null> => {
     const qs = new URLSearchParams({
       api_key: key,
       ...scoped,
-      fields: ['date', 'spend', ...revenueFields].join(','),
+      fields: fields.join(','),
       _renderer: 'json',
     });
     // Hard timeout: this runs inside the main metrics request — a slow Windsor
@@ -42,8 +42,19 @@ async function fetchWindsorDaily(
       byDate.set(date, d);
     }
     return Array.from(byDate.values());
+  };
+  try {
+    // A revenue field the connector doesn't recognize fails the WHOLE request
+    // (this zeroed Google spend for a week) — retry with date+spend only:
+    // patched spend without revenue beats no patch at all.
+    return (await attempt(['date', 'spend', ...revenueFields]))
+      ?? (revenueFields.length ? await attempt(['date', 'spend']) : null);
   } catch {
-    return null;
+    try {
+      return revenueFields.length ? await attempt(['date', 'spend']) : null;
+    } catch {
+      return null;
+    }
   }
 }
 

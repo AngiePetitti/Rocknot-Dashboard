@@ -157,32 +157,54 @@ export default function OverviewContent() {
   // ── Launch readiness: any launch/sale within 7 days with unchecked
   //    playbook items past their lead time gets a loud banner ──
   const [launchAlerts, setLaunchAlerts] = useState<{ id: string; title: string; date: string; days: number; done: number; total: number; overdue: number }[]>([]);
+  // Why there are no alerts, when there are none — silence was undebuggable.
+  const [launchAlertNote, setLaunchAlertNote] = useState<string | null>(null);
   useEffect(() => {
     Promise.all([
       fetch('/api/calendar', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
       fetch('/api/launch/checklist', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
     ]).then(([cal, play]) => {
-      const events = ((cal?.events || cal || []) as { id: string; title: string; date: string; type: string; description?: string }[])
-        // Placeholder-dated launches carry no real countdown — never alarm on them.
-        .filter(e => !/tbd|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || ''));
+      const allEvents = ((cal?.events || []) as { id: string; title: string; date: string; type: string; description?: string }[]);
+      // A stale TBD marker must not override a real confirmed date: TBD
+      // placeholders sit on the 1st by convention, so a specific future date
+      // wins even if old marker text survived in the notes.
+      const todayPstStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      const isTbd = (e: { description?: string; date?: string }) => {
+        if (!/tbd|tbc|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || '')) return false;
+        const day = Number((e.date || '').slice(8, 10));
+        return day === 1 || !e.date || e.date < todayPstStr;
+      };
       const template = (play?.template || []) as { label: string; daysBefore: number }[];
       const byEvent = (play?.byEvent || {}) as Record<string, Record<string, { done: boolean }>>;
-      if (!Array.isArray(events) || !template.length) return;
+      if (!Array.isArray(allEvents) || !allEvents.length) {
+        setLaunchAlertNote(cal?.error ? `Launch alerts unavailable — calendar error: ${String(cal.error).slice(0, 120)}` : 'Launch alerts unavailable — calendar failed to load.');
+        return;
+      }
+      if (!template.length) {
+        setLaunchAlertNote('Launch alerts unavailable — playbook template failed to load.');
+        return;
+      }
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-      const alerts = events
+      const inWindow = allEvents
         .filter(e => (e.type === 'launch' || e.type === 'sale'))
-        .map(e => {
-          const days = Math.round((Date.parse(e.date) - Date.parse(today)) / 86400000);
+        .map(e => ({ e, days: Math.round((Date.parse(e.date) - Date.parse(today)) / 86400000) }))
+        .filter(x => x.days >= -1 && x.days <= 7);
+      const tbdCount = inWindow.filter(x => isTbd(x.e)).length;
+      const alerts = inWindow
+        .filter(x => !isTbd(x.e))
+        .map(({ e, days }) => {
           const checks = byEvent[e.id] || {};
           const done = template.filter(t => checks[t.label]?.done).length;
           const overdue = template.filter(t => !checks[t.label]?.done && days <= t.daysBefore).length;
           return { id: e.id, title: e.title, date: e.date, days, done, total: template.length, overdue };
         })
-        .filter(a => a.days >= -1 && a.days <= 7 && a.overdue > 0)
         .sort((a, b) => a.days - b.days)
-        .slice(0, 3);
+        .slice(0, 4);
       setLaunchAlerts(alerts);
-    }).catch(() => {});
+      setLaunchAlertNote(alerts.length > 0 ? null
+        : tbdCount > 0 ? `${tbdCount} launch${tbdCount > 1 ? 'es' : ''} this week still marked "date TBD" — confirm the date on the calendar to start the checklist countdown.`
+        : 'No launches or sales with confirmed dates in the next 7 days.');
+    }).catch(e => setLaunchAlertNote(`Launch alerts unavailable — ${String(e).slice(0, 120)}`));
   }, []);
 
   const myOverdue = myTasks.filter(t => t.dueDate && t.dueDate < new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }));
@@ -386,6 +408,10 @@ export default function OverviewContent() {
   // ── Month-end forecast (MTD pace, independent of the selected timeframe) ──
   const [mtdSnap, setMtdSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
   const [lastMonthSnap, setLastMonthSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
+  // Same days of LAST month (1st → same day-of-month as yesterday) — the
+  // honest pace comparison. Comparing a projected month against last month's
+  // FULL total hides being ahead day-for-day when last month finished strong.
+  const [sameDaysSnap, setSameDaysSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
 
   useEffect(() => {
     // Forecast pace must come from COMPLETE days only — MTD now includes
@@ -400,6 +426,19 @@ export default function OverviewContent() {
         d => {
           if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
             setMtdSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
+          }
+        }
+      );
+      // Last month, same day span (capped at that month's length).
+      const prevLast = new Date(ty, tm - 1, 0); // last day of previous month
+      const prevY = prevLast.getFullYear();
+      const prevM = prevLast.getMonth() + 1;
+      const prevTo = Math.min(td - 1, prevLast.getDate());
+      cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
+        `/api/windsor?tf=custom&date_from=${prevY}-${String(prevM).padStart(2, '0')}-01&date_to=${prevY}-${String(prevM).padStart(2, '0')}-${String(prevTo).padStart(2, '0')}`,
+        d => {
+          if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
+            setSameDaysSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
           }
         }
       );
@@ -462,23 +501,47 @@ export default function OverviewContent() {
         <TimeframeSelector />
       </Header>
 
-      {/* ── Launch readiness alarms ── */}
-      {!isPartner && launchAlerts.map(a => (
-        <Link
-          key={a.id}
-          href="/dashboard/calendar"
-          className="block rounded-2xl border-2 border-pink-300 bg-pink-50 px-4 py-3 mb-4 shadow-sm transition-transform active:scale-[0.99]"
-        >
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full animate-pulse bg-pink-500" />
-            <p className="text-sm font-bold text-pink-700">
-              🚀 {a.title} {a.days === 0 ? 'launches TODAY' : a.days < 0 ? 'launched yesterday' : `launches in ${a.days}d`} —{' '}
-              {a.overdue} checklist item{a.overdue > 1 ? 's' : ''} due now
-            </p>
-            <span className="ml-auto text-xs font-semibold text-pink-600">☑ {a.done}/{a.total} · Open checklist →</span>
-          </div>
+      {/* Diagnostic line when no launch banners render — silence hid real
+          failures (and TBD-parked launches) from everyone. */}
+      {!isPartner && launchAlerts.length === 0 && launchAlertNote && (
+        <Link href="/dashboard/calendar" className="block rounded-xl border border-gray-200 bg-white px-4 py-2 mb-4 text-xs text-gray-500">
+          🚀 {launchAlertNote} <span className="text-violet-500 font-semibold">Open calendar →</span>
         </Link>
-      ))}
+      )}
+
+      {/* ── Launch readiness — ONE compact card, a slim row per launch.
+          Multiple full-height banners buried the actual dashboard. ── */}
+      {!isPartner && launchAlerts.length > 0 && (() => {
+        const anyOverdue = launchAlerts.some(a => a.overdue > 0);
+        return (
+          <Link
+            href="/dashboard/calendar"
+            className={`block rounded-2xl border-2 px-4 py-2.5 mb-4 shadow-sm transition-transform active:scale-[0.99] ${anyOverdue ? 'border-red-300 bg-red-50' : 'border-pink-300 bg-pink-50'}`}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <span className={`w-2 h-2 rounded-full animate-pulse ${anyOverdue ? 'bg-red-500' : 'bg-pink-500'}`} />
+              <p className={`text-xs font-bold uppercase tracking-wide ${anyOverdue ? 'text-red-700' : 'text-pink-700'}`}>
+                🚀 {launchAlerts.length} launch{launchAlerts.length > 1 ? 'es' : ''} this week
+              </p>
+              <span className={`ml-auto text-[11px] font-semibold ${anyOverdue ? 'text-red-600' : 'text-pink-600'}`}>Open checklists →</span>
+            </div>
+            <div className="space-y-0.5">
+              {launchAlerts.map(a => {
+                const allDone = a.done === a.total;
+                return (
+                  <div key={a.id} className="flex items-baseline gap-2 text-xs">
+                    <span className="font-semibold text-gray-700 truncate">{a.title}</span>
+                    <span className="text-gray-400 whitespace-nowrap">{a.days === 0 ? 'TODAY' : a.days === 1 ? 'tomorrow' : `in ${a.days}d`}</span>
+                    <span className={`ml-auto whitespace-nowrap font-semibold ${a.overdue > 0 ? 'text-red-600' : allDone ? 'text-green-600' : 'text-gray-400'}`}>
+                      {a.overdue > 0 ? `⚠ ${a.overdue} due` : allDone ? '✓ ready' : 'on track'} · ☑ {a.done}/{a.total}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </Link>
+        );
+      })()}
 
       {/* ── Loud personal task reminder ── */}
       {!isPartner && myTasks.length > 0 && (
@@ -499,14 +562,14 @@ export default function OverviewContent() {
             </p>
             <span className={`ml-auto text-xs font-semibold ${myOverdue.length ? 'text-red-600' : 'text-amber-600'}`}>Open board →</span>
           </div>
-          <ul className="mt-1.5 space-y-0.5 pl-4">
-            {[...myOverdue, ...myDueToday, ...myTasks.filter(t => !myOverdue.includes(t) && !myDueToday.includes(t))].slice(0, 4).map((t, i) => (
+          <ul className="mt-1 space-y-0.5 pl-4">
+            {/* Only URGENT tasks get itemized — the rest is just the count. */}
+            {[...myOverdue, ...myDueToday.filter(t => !myOverdue.includes(t))].slice(0, 3).map((t, i) => (
               <li key={i} className="text-xs text-gray-600 list-disc">
                 {t.title}
                 {t.dueDate && <span className={t.dueDate < todayPst ? 'text-red-600 font-semibold' : 'text-gray-400'}> · due {t.dueDate.slice(5)}</span>}
               </li>
             ))}
-            {myTasks.length > 4 && <li className="text-xs text-gray-400 list-disc">+{myTasks.length - 4} more…</li>}
           </ul>
         </Link>
       )}
@@ -1040,6 +1103,16 @@ export default function OverviewContent() {
               </p>
             </div>
           </div>
+          {/* The pace truth: month-to-date vs the SAME days of last month. */}
+          {mtdSnap && sameDaysSnap && sameDaysSnap.revenue > 0 && (() => {
+            const pct = ((mtdSnap.revenue - sameDaysSnap.revenue) / sameDaysSnap.revenue) * 100;
+            return (
+              <p className={`text-sm font-bold mb-3 ${pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                {pct >= 0 ? '▲' : '▼'} {Math.abs(pct).toFixed(0)}% vs the same {forecast.daysElapsed} days of last month
+                <span className="text-xs text-gray-400 font-normal"> ({formatCurrency(mtdSnap.revenue)} vs {formatCurrency(sameDaysSnap.revenue)})</span>
+              </p>
+            );
+          })()}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {([
               {
@@ -1071,7 +1144,7 @@ export default function OverviewContent() {
                   <p className="text-2xl font-bold text-gray-800 mt-0.5">{s.value}</p>
                   {delta !== null && (
                     <p className={`text-xs font-semibold mt-0.5 ${good ? 'text-green-600' : 'text-red-500'}`}>
-                      {delta >= 0 ? '+' : ''}{delta.toFixed(0)}% vs last month{s.isRatio ? `'s ${s.prior!.toFixed(2)}x` : ''}
+                      {delta >= 0 ? '+' : ''}{delta.toFixed(0)}% vs last month&apos;s FULL {s.isRatio ? `${s.prior!.toFixed(2)}x` : 'total'}
                     </p>
                   )}
                 </div>

@@ -199,11 +199,18 @@ function aggregateRows(rows: WindsorRow[]) {
         if (seenOrderIds.has(orderId)) continue;
         seenOrderIds.add(orderId);
       }
-      const rev = Number(row.order_total_price || row.order_current_total_price || row.order_subtotal_price || row.order_gross_sales || row.order_net_sales || row.revenue || 0);
-      byDate[date].shopifyRevenue += rev;
+      const revRaw = Number(row.order_total_price || row.order_current_total_price || row.order_subtotal_price || row.order_gross_sales || row.order_net_sales || row.revenue || 0);
       // Net sales (post-discount/returns, pre-tax/shipping) for true MER;
       // subtotal is the closest proxy when Windsor omits net_sales.
-      byDate[date].shopifyNetSales += Number(row.order_net_sales || row.order_subtotal_price || 0) || rev;
+      // Verified against Shopify's own report (2026-09-21, 62 orders):
+      // net_sales matched Shopify within ~1% while total_price came in
+      // ~15% LOW — so net is the trustworthy field. Total is floored at
+      // net (total can never be below net) instead of capping net at the
+      // unreliable total.
+      const netRaw = Number(row.order_net_sales || row.order_subtotal_price || 0) || revRaw;
+      const rev = Math.max(revRaw, netRaw);
+      byDate[date].shopifyRevenue += rev;
+      byDate[date].shopifyNetSales += netRaw;
       byDate[date].orders += Math.round(Number(row.order_count || 0));
     } else {
       if (src.includes('facebook') || src.includes('meta')) {

@@ -18,6 +18,10 @@ const ALL_CREDITS: AdCredit[] = [
   // first $7,500 was real cash, then the credit kicks in until $15,000
   // cumulative, after which spend is real cash again.
   { client: 'rocknot', platform: 'snapchat', amount: 7500, from: '2026-01-01', afterSpend: 7500 },
+  // Rocknot — second Snapchat credit, received 2026-09-22: covers the FIRST
+  // $7,500 of Snap spend counted from that date (afterSpend 0 = applies
+  // immediately to new spend).
+  { client: 'rocknot', platform: 'snapchat', amount: 7500, from: '2026-09-22', afterSpend: 0 },
 ];
 
 // Only the active client's credits apply to this deployment.

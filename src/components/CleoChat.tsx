@@ -53,7 +53,19 @@ function AnswerMarkdown({ text }: { text: string }) {
   );
 }
 
+// Generic, rotating working states — "crunching the numbers" read oddly on
+// non-numeric asks (task creation, briefs).
+const THINKING_PHRASES = ['thinking…', 'putting that together…', 'on it…', 'working on it…', 'one sec…'];
+
 function ConversationView({ chat, asking, endRef }: { chat: ChatMsg[]; asking: boolean; endRef: React.RefObject<HTMLDivElement> }) {
+  // Pick a phrase per ask, and rotate if it runs long.
+  const [thinkingPhrase, setThinkingPhrase] = useState(0);
+  useEffect(() => {
+    if (!asking) return;
+    setThinkingPhrase(Math.floor(Math.random() * THINKING_PHRASES.length));
+    const t = setInterval(() => setThinkingPhrase(p => (p + 1) % THINKING_PHRASES.length), 6000);
+    return () => clearInterval(t);
+  }, [asking]);
   return (
     <>
       {chat.map((msg, i) => (
@@ -73,7 +85,7 @@ function ConversationView({ chat, asking, endRef }: { chat: ChatMsg[]; asking: b
               <span className="animate-bounce" style={{ animationDelay: '0.15s' }}>·</span>
               <span className="animate-bounce" style={{ animationDelay: '0.3s' }}>·</span>
             </span>
-            <span className="ml-2">crunching the numbers…</span>
+            <span className="ml-2">{THINKING_PHRASES[thinkingPhrase]}</span>
           </div>
         </div>
       )}
@@ -88,6 +100,46 @@ export default function CleoChat() {
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
+
+  // ── Voice input (browser speech recognition, where supported) ──
+  const [listening, setListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const recRef = useRef<{ stop: () => void } | null>(null);
+  useEffect(() => {
+    const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
+    setVoiceSupported(Boolean(w.SpeechRecognition || w.webkitSpeechRecognition));
+  }, []);
+  function toggleVoice() {
+    if (listening) { recRef.current?.stop(); return; }
+    const w = window as unknown as { SpeechRecognition?: new () => SpeechRec; webkitSpeechRecognition?: new () => SpeechRec };
+    interface SpeechRec {
+      lang: string; interimResults: boolean; continuous: boolean;
+      onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null;
+      onend: (() => void) | null; onerror: (() => void) | null;
+      start: () => void; stop: () => void;
+    }
+    const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!Ctor) return;
+    const rec = new Ctor();
+    rec.lang = 'en-US';
+    rec.interimResults = true;
+    rec.continuous = false;
+    let finalText = '';
+    rec.onresult = e => {
+      let interim = '';
+      for (let i = 0; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) finalText += r[0].transcript;
+        else interim += r[0].transcript;
+      }
+      setQuestion((finalText + interim).trim());
+    };
+    rec.onend = () => { setListening(false); recRef.current = null; };
+    rec.onerror = () => { setListening(false); recRef.current = null; };
+    recRef.current = rec;
+    setListening(true);
+    rec.start();
+  }
   const [reportMenu, setReportMenu] = useState(false);
   const [reportLink, setReportLink] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -134,23 +186,45 @@ export default function CleoChat() {
     } catch { /* ignore */ }
     if (local.length) setChat(local);
 
-    // Server copy (keyed to the login) wins when it's ahead of this device;
-    // otherwise push the local copy up so it's backed up and synced.
+    // Server copy (keyed to the login) is the source of truth across devices.
+    // The old rule was "longer copy wins", which let a STALE-but-longer local
+    // history overwrite the server and destroy a newer conversation from
+    // another device. Now: the server wins whenever this device has nothing
+    // unsynced (tracked via a synced-snapshot hash); genuinely-new local
+    // messages are pushed up only when the server has nothing newer.
+    const syncKey = `${chatKey}:synced`;
+    let lastSynced = '';
+    try { lastSynced = localStorage.getItem(syncKey) || ''; } catch { /* ignore */ }
+    const localStr = JSON.stringify(local);
     let cancelled = false;
     fetch('/api/insights/chat', { cache: 'no-store' })
       .then(r => r.json())
       .then((d: { configured?: boolean; messages?: ChatMsg[] }) => {
         if (cancelled || !d?.configured) return;
         const server = Array.isArray(d.messages) ? d.messages : [];
-        if (server.length > local.length) {
-          setChat(server);
-          try { localStorage.setItem(chatKey, JSON.stringify(server)); } catch { /* ignore */ }
-        } else if (local.length > server.length) {
+        const serverStr = JSON.stringify(server);
+        const localUnsynced = localStr !== lastSynced && local.length > 0;
+        if (serverStr !== localStr && (server.length > 0 || !localUnsynced)) {
+          if (!localUnsynced || server.length >= local.length) {
+            // Adopt the server copy — this device has nothing newer.
+            setChat(server);
+            try {
+              localStorage.setItem(chatKey, serverStr);
+              localStorage.setItem(syncKey, serverStr);
+            } catch { /* ignore */ }
+            return;
+          }
+        }
+        if (localUnsynced && local.length > server.length) {
+          // This device holds messages the server never got (e.g. the backup
+          // request died mid-session) — push them up.
           fetch('/api/insights/chat', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ messages: local }),
-          }).catch(() => {});
+          }).then(() => { try { localStorage.setItem(syncKey, localStr); } catch { /* ignore */ } }).catch(() => {});
+        } else {
+          try { localStorage.setItem(syncKey, localStr); } catch { /* ignore */ }
         }
       })
       .catch(() => {});
@@ -175,7 +249,12 @@ export default function CleoChat() {
       if (!res.ok || data.error) throw new Error(data.error || 'Something went wrong');
       const withAnswer: ChatMsg[] = [...next, { role: 'assistant', content: data.answer }];
       setChat(withAnswer);
-      try { localStorage.setItem(chatKey, JSON.stringify(withAnswer.slice(-24))); } catch { /* ignore */ }
+      // Voice conversation: a dictated question gets a spoken answer.
+      try {
+        const snap = JSON.stringify(withAnswer.slice(-24));
+        localStorage.setItem(chatKey, snap);
+        localStorage.setItem(`${chatKey}:synced`, snap);
+      } catch { /* ignore */ }
       // Back up to the server (keyed to the login) — best-effort.
       fetch('/api/insights/chat', {
         method: 'PUT',
@@ -197,6 +276,7 @@ export default function CleoChat() {
   }
 
   function clearChat() {
+    if (!confirm('Clear this conversation everywhere? It syncs across your devices, so this deletes it on all of them.')) return;
     setChat([]);
     setAskError(null);
     try { localStorage.removeItem(chatKey); } catch { /* ignore */ }
@@ -367,6 +447,17 @@ export default function CleoChat() {
               disabled={asking}
               className="flex-1 min-w-0 px-3.5 py-2.5 text-base md:text-sm border border-gray-200 rounded-xl bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-60"
             />
+            {voiceSupported && (
+              <button
+                type="button"
+                onClick={toggleVoice}
+                disabled={asking}
+                aria-label={listening ? 'Stop dictation' : 'Dictate your question'}
+                className={`px-3 py-2.5 rounded-xl border text-base transition-colors ${listening ? 'bg-red-50 border-red-300 animate-pulse' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
+              >
+                {listening ? '🔴' : '🎤'}
+              </button>
+            )}
             <button
               type="submit"
               disabled={asking || !question.trim()}

@@ -75,6 +75,92 @@ async function runShopifyQL(query: string) {
   return json?.data?.shopifyqlQuery;
 }
 
+// Live fallback for "Today": ShopifyQL's sales dataset lags behind live
+// orders (often by an hour+), so early in the day it reports zero product
+// sales while the store is actively selling. This walks today's actual
+// orders and aggregates line items instead. COGS/gross profit aren't
+// available per line item live, so those stay blank until QL catches up.
+async function fetchTodayLineItems(from: string): Promise<{
+  products: ProductSales[];
+  variants: Array<{ product: string; variant: string; revenue: number; unitsSold: number }>;
+  totalRevenue: number;
+  totalUnits: number;
+} | null> {
+  type Agg = { units: number; revenue: number };
+  const byProduct = new Map<string, Agg>();
+  const byVariant = new Map<string, Agg>();
+  let cursor: string | null = null;
+  let orderCount = 0;
+
+  for (let page = 0; page < 6; page++) {
+    const query: string = `{
+      orders(first: 100${cursor ? `, after: ${JSON.stringify(cursor)}` : ''}, query: ${JSON.stringify(`created_at:>=${from} -status:cancelled`)}) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          lineItems(first: 50) {
+            nodes {
+              title
+              variantTitle
+              quantity
+              discountedTotalSet { shopMoney { amount } }
+            }
+          }
+        }
+      }
+    }`;
+    const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN! },
+      body: JSON.stringify({ query }),
+      next: { revalidate: 0 },
+    });
+    const json = await res.json();
+    const orders = json?.data?.orders;
+    if (!orders) return null;
+    for (const o of orders.nodes || []) {
+      orderCount++;
+      for (const li of o?.lineItems?.nodes || []) {
+        const title = li?.title || 'Unknown';
+        const amount = Number(li?.discountedTotalSet?.shopMoney?.amount || 0);
+        const qty = Number(li?.quantity || 0);
+        const p = byProduct.get(title) || { units: 0, revenue: 0 };
+        p.units += qty; p.revenue += amount;
+        byProduct.set(title, p);
+        const vt = (li?.variantTitle || '').replace(/^Default Title$/i, '');
+        const vKey = `${title}||${vt}`;
+        const v = byVariant.get(vKey) || { units: 0, revenue: 0 };
+        v.units += qty; v.revenue += amount;
+        byVariant.set(vKey, v);
+      }
+    }
+    if (!orders.pageInfo?.hasNextPage) break;
+    cursor = orders.pageInfo.endCursor;
+  }
+  if (orderCount === 0) return null;
+
+  const totalRevenue = Math.round(Array.from(byProduct.values()).reduce((s, a) => s + a.revenue, 0));
+  const totalUnits = Array.from(byProduct.values()).reduce((s, a) => s + a.units, 0);
+  const products: ProductSales[] = Array.from(byProduct.entries())
+    .map(([name, a], i) => ({
+      id: String(i), name, category: 'Other',
+      unitsSold: a.units, revenue: Math.round(a.revenue),
+      cogs: 0, grossProfit: 0, grossMargin: 0,
+      percentOfTotal: totalRevenue > 0 ? Math.round((a.revenue / totalRevenue) * 1000) / 10 : 0,
+    }))
+    .filter(p => p.revenue > 0)
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 50);
+  const variants = Array.from(byVariant.entries())
+    .map(([key, a]) => {
+      const [product, variant] = key.split('||');
+      return { product, variant, revenue: Math.round(a.revenue), unitsSold: a.units };
+    })
+    .filter(v => v.product && v.revenue > 0)
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 300);
+  return { products, variants, totalRevenue, totalUnits };
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const tfRaw = searchParams.get('tf') || '30d';
@@ -214,6 +300,20 @@ export async function GET(request: NextRequest) {
         unitsSold: Math.round(parseFloat(vCell(r, 'orders') || '0')),
       }))
       .filter(v => v.product && v.revenue > 0);
+
+    // ShopifyQL's analytics tables lag live orders — when a range that
+    // includes today comes back empty (or clearly under-reports), rebuild
+    // today's product sales from actual live orders instead of showing $0.
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    if (to >= todayStr && from === todayStr && (products.length === 0 || totalRevenue === 0)) {
+      const live = await fetchTodayLineItems(from).catch(() => null);
+      if (live && live.totalRevenue > 0) {
+        return NextResponse.json(
+          { source: 'shopify_orders_live', ...live, totalGrossProfit: 0 },
+          { headers: cacheHeaders(true) }
+        );
+      }
+    }
 
     return NextResponse.json(
       { source: 'shopify_live', products, variants, totalRevenue, totalUnits, totalGrossProfit },

@@ -580,7 +580,7 @@ export default function InventoryContent() {
                           className="w-20 ml-1.5 px-2 py-1 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
                         />
                       </label>
-                      <label className="relative flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-lg text-xs text-gray-600 bg-white cursor-pointer">
+                      <label onClick={e => { const inp = e.currentTarget.querySelector('input[type="date"]') as HTMLInputElement | null; try { inp?.showPicker(); } catch { inp?.focus(); } }} className="relative flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-lg text-xs text-gray-600 bg-white cursor-pointer">
                         📅 {editEta ? new Date(editEta + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Arrival date'}
                         <input
                           type="date"

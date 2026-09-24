@@ -39,21 +39,32 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
 
   // Placeholder-dated events ("date TBD", parked on the 1st) get no
   // countdown pressure — lead times are meaningless without a real date.
-  const isTbd = (e: MarketingEvent) => /tbd|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || '');
+  // A stale TBD marker in the notes must not override a real date: events
+  // parked "TBD" sit on the 1st of a month by convention, so a specific
+  // future date means someone confirmed it (even if the old marker text
+  // survived an edit made before the auto-clear fix).
+  const isTbd = (e: MarketingEvent) => {
+    if (!/tbd|tbc|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || '')) return false;
+    const day = Number((e.date || '').slice(8, 10));
+    const today = pstToday();
+    return day === 1 || !e.date || e.date < today;
+  };
 
-  // Launches & sales from 21 days out through 3 days past (post-launch
-  // last-chance items can still be pending on launch day).
+  // Launches & sales with real dates: from 21 days out through 1 day past
+  // (launch-day items can straggle), then gone. Events marked Done are
+  // finished regardless of date.
   const upcoming = useMemo(() => {
     return events
-      .filter(e => (e.type === 'launch' || e.type === 'sale') && !isTbd(e) && daysUntil(e.date) >= -3 && daysUntil(e.date) <= 21)
+      .filter(e => (e.type === 'launch' || e.type === 'sale') && e.status !== 'done' && !isTbd(e) && daysUntil(e.date) >= -1 && daysUntil(e.date) <= 21)
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [events]);
 
   // Undated launches wait in a compact holding list — checklist available,
-  // nothing ever turns red until a real date is set on the event.
+  // nothing ever turns red until a real date is set on the event. An event
+  // marked Live or Done has launched: it is no longer "waiting on a date".
   const awaitingDate = useMemo(() => {
     return events
-      .filter(e => (e.type === 'launch' || e.type === 'sale') && isTbd(e) && daysUntil(e.date) >= -14)
+      .filter(e => (e.type === 'launch' || e.type === 'sale') && isTbd(e) && e.status !== 'live' && e.status !== 'done' && daysUntil(e.date) >= -45)
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [events]);
   const [showAwaiting, setShowAwaiting] = useState(false);

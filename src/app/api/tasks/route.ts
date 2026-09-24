@@ -72,6 +72,41 @@ export async function POST(req: NextRequest) {
   const auth = await requireUser();
   if (auth instanceof NextResponse) return auth;
   const body = await req.json().catch(() => ({}));
+
+  // Batch mode: {tasks: [...]} creates them all in ONE load+save. The store
+  // is whole-list load-modify-save, so N parallel single creates clobber
+  // each other (Cleo's 15-task calendar collapsed to 5) — batch is the safe
+  // path for anything more than one.
+  if (Array.isArray(body.tasks)) {
+    const cleaned = (body.tasks as Record<string, unknown>[]).map(clean).filter(f => f.title);
+    if (!cleaned.length) return NextResponse.json({ error: 'No valid tasks (each needs a title)' }, { status: 400 });
+    try {
+      const tasks = await load();
+      const now = new Date().toISOString();
+      let order = Math.max(0, ...tasks.map(t => t.order + 1));
+      for (const fields of cleaned) {
+        tasks.push({
+          id: `task_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          title: fields.title!,
+          description: fields.description || undefined,
+          assignee: fields.assignee || undefined,
+          dueDate: fields.dueDate || undefined,
+          priority: fields.priority || 'medium',
+          status: fields.status || 'todo',
+          ...(fields.link ? { link: fields.link } : {}),
+          createdAt: now,
+          updatedAt: now,
+          ...(auth.author ? { createdBy: auth.author } : {}),
+          order: order++,
+        });
+      }
+      await saveDoc(DOC, JSON.stringify(tasks));
+      return NextResponse.json({ ok: true, created: cleaned.length, tasks });
+    } catch (err) {
+      return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });
+    }
+  }
+
   const fields = clean(body);
   if (!fields.title) return NextResponse.json({ error: 'Title is required' }, { status: 400 });
   try {
