@@ -15,7 +15,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { email: str
   if (!(await requireAdmin())) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   try {
     const { role } = await req.json() as { role?: string };
-    await upsertUser(decodeURIComponent(params.email), role === 'admin' ? 'admin' : 'team');
+    await upsertUser(decodeURIComponent(params.email), role === 'admin' ? 'admin' : role === 'partner' ? 'partner' : 'team');
     return NextResponse.json({ users: await listUsers() });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 400 });

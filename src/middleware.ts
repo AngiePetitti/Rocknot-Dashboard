@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
+import { partnerCanOpen } from '@/src/lib/access';
 
 // Gate every page and API route behind sign-in. Fails OPEN when auth isn't
 // configured yet (no secret / Google creds) so deploying this never locks out
@@ -33,6 +34,17 @@ export async function middleware(req: NextRequest) {
     // Debug endpoints expose raw data — admins only.
     if (pathname.startsWith('/api/debug') && token.role !== 'admin') {
       return new NextResponse(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } });
+    }
+    // Partners (outside agencies) get a fixed slice of pages and the API
+    // routes behind them; anything else is refused before it runs.
+    if (token.role === 'partner' && !partnerCanOpen(pathname)) {
+      if (pathname.startsWith('/api/')) {
+        return new NextResponse(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } });
+      }
+      const home = req.nextUrl.clone();
+      home.pathname = '/dashboard';
+      home.search = '';
+      return NextResponse.redirect(home);
     }
     return NextResponse.next();
   }
