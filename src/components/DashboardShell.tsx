@@ -4,10 +4,13 @@ import { useState } from 'react';
 import Sidebar from './Sidebar';
 import CleoChat from './CleoChat';
 import { useClient } from '@/src/components/ClientProvider';
+import { useSession } from 'next-auth/react';
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const client = useClient();
+  const { data: session } = useSession();
+  const isPartner = session?.user?.role === 'partner';
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -62,8 +65,8 @@ export default function DashboardShell({ children }: { children: React.ReactNode
         </div>
       </main>
 
-      {/* Cleo — AI analyst chat, available on every tab */}
-      <CleoChat />
+      {/* Cleo — AI analyst chat, available on every tab (not for partner logins) */}
+      {!isPartner && <CleoChat />}
     </div>
   );
 }

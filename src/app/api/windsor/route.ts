@@ -3,6 +3,21 @@ import { Timeframe } from '@/src/lib/mockData';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getOverview, fetchShopifyDaily, fetchShopifyTotals, fetchShopifyCustomerSplit } from '@/src/lib/bqOverview';
 import { fetchMarketplaceTotals } from '@/src/lib/channel';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/src/lib/auth';
+
+// Partner (agency) logins get the ads view only: customer revenue split and
+// marketplace notes never leave the server for them.
+async function partnerSession(): Promise<boolean> {
+  try { const s = await getServerSession(authOptions); return s?.user?.role === 'partner'; } catch { return false; }
+}
+function forPartner<T extends { metrics?: unknown }>(payload: T, partner: boolean): T {
+  if (!partner || !payload.metrics) return payload;
+  const m = { ...(payload.metrics as Record<string, unknown>) };
+  for (const k of ['newCustomerRevenue', 'returningCustomerRevenue', 'pctNew', 'pctReturning', 'marketplaces', 'humanSessions', 'botSessions']) delete m[k];
+  // Daily new-customer counts stay: the CAC-over-time chart (an ads metric) needs them.
+  return { ...payload, metrics: m };
+}
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { fetchMetaToday } from '@/src/lib/metaLive';
@@ -494,7 +509,7 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      return NextResponse.json({
+      return NextResponse.json(forPartner({
         source: 'bigquery_live',
         timeframe: tf,
         dateFrom: dateFrom || null,
@@ -506,7 +521,7 @@ export async function GET(request: NextRequest) {
         revenueData: overview.revenueData,
         ...(overview.adsError ? { adsError: overview.adsError } : {}),
         ...(bqPrior ? { priorPeriod: bqPrior, priorLabel: bqPriorLabel } : {}),
-      }, { headers: cacheHeaders(false) });
+      }, await partnerSession()), { headers: cacheHeaders(false) });
     }
 
     if (debug) {
@@ -840,7 +855,7 @@ export async function GET(request: NextRequest) {
       };
     }
 
-    return NextResponse.json({
+    return NextResponse.json(forPartner({
       source: 'windsor_live',
       timeframe: tf,
       dateFrom: dateFrom || null,
@@ -852,7 +867,7 @@ export async function GET(request: NextRequest) {
       ...(shopifyLiveError && current.metrics.totalRevenue === 0 ? { shopifyLiveError } : {}),
       ...(priorPeriod ? { priorPeriod, priorLabel } : {}),
       ...(lastWindsorError ? { adsError: `Windsor API error: ${lastWindsorError} — if the API key was rotated, update WINDSOR_API_KEY in Vercel and redeploy.` } : {}),
-    }, { headers: cacheHeaders(includesToday) });
+    }, await partnerSession()), { headers: cacheHeaders(includesToday) });
 
   } catch (err) {
     return NextResponse.json({

@@ -3,14 +3,16 @@
 import { useEffect, useState } from 'react';
 import Card from '@/src/components/ui/Card';
 
-interface ListedUser { email: string; role: 'admin' | 'team'; locked: boolean; source: 'env' | 'sheet'; }
+import { ROLE_LABELS, ROLE_HELP, type Role } from '@/src/lib/access';
+
+interface ListedUser { email: string; role: Role; locked: boolean; source: 'env' | 'sheet'; }
 
 export default function AdminUsers({ currentEmail }: { currentEmail: string }) {
   const [users, setUsers] = useState<ListedUser[]>([]);
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
   const [newEmail, setNewEmail] = useState('');
-  const [newRole, setNewRole] = useState<'admin' | 'team'>('team');
+  const [newRole, setNewRole] = useState<Role>('team');
   const [busy, setBusy] = useState(false);
 
   async function load() {
@@ -39,7 +41,7 @@ export default function AdminUsers({ currentEmail }: { currentEmail: string }) {
     apply(() => fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: newEmail.trim(), role: newRole }) }))
       .then(() => setNewEmail(''));
   };
-  const changeRole = (email: string, role: 'admin' | 'team') =>
+  const changeRole = (email: string, role: Role) =>
     apply(() => fetch(`/api/admin/users/${encodeURIComponent(email)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }) }));
   const remove = (email: string) => {
     if (!confirm(`Remove ${email}? They'll lose access on their next sign-in.`)) return;
@@ -57,8 +59,9 @@ export default function AdminUsers({ currentEmail }: { currentEmail: string }) {
             placeholder="name@company.com"
             className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300"
           />
-          <select value={newRole} onChange={e => setNewRole(e.target.value as 'admin' | 'team')} className="text-sm border border-gray-200 rounded-lg px-2 py-2 bg-white">
+          <select value={newRole} onChange={e => setNewRole(e.target.value as Role)} className="text-sm border border-gray-200 rounded-lg px-2 py-2 bg-white">
             <option value="team">Team</option>
+            <option value="partner">{ROLE_LABELS.partner}</option>
             <option value="admin">Admin</option>
           </select>
           <button onClick={addUser} disabled={busy || !newEmail.trim()} className="text-sm font-semibold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 rounded-lg px-4 py-2">Add</button>
@@ -82,11 +85,12 @@ export default function AdminUsers({ currentEmail }: { currentEmail: string }) {
                   {u.locked && <p className="text-[10px] text-gray-400">Permanent admin (set in env) — manage in Vercel</p>}
                 </div>
                 {u.locked ? (
-                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 capitalize">{u.role}</span>
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${u.role === 'partner' ? 'bg-amber-50 text-amber-700' : 'bg-violet-50 text-violet-700'}`} title={ROLE_HELP[u.role]}>{ROLE_LABELS[u.role] || u.role}</span>
                 ) : (
                   <>
-                    <select value={u.role} disabled={busy} onChange={e => changeRole(u.email, e.target.value as 'admin' | 'team')} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+                    <select value={u.role} disabled={busy} onChange={e => changeRole(u.email, e.target.value as Role)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
                       <option value="team">Team</option>
+                      <option value="partner">{ROLE_LABELS.partner}</option>
                       <option value="admin">Admin</option>
                     </select>
                     <button onClick={() => remove(u.email)} disabled={busy} className="text-xs text-red-500 hover:text-red-700 font-medium">Remove</button>

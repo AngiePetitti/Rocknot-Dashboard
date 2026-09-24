@@ -2,7 +2,8 @@ import type { NextAuthOptions } from 'next-auth';
 import Google from 'next-auth/providers/google';
 import { roleFor } from '@/src/lib/users';
 
-export type Role = 'admin' | 'team';
+import type { Role } from '@/src/lib/access';
+export type { Role };
 
 // Auth only enforces once the Google credentials + secret exist — so shipping
 // this code never locks out the live site before it's configured.

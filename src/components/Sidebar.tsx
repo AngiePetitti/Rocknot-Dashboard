@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
 import { useClient } from '@/src/components/ClientProvider';
+import { PARTNER_PAGES } from '@/src/lib/access';
 
 const navItems = [
   { href: '/dashboard', label: 'Overview', icon: '📊' },
@@ -42,7 +43,10 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const visibleNav = navItems.filter(i => !i.adminOnly || isAdmin || status === 'unauthenticated');
   // Marketplace channels (e.g. Nordstrom) get their own tab, right after Overview.
   const marketplaceNav = (client.marketplaces || []).map(m => ({ href: `/dashboard/channel/${m.key}`, label: m.label, icon: '🏬' }));
-  const nav = marketplaceNav.length ? [visibleNav[0], ...marketplaceNav, ...visibleNav.slice(1)] : visibleNav;
+  const isPartner = session?.user?.role === 'partner';
+  const nav = isPartner
+    ? visibleNav.filter(i => PARTNER_PAGES.includes(i.href))
+    : marketplaceNav.length ? [visibleNav[0], ...marketplaceNav, ...visibleNav.slice(1)] : visibleNav;
 
   function buildHref(href: string) {
     return `${href}?tf=${tf}`;

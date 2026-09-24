@@ -125,6 +125,9 @@ export default function OverviewContent() {
   // ── Personal task reminder: each person's own open tasks, front and
   //    center when they log in ──
   const { data: session } = useSession();
+  // Partner (agency) logins see the ads view only: no launches, tasks, calendar,
+  // customer counts, product lines, forecast, briefing or marketplace notes.
+  const isPartner = session?.user?.role === 'partner';
   const [allTasks, setAllTasks] = useState<{ title: string; status: string; assignee?: string; dueDate?: string; priority: string }[]>([]);
   useEffect(() => {
     fetch('/api/tasks', { cache: 'no-store' })
@@ -490,17 +493,17 @@ export default function OverviewContent() {
   return (
     <div>
       <Header
-        title="MER Dashboard"
-        subtitle={isCustom && dateFrom && dateTo
-          ? `Overview · ${dateFrom} → ${dateTo}${compareOn && priorLabel ? ` vs ${priorLabel}` : ''}`
-          : `Overview · ${TIMEFRAME_LABELS[tf] || tf}${compareOn && priorLabel ? ` vs prior period` : ''}`}
+        title={isPartner ? 'Marketing Performance' : 'MER Dashboard'}
+        subtitle={`${isPartner ? 'Partner view · ads against company goals · ' : 'Overview · '}${isCustom && dateFrom && dateTo
+          ? `${dateFrom} → ${dateTo}${compareOn && priorLabel ? ` vs ${priorLabel}` : ''}`
+          : `${TIMEFRAME_LABELS[tf] || tf}${compareOn && priorLabel ? ` vs prior period` : ''}`}`}
       >
         <TimeframeSelector />
       </Header>
 
       {/* Diagnostic line when no launch banners render — silence hid real
           failures (and TBD-parked launches) from everyone. */}
-      {launchAlerts.length === 0 && launchAlertNote && (
+      {!isPartner && launchAlerts.length === 0 && launchAlertNote && (
         <Link href="/dashboard/calendar" className="block rounded-xl border border-gray-200 bg-white px-4 py-2 mb-4 text-xs text-gray-500">
           🚀 {launchAlertNote} <span className="text-violet-500 font-semibold">Open calendar →</span>
         </Link>
@@ -508,7 +511,7 @@ export default function OverviewContent() {
 
       {/* ── Launch readiness — ONE compact card, a slim row per launch.
           Multiple full-height banners buried the actual dashboard. ── */}
-      {launchAlerts.length > 0 && (() => {
+      {!isPartner && launchAlerts.length > 0 && (() => {
         const anyOverdue = launchAlerts.some(a => a.overdue > 0);
         return (
           <Link
@@ -541,7 +544,7 @@ export default function OverviewContent() {
       })()}
 
       {/* ── Loud personal task reminder ── */}
-      {myTasks.length > 0 && (
+      {!isPartner && myTasks.length > 0 && (
         <Link
           href="/dashboard/tasks"
           className={`block rounded-2xl border-2 px-4 py-3 mb-4 shadow-sm transition-transform active:scale-[0.99] ${
@@ -734,7 +737,7 @@ export default function OverviewContent() {
                 <> · includes {formatCurrency(metrics.returnFees!)} in return fees the store keeps</>
               )}
             </p>
-            {metrics.marketplaces && metrics.marketplaces.length > 0 && (
+            {!isPartner && metrics.marketplaces && metrics.marketplaces.length > 0 && (
               <p className="text-[11px] text-amber-600 mt-1">
                 Online store only · {metrics.marketplaces.map(m => (
                   <span key={m.key}>{m.label} ({m.orders.toLocaleString()} orders · {formatCurrency(m.netSales)} net) is not in any figure on this page — see the <Link href={`/dashboard/channel/${m.key}?tf=${tfRaw}`} className="underline">{m.label} tab</Link></span>
@@ -902,6 +905,7 @@ export default function OverviewContent() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {tfRaw !== 'today' && (
             <>
+              {!isPartner && (<>
               <MetricCard
                 title="New Customers"
                 value={String(metrics.newCustomers)}
@@ -916,6 +920,7 @@ export default function OverviewContent() {
                 accentColor="#bbf7d0"
                 trend={metrics.returningCustomerRevenue ? { value: formatCurrency(metrics.returningCustomerRevenue) + ' revenue', positive: true } : undefined}
               />
+              </>)}
               <MetricCard
                 title="New Customer CAC"
                 value={metrics.newCustomers ? formatCurrency(metrics.totalAdSpend / metrics.newCustomers) : '—'}
@@ -1026,7 +1031,7 @@ export default function OverviewContent() {
       )}
 
       {/* ── By product line (women's vs kids …) ── */}
-      {isLive && client.lines && client.lines.length > 0 && (
+      {isLive && !isPartner && client.lines && client.lines.length > 0 && (
         <Card accentColor="#f9a8d4" className="mb-6">
           <div className="flex items-baseline justify-between mb-1">
             <h2 className="text-sm font-bold text-gray-700">By Product Line</h2>
@@ -1086,7 +1091,7 @@ export default function OverviewContent() {
       )}
 
       {/* ── Month-end forecast (MTD pace) ── */}
-      {isLive && forecast && (
+      {isLive && !isPartner && forecast && (
         <Card accentColor="#93c5fd" className="mb-6">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-base">📈</span>
@@ -1153,7 +1158,7 @@ export default function OverviewContent() {
       )}
 
       {/* ── This week's marketing (from the Marketing Calendar) ── */}
-      {isLive && (marketingThisWeek.live.length > 0 || marketingThisWeek.upcoming.length > 0) && (
+      {isLive && !isPartner && (marketingThisWeek.live.length > 0 || marketingThisWeek.upcoming.length > 0) && (
         <Card accentColor="#8b5cf6" className="mb-6">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-base">📣</span>
@@ -1205,7 +1210,7 @@ export default function OverviewContent() {
       )}
 
       {/* ── Briefing: what's going well / what needs attention ── */}
-      {isLive && (callouts.good.length > 0 || callouts.attention.length > 0) && (
+      {isLive && !isPartner && (callouts.good.length > 0 || callouts.attention.length > 0) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
           <Card accentColor="#86efac">
             <div className="flex items-center gap-2 mb-3">
@@ -1259,7 +1264,7 @@ export default function OverviewContent() {
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
-        {(tfRaw === 'today' || tfRaw === 'yesterday') ? (
+        {(tfRaw === 'today' || tfRaw === 'yesterday') && !isPartner ? (
           /* Single-day view: New vs Returning customer revenue breakdown */
           <Card accentColor="#c4b5fd" className="lg:col-span-2">
             <h2 className="text-sm font-bold text-gray-700 mb-1">Customer Revenue Breakdown</h2>

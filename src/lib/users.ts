@@ -60,7 +60,7 @@ export async function getStoredUsers(): Promise<StoredUser[]> {
     await ensureTab();
     const d = await api(`/values/${TAB}!A2:B`);
     const users: StoredUser[] = (d.values || [])
-      .map((r: string[]) => ({ email: (r[0] || '').toLowerCase().trim(), role: ((r[1] || '').toLowerCase().trim() === 'admin' ? 'admin' : 'team') as Role }))
+      .map((r: string[]) => { const rr = (r[1] || '').toLowerCase().trim(); return { email: (r[0] || '').toLowerCase().trim(), role: (rr === 'admin' ? 'admin' : rr === 'partner' ? 'partner' : 'team') as Role }; })
       .filter((u: StoredUser) => u.email);
     cache = { at: Date.now(), users };
     return users;
@@ -74,7 +74,7 @@ async function writeStoredUsers(users: StoredUser[]): Promise<void> {
   await api(`/values/${TAB}!A2:B:clear`, { method: 'POST', body: '{}' });
   await api(`/values/${TAB}!A1?valueInputOption=RAW`, {
     method: 'PUT',
-    body: JSON.stringify({ values: [['Email', 'Role'], ...users.map(u => [u.email, u.role === 'admin' ? 'Admin' : 'Team'])] }),
+    body: JSON.stringify({ values: [['Email', 'Role'], ...users.map(u => [u.email, u.role === 'admin' ? 'Admin' : u.role === 'partner' ? 'Partner' : 'Team'])] }),
   });
   cache = { at: Date.now(), users };
 }

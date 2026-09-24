@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   try {
     const { email, role } = await req.json() as { email?: string; role?: string };
     if (!email) return NextResponse.json({ error: 'Email required' }, { status: 400 });
-    await upsertUser(email, role === 'admin' ? 'admin' : 'team');
+    await upsertUser(email, role === 'admin' ? 'admin' : role === 'partner' ? 'partner' : 'team');
     return NextResponse.json({ users: await listUsers() });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 400 });
