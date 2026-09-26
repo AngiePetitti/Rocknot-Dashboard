@@ -52,12 +52,20 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
 
   // Launches & sales with real dates: from 21 days out through 1 day past
   // (launch-day items can straggle), then gone. Events marked Done are
-  // finished regardless of date.
+  // finished regardless of date, and a launch whose date has passed with
+  // every checklist item checked has nothing left to show — it drops off
+  // instead of lingering as "✓ ready".
   const upcoming = useMemo(() => {
+    const allChecked = (e: MarketingEvent) => {
+      if (!template.length) return false;
+      const checks = byEvent[e.id] || {};
+      return template.every(t => checks[t.label]?.done);
+    };
     return events
       .filter(e => (e.type === 'launch' || e.type === 'sale') && e.status !== 'done' && !isTbd(e) && daysUntil(e.date) >= -1 && daysUntil(e.date) <= 21)
+      .filter(e => !(daysUntil(e.date) < 0 && allChecked(e)))
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [events]);
+  }, [events, template, byEvent]);
 
   // Undated launches wait in a compact holding list — checklist available,
   // nothing ever turns red until a real date is set on the event. An event

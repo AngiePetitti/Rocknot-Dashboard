@@ -198,10 +198,15 @@ export default function OverviewContent() {
           const overdue = template.filter(t => !checks[t.label]?.done && days <= t.daysBefore).length;
           return { id: e.id, title: e.title, date: e.date, days, done, total: template.length, overdue };
         })
+        // Fully checked-off launches need no reminder — drop them from the
+        // Overview card so only ones with real work left take up space.
+        .filter(a => a.done < a.total)
         .sort((a, b) => a.days - b.days)
         .slice(0, 4);
+      const readyCount = inWindow.filter(x => !isTbd(x.e)).length - alerts.length;
       setLaunchAlerts(alerts);
       setLaunchAlertNote(alerts.length > 0 ? null
+        : readyCount > 0 ? `All ${readyCount > 1 ? `${readyCount} launch checklists` : 'launch checklists'} for this week are complete ✓`
         : tbdCount > 0 ? `${tbdCount} launch${tbdCount > 1 ? 'es' : ''} this week still marked "date TBD" — confirm the date on the calendar to start the checklist countdown.`
         : 'No launches or sales with confirmed dates in the next 7 days.');
     }).catch(e => setLaunchAlertNote(`Launch alerts unavailable — ${String(e).slice(0, 120)}`));
