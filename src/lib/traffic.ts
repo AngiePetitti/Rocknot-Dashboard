@@ -5,6 +5,7 @@
 // The organic-post half of the tab (Instagram / Pinterest / TikTok post
 // performance) is not in here yet: it needs the Windsor organic tables.
 import { shopifyDomain, hasPlatform, metaAccountSql, getClient, storeOnlyWhere } from '@/src/lib/client';
+import { shopifyql as sharedShopifyql } from '@/src/lib/shopifyql';
 import { runQuery, getDataset } from '@/src/lib/bigquery';
 
 const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
@@ -17,28 +18,7 @@ export function trafficConfigured(): boolean {
 }
 
 export async function shopifyql(ql: string, timeoutMs = 20000): Promise<Row[]> {
-  const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
-    body: JSON.stringify({
-      query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) { tableData { rows columns { name } } parseErrors } }`,
-    }),
-    cache: 'no-store',
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const json = await res.json();
-  const topErrors = (json?.errors as Array<{ message?: string }> | undefined) || [];
-  if (topErrors.length) throw new Error(topErrors.map(e => e.message).join('; ') || 'Shopify GraphQL error');
-  const q = json?.data?.shopifyqlQuery;
-  if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
-  const cols: { name: string }[] = q?.tableData?.columns || [];
-  const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
-  return rows.map(r => {
-    if (!Array.isArray(r)) return r;
-    const o: Row = {};
-    cols.forEach((c, i) => { o[c.name] = r[i] ?? ''; });
-    return o;
-  });
+  return sharedShopifyql(ql, { timeoutMs });
 }
 
 const num = (v: string | undefined) => { const n = parseFloat(v || '0'); return Number.isFinite(n) ? n : 0; };

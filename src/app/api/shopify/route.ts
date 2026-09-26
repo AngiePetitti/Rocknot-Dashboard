@@ -1,3 +1,4 @@
+import { runShopifyQLLegacy } from '@/src/lib/shopifyql';
 import { NextRequest, NextResponse } from 'next/server';
 import { getRevenueForTimeframe, getMetricsForTimeframe, shopifyLast30Days } from '@/src/lib/mockData';
 import { Timeframe } from '@/src/lib/mockData';
@@ -31,25 +32,7 @@ const UNTIL_MAP: Record<Timeframe, string> = {
 };
 
 async function runShopifyQL(query: string) {
-  const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': TOKEN!,
-    },
-    body: JSON.stringify({
-      query: `{ shopifyqlQuery(query: ${JSON.stringify(query)}) {
-        tableData {
-          rows
-          columns { name dataType }
-        }
-        parseErrors
-      }}`,
-    }),
-    next: { revalidate: 0 }, // always fresh
-  });
-  const json = await res.json();
-  return json?.data?.shopifyqlQuery;
+  return runShopifyQLLegacy(query);
 }
 
 export async function GET(request: NextRequest) {

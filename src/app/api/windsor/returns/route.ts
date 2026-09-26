@@ -1,3 +1,4 @@
+import { runShopifyQLRaw } from '@/src/lib/shopifyql';
 import { NextRequest, NextResponse } from 'next/server';
 import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
@@ -62,20 +63,7 @@ function rangeForTf(tfRaw: string, dateFrom: string, dateTo: string): { from: st
 }
 
 async function runShopifyQL(query: string) {
-  const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
-    body: JSON.stringify({
-      query: `{ shopifyqlQuery(query: ${JSON.stringify(query)}) {
-        tableData { rows columns { name dataType } }
-        parseErrors
-      }}`,
-    }),
-    cache: 'no-store',
-  });
-  const json = await res.json();
-  const q = json?.data?.shopifyqlQuery;
-  if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
+  const q = { tableData: await runShopifyQLRaw(query) };
   const cols: { name: string }[] = q?.tableData?.columns || [];
   const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
   const cell = (r: Record<string, string> | string[], name: string): string => {
