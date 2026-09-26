@@ -3,6 +3,7 @@ import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
 import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees, storeOnlyWhere } from '@/src/lib/client';
 import { fetchHumanConversion } from '@/src/lib/traffic';
 import { fetchMarketplaceTotals, MarketplaceTotals } from '@/src/lib/channel';
+import { runShopifyQLRaw } from '@/src/lib/shopifyql';
 
 export interface OverviewResult {
   adsError?: string;
@@ -126,27 +127,7 @@ async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean
     ? 'orders, net_sales, return_fees, total_sales, average_order_value'
     : 'orders, net_sales, total_sales, average_order_value';
   const ql = `FROM sales SHOW ${fields} TIMESERIES day ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
-  const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
-    body: JSON.stringify({
-      query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) {
-        tableData { rows columns { name } }
-        parseErrors
-      }}`,
-    }),
-    cache: 'no-store',
-    // ShopifyQL over a long range with many refunds can take well over 8s;
-    // aborting early was the main reason the fallback numbers appeared.
-    signal: AbortSignal.timeout(20000),
-  });
-  const json = await res.json();
-  // Top-level GraphQL errors (throttling, auth, scope) come back OUTSIDE
-  // data.shopifyqlQuery — swallowing them silently rendered $0 revenue.
-  const topErrors = (json?.errors as Array<{ message?: string }> | undefined) || [];
-  if (topErrors.length) throw new Error(topErrors.map(e => e.message).join('; ') || 'Shopify GraphQL error');
-  const q = json?.data?.shopifyqlQuery;
-  if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
+  const q = { tableData: await runShopifyQLRaw(ql) };
   const cols: { name: string }[] = q?.tableData?.columns || [];
   // The live Admin API returns each row as an object keyed by column name;
   // some clients/versions return positional arrays. Support both.
@@ -187,20 +168,7 @@ export async function fetchShopifyTotals(from: string, to: string): Promise<Shop
       ? 'orders, net_sales, return_fees, total_sales, average_order_value'
       : 'orders, net_sales, total_sales, average_order_value';
     try {
-      const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
-        body: JSON.stringify({
-          query: `{ shopifyqlQuery(query: ${JSON.stringify(`FROM sales SHOW ${fields} ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`)}) { tableData { rows columns { name } } parseErrors } }`,
-        }),
-        cache: 'no-store',
-        signal: AbortSignal.timeout(15000),
-      });
-      const json = await res.json();
-      const topErrors = (json?.errors as Array<{ message?: string }> | undefined) || [];
-      if (topErrors.length) throw new Error(topErrors.map(e => e.message).join('; ') || 'Shopify GraphQL error');
-      const q = json?.data?.shopifyqlQuery;
-      if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
+      const q = { tableData: await runShopifyQLRaw(`FROM sales SHOW ${fields} ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`, { timeoutMs: 15000 }) };
       const cols: { name: string }[] = q?.tableData?.columns || [];
       const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
       if (!rows.length) return null;
@@ -280,23 +248,7 @@ export async function fetchShopifyCustomerSplit(from: string, to: string): Promi
   // ShopifyQL does not support GROUP BY customer_type. Instead, use the
   // built-in returning_customers dimension alongside total customers.
   const ql = `FROM sales SHOW net_sales, customers, returning_customers ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
-  const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
-    body: JSON.stringify({
-      query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) {
-        tableData { rows columns { name } }
-        parseErrors
-      }}`,
-    }),
-    cache: 'no-store',
-    signal: AbortSignal.timeout(8000),
-  });
-  const json = await res.json();
-  const topErrors = (json?.errors as Array<{ message?: string }> | undefined) || [];
-  if (topErrors.length) throw new Error(topErrors.map(e => e.message).join('; ') || 'Shopify GraphQL error');
-  const q = json?.data?.shopifyqlQuery;
-  if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
+  const q = { tableData: await runShopifyQLRaw(ql, { timeoutMs: 12000 }) };
   const cols: { name: string }[] = q?.tableData?.columns || [];
   const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
   if (rows.length === 0) return null;
@@ -505,8 +457,11 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   type PlatformDayRow = { date: string; spend: number | null; revenue: number | null };
   const noPlatformRows = Promise.resolve([] as PlatformDayRow[]);
   let shopifyQlError: string | undefined;
-  const [shopifyDaysQl, shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows, pinterestRows, shopifySplit, marketplaceTotals] = await Promise.all([
-    fetchShopifyDaily(dateFrom, dateTo).catch((e: unknown) => { shopifyQlError = String(e instanceof Error ? e.message : e); return null; }),
+  // The per-day Shopify report is THE number this page is judged on — run it
+  // alone first so the secondary Shopify queries below never compete with it
+  // for Shopify's ShopifyQL rate limit.
+  const shopifyDaysQl = await fetchShopifyDaily(dateFrom, dateTo).catch((e: unknown) => { shopifyQlError = String(e instanceof Error ? e.message : e); return null; });
+  const [shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows, pinterestRows, shopifySplit, marketplaceTotals] = await Promise.all([
     runQuery<{ date: string; orders: number; total_sales: number | null; net_sales: number | null; net_sales_placed: number | null }>(bqShopifySql, params)
       .then(rows => rows.map(r => ({
         date: r.date,

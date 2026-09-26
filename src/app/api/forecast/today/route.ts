@@ -1,3 +1,4 @@
+import { runShopifyQLRaw } from '@/src/lib/shopifyql';
 import { NextResponse } from 'next/server';
 import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
 
@@ -12,19 +13,7 @@ const DOMAIN = shopifyDomain();
 // that curve — far better than linear extrapolation, since mornings and
 // evenings contribute very different shares of a day.
 async function hourlySales(ql: string) {
-  const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
-    body: JSON.stringify({
-      query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) {
-        tableData { rows columns { name } } parseErrors
-      }}`,
-    }),
-    cache: 'no-store',
-  });
-  const json = await res.json();
-  const q = json?.data?.shopifyqlQuery;
-  if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
+  const q = { tableData: await runShopifyQLRaw(ql, { timeoutMs: 12000 }) };
   const cols: { name: string }[] = q?.tableData?.columns || [];
   const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
   const cell = (r: Record<string, string> | string[], name: string): string => {

@@ -1,3 +1,4 @@
+import { runShopifyQLRaw } from '@/src/lib/shopifyql';
 import { runQuery, getDataset, isBigQueryConfigured, tableExists } from '@/src/lib/bigquery';
 import { productLines, lineForProduct, shopifyDomain, metaAccountSql, hasPlatform, PLATFORMS, ProductLine, storeOnlyWhere } from '@/src/lib/client';
 
@@ -28,18 +29,7 @@ const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 async function shopifyByProductType(from: string, to: string): Promise<Array<{ productType: string; netSales: number; totalSales: number; orders: number }>> {
   if (!SHOPIFY_TOKEN) throw new Error('SHOPIFY_ACCESS_TOKEN not set');
   const ql = `FROM sales SHOW net_sales, total_sales, orders GROUP BY product_type ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
-  const res = await fetch(`https://${shopifyDomain()}/admin/api/2026-04/graphql.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
-    body: JSON.stringify({ query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) { tableData { rows columns { name } } parseErrors } }` }),
-    cache: 'no-store',
-    signal: AbortSignal.timeout(8000),
-  });
-  const json = await res.json();
-  const topErrors = (json?.errors as Array<{ message?: string }> | undefined) || [];
-  if (topErrors.length) throw new Error(topErrors.map(e => e.message).join('; ') || 'Shopify GraphQL error');
-  const q = json?.data?.shopifyqlQuery;
-  if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
+  const q = { tableData: await runShopifyQLRaw(ql, { timeoutMs: 12000 }) };
   const cols: { name: string }[] = q?.tableData?.columns || [];
   const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
   const cell = (r: Record<string, string> | string[], name: string): string => {

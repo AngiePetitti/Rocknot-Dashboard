@@ -1,3 +1,4 @@
+import { runShopifyQLRaw } from '@/src/lib/shopifyql';
 import { NextRequest, NextResponse } from 'next/server';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getCustomerMetrics, getCohortData } from '@/src/lib/bqCustomers';
@@ -54,20 +55,7 @@ interface ShopifyCustomerTotals {
 async function fetchShopifyCustomers(from: string, to: string): Promise<ShopifyCustomerTotals | null> {
   if (!SHOPIFY_TOKEN) return null;
   const ql = `FROM sales SHOW customers, returning_customers, returning_customer_rate ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
-  const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
-    body: JSON.stringify({
-      query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) {
-        tableData { rows columns { name } }
-        parseErrors
-      }}`,
-    }),
-    cache: 'no-store',
-  });
-  const json = await res.json();
-  const q = json?.data?.shopifyqlQuery;
-  if (typeof q?.parseErrors === 'string' && q.parseErrors) throw new Error(q.parseErrors);
+  const q = { tableData: await runShopifyQLRaw(ql, { timeoutMs: 12000 }) };
   const cols: { name: string }[] = q?.tableData?.columns || [];
   const r = (q?.tableData?.rows || [])[0] as Record<string, string> | string[] | undefined;
   if (!r) return null;
