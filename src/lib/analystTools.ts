@@ -64,7 +64,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_product_catalog',
     description:
-      'The REAL product catalog from Shopify: every active product\'s exact title, type, price, variant names (colors/sizes), and description. MANDATORY before writing any copy, campaign, or brief that mentions a product — copy may only reference products, variants, colors, and features that appear here or that the operator stated. Never invent product names, finishes, straps, or "2-in-1" features.',
+      'The REAL product catalog from Shopify: every active product\'s exact title, type, price, variant names (colors/sizes), and description. MANDATORY before writing any copy, campaign, or brief that mentions a product — copy may only reference products, variants, colors, and features that appear here or that the operator stated. Never invent product names, finishes, straps, or "2-in-1" features, and never feature or mention a product or variant the catalog marks SOLD OUT / OUT OF STOCK.',
     input_schema: { type: 'object', properties: {} },
   },
   {

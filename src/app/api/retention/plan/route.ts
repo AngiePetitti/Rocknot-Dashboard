@@ -110,7 +110,7 @@ Already scheduled/drafted (do NOT duplicate these): ${d.scheduled.map(c => `${c.
 BRAND BRIEF (who the brand is, who buys, voice, and hard rules — every campaign must follow it; never invent premises like restocks, sell-outs, or occasions the data doesn't show):
 ${brandBrief || '(none)'}
 
-PRODUCT CATALOG (the ONLY real products — every product, variant, color, and feature mentioned in any campaign MUST come from this list, named exactly as it appears here; never invent product names, finishes, straps, or capabilities):
+PRODUCT CATALOG (the ONLY real products — every product, variant, color, and feature mentioned in any campaign MUST come from this list, named exactly as it appears here; never invent product names, finishes, straps, or capabilities. Anything marked SOLD OUT or OUT OF STOCK must NOT be featured, paired, listed as a shade option, or mentioned at all):
 ${catalog}
 
 BRAND GUIDELINES (ALL copy voice and every design brief must follow these — never invent brand colors, fonts, or aesthetic descriptors that are not in this section. If it is empty, write design briefs that instruct the designer to pull visual identity from ${brand.siteDomain} and note the guidelines doc is pending):
