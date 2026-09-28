@@ -102,10 +102,15 @@ Already scheduled/drafted (do NOT duplicate these): ${d.scheduled.map(c => `${c.
   const aovLine = brand.brand.aov ? ` AOV ~$${brand.brand.aov}.` : '';
   const { getBrandBrief } = await import('@/src/lib/brandBrief');
   const brandBrief = await getBrandBrief().catch(() => '');
+  const { fetchCatalog, catalogText } = await import('@/src/lib/catalog');
+  const catalog = catalogText(await fetchCatalog().catch(() => []));
   const prompt = `You are ${brand.analyst.name}, ${brand.name}'s retention marketing strategist. ${brand.brand.description}${founderLine}${aovLine}
 
 BRAND BRIEF (who the brand is, who buys, voice, and hard rules — every campaign must follow it; never invent premises like restocks, sell-outs, or occasions the data doesn't show):
 ${brandBrief || '(none)'}
+
+PRODUCT CATALOG (the ONLY real products — every product, variant, color, and feature mentioned in any campaign MUST come from this list, named exactly as it appears here; never invent product names, finishes, straps, or capabilities):
+${catalog}
 
 BRAND GUIDELINES (ALL copy voice and every design brief must follow these — never invent brand colors, fonts, or aesthetic descriptors that are not in this section. If it is empty, write design briefs that instruct the designer to pull visual identity from ${brand.siteDomain} and note the guidelines doc is pending):
 ${guidelines || '(none uploaded yet)'}

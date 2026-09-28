@@ -62,6 +62,12 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_product_catalog',
+    description:
+      'The REAL product catalog from Shopify: every active product\'s exact title, type, price, variant names (colors/sizes), and description. MANDATORY before writing any copy, campaign, or brief that mentions a product — copy may only reference products, variants, colors, and features that appear here or that the operator stated. Never invent product names, finishes, straps, or "2-in-1" features.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'get_ad_performance',
     description: 'Per-platform ad performance (every paid platform the store runs) for a date range: spend, attributed revenue, ROAS, clicks, conversions.',
     input_schema: {
@@ -204,6 +210,12 @@ export async function execTool(get: Getter, name: string, input: Record<string, 
     return 'Error: date_from and date_to must be YYYY-MM-DD with date_from <= date_to.';
   }
   const params = `tf=custom&date_from=${from}&date_to=${to}`;
+
+  if (name === 'get_product_catalog') {
+    const { fetchCatalog, catalogText } = await import('@/src/lib/catalog');
+    const items = await fetchCatalog().catch(() => []);
+    return `ACTIVE PRODUCT CATALOG (${items.length} products — these are the ONLY real products/variants; do not invent others):\n${catalogText(items)}`;
+  }
 
   if (name === 'get_metrics') {
     const d = await get(`/api/windsor?${params}`);
