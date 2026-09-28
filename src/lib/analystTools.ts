@@ -191,6 +191,32 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'update_task',
+    description: "Update an existing task on the Tasks board: change its due date, title, assignee, priority, or status (todo/in_progress/done). Get the task's id from get_tasks first. Use this to fix wrong dates or reassign work when the operator asks.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Task id from get_tasks' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        assignee: { type: 'string' },
+        due_date: { type: 'string', description: 'YYYY-MM-DD' },
+        priority: { type: 'string', enum: ['low', 'medium', 'high'] },
+        status: { type: 'string', enum: ['todo', 'in_progress', 'done'] },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'delete_task',
+    description: "Delete a task from the Tasks board permanently (duplicates, stale versions from an old plan). Get the id from get_tasks. Only delete when the operator asked for a cleanup or removal — when in doubt, list what you would delete and ask.",
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'Task id from get_tasks' } },
+      required: ['id'],
+    },
+  },
+  {
     name: 'get_month_notes',
     description: "The team's monthly performance log (Goals tab): free-form notes on what happened each month — launches, stockouts, promos, ad account issues. ALWAYS check this when explaining why performance rose or fell in a given month.",
     input_schema: { type: 'object', properties: {} },
@@ -389,10 +415,35 @@ By order count: 1 order ${m.oneOrderCount?.toLocaleString?.() ?? '?'} (LTV $${m.
 
   if (name === 'get_tasks') {
     const d = await get('/api/tasks');
-    const tasks = (d?.tasks as Array<{ title: string; status: string; assignee?: string; dueDate?: string; priority: string }>) ?? [];
+    const tasks = (d?.tasks as Array<{ id: string; title: string; status: string; assignee?: string; dueDate?: string; priority: string }>) ?? [];
     if (!tasks.length) return 'The Tasks board is empty.';
-    const line = (t: typeof tasks[number]) => `- ${t.title} [${t.status}] ${t.assignee ? `@${t.assignee} ` : ''}${t.dueDate ? `due ${t.dueDate} ` : ''}(${t.priority})`;
+    const line = (t: typeof tasks[number]) => `- [id ${t.id}] ${t.title} [${t.status}] ${t.assignee ? `@${t.assignee} ` : ''}${t.dueDate ? `due ${t.dueDate} ` : ''}(${t.priority})`;
     return `Tasks board (${tasks.filter(t => t.status !== 'done').length} open):\n${tasks.map(line).join('\n')}`;
+  }
+
+  if (name === 'update_task') {
+    const id = String(input.id ?? '').trim();
+    if (!id) return 'Error: id is required (from get_tasks).';
+    const body: Record<string, unknown> = { id };
+    if (input.title != null) body.title = String(input.title);
+    if (input.description != null) body.description = String(input.description);
+    if (input.assignee != null) body.assignee = String(input.assignee);
+    if (input.due_date != null) {
+      const due = String(input.due_date);
+      if (due && !DATE_RE.test(due)) return 'Error: due_date must be YYYY-MM-DD.';
+      body.dueDate = due;
+    }
+    if (['low', 'medium', 'high'].includes(String(input.priority))) body.priority = String(input.priority);
+    if (['todo', 'in_progress', 'done'].includes(String(input.status))) body.status = String(input.status);
+    const d = await get('/api/tasks', { method: 'PUT', body });
+    return d?.ok ? `Task ${id} updated.` : `Error: could not update task ${id} (does it still exist?).`;
+  }
+
+  if (name === 'delete_task') {
+    const id = String(input.id ?? '').trim();
+    if (!id) return 'Error: id is required (from get_tasks).';
+    const d = await get(`/api/tasks?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return d?.ok ? `Task ${id} deleted.` : `Error: could not delete task ${id} (does it still exist?).`;
   }
 
   if (name === 'create_task') {
