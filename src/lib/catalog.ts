@@ -98,7 +98,7 @@ export function catalogText(items: CatalogProduct[]): string {
       const bits = [p.title];
       if (p.soldOut) bits.push('⛔ SOLD OUT — do NOT feature or mention in any campaign');
       if (p.type) bits.push(`[${p.type}]`);
-      bits.push(p.price);
+      bits.push(`${p.price} (internal reference — never print prices in customer-facing copy)`);
       if (p.variants.length) bits.push(`in-stock variants: ${p.variants.join(', ')}`);
       if (p.oosVariants.length) bits.push(`OUT OF STOCK (never mention): ${p.oosVariants.join(', ')}`);
       if (p.description) bits.push(`— ${p.description}`);

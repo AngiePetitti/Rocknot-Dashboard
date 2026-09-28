@@ -21,6 +21,7 @@ PRODUCT FACTS (corrections that override any assumption):
 - Interchangeable rhinestone straps exist as their own product category — but only call something a strap if the catalog lists it as one.
 
 HARD RULES:
+- Never put prices in customer-facing copy (emails, SMS, ads) unless the operator explicitly asks — the product page shows the price.
 - Never write bridal/wedding-themed copy unless the operator explicitly asks.
 - "Statement Strings™ Hoodie" is always written exactly that way.
 - When unsure what a product is, ask or check top-products data — never guess an occasion or use case.
