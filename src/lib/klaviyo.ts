@@ -335,3 +335,28 @@ export async function fetchRetentionData(from?: string, to?: string): Promise<Re
     ...(statsError ? { statsError } : {}),
   };
 }
+
+/** One-shot diagnostics for the Retention tab's blank stats: which metrics
+ *  the key can see, which one we pick as "Placed Order", and whether the
+ *  campaign values report returns rows whose ids match the campaign list. */
+export async function klaviyoDiagnostics(from: string, to: string): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = { configured: klaviyoConfigured(), range: { from, to } };
+  try {
+    const json = await kfetch('/api/metrics');
+    const metrics = (json.data as Array<{ id: string; attributes?: { name?: string; integration?: { name?: string } } }>) || [];
+    out.metrics = metrics.map(m => ({ id: m.id, name: m.attributes?.name, integration: m.attributes?.integration?.name })).slice(0, 60);
+    out.metricCount = metrics.length;
+  } catch (e) { out.metricsError = String(e instanceof Error ? e.message : e); }
+  try { out.placedOrderMetricId = await placedOrderMetricId(); } catch (e) { out.placedOrderError = String(e instanceof Error ? e.message : e); }
+  try {
+    const [email, sms] = await Promise.all([listCampaigns('email'), listCampaigns('sms')]);
+    out.campaigns = { email: email.length, sms: sms.length, sample: [...email, ...sms].slice(0, 5).map(c => ({ id: c.id, name: c.name, status: c.status, sendTime: c.sendTime })) };
+  } catch (e) { out.campaignsError = String(e instanceof Error ? e.message : e); }
+  if (typeof out.placedOrderMetricId === 'string') {
+    try {
+      const results = await valuesReport('campaign-values-report', out.placedOrderMetricId, from, to);
+      out.valuesReport = { rows: results.length, sample: results.slice(0, 3) };
+    } catch (e) { out.valuesReportError = String(e instanceof Error ? e.message : e); }
+  }
+  return out;
+}

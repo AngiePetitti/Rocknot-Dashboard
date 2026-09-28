@@ -7,6 +7,8 @@ import TimeframeSelector from '@/src/components/ui/TimeframeSelector';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import MetricCard from '@/src/components/ui/MetricCard';
+import TrendBrief from '@/src/components/TrendBrief';
+import { useClient } from '@/src/components/ClientProvider';
 
 interface Campaign {
   id: string; name: string; channel: 'email' | 'sms'; status: string; sendTime: string | null;
@@ -40,6 +42,7 @@ const TYPE_COLORS: Record<string, string> = {
 
 export default function RetentionContent() {
   const searchParams = useSearchParams();
+  const client = useClient();
   const tfRaw = searchParams.get('tf') || '30d';
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
@@ -243,6 +246,9 @@ Design: ${c.designBrief || '—'}`,
           </div>
         </Card>
       )}
+
+      {/* ── On Trend: what to be making right now (web-scanned daily) ── */}
+      <TrendBrief brandName={client.name} />
 
       {/* ── Last 30 days of campaigns ── */}
       {(data?.recent?.length ?? 0) > 0 && (
