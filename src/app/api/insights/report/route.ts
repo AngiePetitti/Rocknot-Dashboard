@@ -121,10 +121,13 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
-  const focus = (body.focus || '').trim().slice(0, 1000);
+  // The focus is the builder's full brief — truncating it to a sentence
+  // silently dropped the operator's per-item requirements (e.g. "every
+  // campaign needs full copy"), so keep it generous. Same for history.
+  const focus = (body.focus || '').trim().slice(0, 6000);
   const history = (body.messages ?? [])
     .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
-    .slice(-16);
+    .slice(-40);
   if (!focus && !history.some(m => m.role === 'assistant')) {
     return NextResponse.json({ error: `Ask ${getClient().analyst.name} at least one question first — the report is built from the conversation.` }, { status: 400 });
   }
@@ -167,9 +170,12 @@ BRAND STYLE — ${brand.name} dashboard pastels (use these exact colors)
   · Keep each chart + its title + caption inside one card so they print together.
   · Prefer several smaller charts/tables over one tall one.
 
+CONTENT DELIVERABLES — overrides the one-pager rule:
+- When the focus asks for content the team will USE (email/SMS campaign copy, briefs, calendars with copy), COMPLETENESS beats brevity: every single item listed in the focus gets its own full section with everything the focus requires (e.g. subject line, preview text, full body copy, CTA) written out ready-to-send — never "similar to above", never a summary row in place of the copy. Follow every naming rule and standing instruction in the focus exactly, for every item. Charts are optional in these reports.
+
 SPEED — the operator is waiting on this report:
 - Fetch only 1–3 tool calls' worth of data (batch calls in parallel where possible), then write.
-- Keep the HTML lean: one shared <style> block with short class names — no inline style repetition, no CSS resets, no comments. 2–4 sections, each chart's SVG as simple as accuracy allows. Aim for a tight one-pager over an exhaustive dossier.
+- Keep the HTML lean: one shared <style> block with short class names — no inline style repetition, no CSS resets, no comments. For data reports: 2–4 sections, each chart's SVG as simple as accuracy allows — a tight one-pager over an exhaustive dossier.
 
 HONESTY
 - Only report numbers you fetched. If a period had no data, either omit it or mark it "no data" — never fabricate.`;
@@ -190,7 +196,10 @@ HONESTY
       // non-streaming limit at this max_tokens.
       const response = await client.messages.stream({
         model: 'claude-opus-4-8',
-        max_tokens: 20000,
+        // Content-deliverable reports (full copy for every campaign) run much
+        // longer than data one-pagers — a low cap silently truncated the
+        // later campaigns' copy.
+        max_tokens: 48000,
         thinking: { type: 'adaptive' },
         // Report writing is mostly formatting; medium effort cuts thinking
         // time substantially without hurting the numbers (they come from tools).
@@ -218,6 +227,12 @@ HONESTY
         continue;
       }
 
+      // A max_tokens stop means the tail of the report (the last campaigns'
+      // copy) was cut off mid-document — fail loudly instead of returning a
+      // silently incomplete report.
+      if (response.stop_reason === 'max_tokens') {
+        return NextResponse.json({ error: 'The report ran too long and was cut off — split it into two smaller reports (e.g. by week or by campaign group).' }, { status: 502 });
+      }
       finalText = response.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
       break;
     }

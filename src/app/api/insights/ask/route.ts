@@ -38,7 +38,7 @@ const CREATE_REPORT_TOOL: Anthropic.Tool = {
   input_schema: {
     type: 'object',
     properties: {
-      focus: { type: 'string', description: 'One or two sentences describing exactly what the report should cover — topic, date range(s), comparisons, products.' },
+      focus: { type: 'string', description: 'A complete brief for the report builder (it does NOT see this chat reliably — everything it must honor goes here): topic, date range(s), comparisons, products, AND every standing instruction or correction the operator has given that applies (naming rules, required content per item, things to include for EVERY entry). If the operator asked for content deliverables (e.g. email campaign copy), say explicitly that each item needs full ready-to-use copy, and list the items.' },
     },
     required: ['focus'],
   },
@@ -55,9 +55,12 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
+  // Keep a long window: standing instructions ("always call it Statement
+  // Strings™ Hoodie") arrive early in a session, and trimming them out made
+  // Cleo "forget" corrections the operator already gave.
   const history = (body.messages ?? [])
     .filter(mm => (mm.role === 'user' || mm.role === 'assistant') && typeof mm.content === 'string' && (mm.content.trim() || (mm.images && mm.images.length)))
-    .slice(-16);
+    .slice(-80);
   if (!history.length || history[history.length - 1].role !== 'user') {
     return NextResponse.json({ error: 'Send at least one user message' }, { status: 400 });
   }
@@ -81,6 +84,8 @@ Format for fast reading on a phone (GitHub-flavored markdown):
 - Use a compact markdown table for any month-over-month, period, or product comparison (short column headers, one metric family per table). Never list months inline in a sentence.
 - Use short bullets for everything else; **bold** the numbers that matter.
 - Keep the whole answer tight — no filler, no headers, no closing pleasantries.
+
+Standing instructions: when the operator gives a rule or correction earlier in the conversation ("always use this product name", "every campaign must include full copy"), treat it as binding for the rest of the session — apply it without being reminded, and carry it into any create_report focus.
 
 If the operator asks for a report / PDF / shareable document, call create_report with a precise focus, then confirm in one sentence that the report is being built (it opens in a new tab and lands in their Saved reports) — don't rewrite the analysis in the chat.`;
 
