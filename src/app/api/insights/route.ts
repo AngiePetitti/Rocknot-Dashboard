@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { friendlyAiError } from '@/src/lib/aiError';
 import Anthropic from '@anthropic-ai/sdk';
 import { getClient } from '@/src/lib/client';
 
@@ -247,6 +248,6 @@ ${businessContext}`.trim();
       },
     });
   } catch (err) {
-    return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });
+    return NextResponse.json({ error: friendlyAiError(err) }, { status: 500 });
   }
 }

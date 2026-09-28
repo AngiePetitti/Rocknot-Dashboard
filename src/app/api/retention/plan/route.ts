@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { friendlyAiError } from '@/src/lib/aiError';
 import Anthropic from '@anthropic-ai/sdk';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
@@ -60,7 +61,7 @@ export async function PATCH(req: NextRequest) {
     await saveLarge('retention_plan', JSON.stringify(payload));
     return NextResponse.json({ ok: true, skippedKeys: payload.skippedKeys });
   } catch (e) {
-    return NextResponse.json({ error: String(e instanceof Error ? e.message : e) }, { status: 500 });
+    return NextResponse.json({ error: friendlyAiError(e) }, { status: 500 });
   }
 }
 
@@ -148,6 +149,6 @@ For SMS, subjectLines holds the 2-3 message variants (with emoji, under 160 char
     await saveLarge('retention_plan', JSON.stringify(payload));
     return NextResponse.json(payload);
   } catch (e) {
-    return NextResponse.json({ error: String(e instanceof Error ? e.message : e) }, { status: 500 });
+    return NextResponse.json({ error: friendlyAiError(e) }, { status: 500 });
   }
 }

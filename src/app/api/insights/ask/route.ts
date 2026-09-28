@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { friendlyAiError } from '@/src/lib/aiError';
 import Anthropic from '@anthropic-ai/sdk';
 import { ANALYST_TOOLS, execTool, makeFetcher } from '@/src/lib/analystTools';
 import { getClient } from '@/src/lib/client';
@@ -163,6 +164,6 @@ If the operator asks for a report / PDF / shareable document, call create_report
     if (!answer) answer = 'I ran out of analysis steps before finishing — try asking a more specific question.';
     return NextResponse.json({ ok: true, answer, ...(reportFocus ? { reportFocus } : {}) });
   } catch (err) {
-    return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });
+    return NextResponse.json({ error: friendlyAiError(err) }, { status: 500 });
   }
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { friendlyAiError } from '@/src/lib/aiError';
 import { getClient } from '@/src/lib/client';
 import Anthropic from '@anthropic-ai/sdk';
 import { getServerSession } from 'next-auth';
@@ -271,6 +272,6 @@ HONESTY
     }
     return NextResponse.json({ ok: true, html: injectToolbar(html, saved), ...(saveError ? { saveError } : {}) });
   } catch (err) {
-    return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });
+    return NextResponse.json({ error: friendlyAiError(err) }, { status: 500 });
   }
 }
