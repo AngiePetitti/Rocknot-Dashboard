@@ -168,7 +168,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Short task title (single-task mode)' },
-        description: { type: 'string', description: 'Details/context (optional)' },
+        description: { type: 'string', description: 'Details/context. For a design/campaign task, this MUST contain the COMPLETE brief the assignee needs to execute without asking questions: subject line, preview text, full body copy, CTA, products featured, and any format notes — never just a campaign name.' },
         assignee: { type: 'string', description: 'Team member name (optional)' },
         due_date: { type: 'string', description: 'YYYY-MM-DD (optional)' },
         priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Default medium' },
@@ -179,7 +179,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
             type: 'object',
             properties: {
               title: { type: 'string' },
-              description: { type: 'string' },
+              description: { type: 'string', description: 'For design/campaign tasks: the COMPLETE brief (subject, preview, full body copy, CTA, products, format notes), not just the campaign name.' },
               assignee: { type: 'string' },
               due_date: { type: 'string', description: 'YYYY-MM-DD' },
               priority: { type: 'string', enum: ['low', 'medium', 'high'] },
