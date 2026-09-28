@@ -8,7 +8,26 @@ export const maxDuration = 300;
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-interface ChatMessage { role: 'user' | 'assistant'; content: string }
+interface ChatImage { dataUrl: string; name?: string }
+interface ChatMessage { role: 'user' | 'assistant'; content: string; images?: ChatImage[] }
+
+// Screenshots the operator attaches (Ads Manager, Shopify, a creative, a Slack
+// thread). Data URLs only, common raster types, ≤ 5 MB decoded, 4 per message.
+const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+function parseImage(img: ChatImage): { media_type: ImageMediaType; data: string } | null {
+  const m = /^data:(image\/[a-z]+);base64,([A-Za-z0-9+/=]+)$/.exec(img?.dataUrl || '');
+  if (!m || !IMAGE_TYPES.has(m[1])) return null;
+  if (m[2].length * 0.75 > 5 * 1024 * 1024) return null;
+  return { media_type: m[1] as ImageMediaType, data: m[2] };
+}
+function toParam(mm: ChatMessage): Anthropic.MessageParam {
+  const imgs = (mm.images || []).slice(0, 4).map(parseImage).filter((x): x is NonNullable<typeof x> => x !== null);
+  if (mm.role !== 'user' || !imgs.length) return { role: mm.role, content: mm.content };
+  const blocks: Anthropic.ContentBlockParam[] = imgs.map(i => ({ type: 'image', source: { type: 'base64', media_type: i.media_type, data: i.data } }));
+  blocks.push({ type: 'text', text: mm.content.trim() || 'What should I do based on this?' });
+  return { role: 'user', content: blocks };
+}
 
 // Chat-only tool: lets Cleo kick off the shareable-report builder when the
 // operator asks for a report in conversation.
@@ -37,7 +56,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
   const history = (body.messages ?? [])
-    .filter(mm => (mm.role === 'user' || mm.role === 'assistant') && typeof mm.content === 'string' && mm.content.trim())
+    .filter(mm => (mm.role === 'user' || mm.role === 'assistant') && typeof mm.content === 'string' && (mm.content.trim() || (mm.images && mm.images.length)))
     .slice(-16);
   if (!history.length || history[history.length - 1].role !== 'user') {
     return NextResponse.json({ error: 'Send at least one user message' }, { status: 400 });
@@ -49,7 +68,7 @@ export async function POST(req: NextRequest) {
   const brand = getClient();
   const system = `You are ${brand.analyst.name}, the in-house AI data analyst for ${brand.name}. ${brand.brand.description} Today's date is ${today}.
 
-You answer the operator's questions by QUERYING the store's data with the tools provided. The question determines what you fetch — derive the exact date ranges it implies (e.g. "last year vs this year month over month" → fetch each year's window with monthly granularity; "last week" → that week daily). Use yesterday as the end date for current periods, since today is partial. Fetch the minimum needed; use monthly granularity for ranges over ~3 months.
+You answer the operator's questions by QUERYING the store's data with the tools provided. The operator may ATTACH SCREENSHOTS (an ads manager, Shopify, an email or creative, a Slack thread, a spreadsheet). When one is attached: read every number and label off it carefully, say in one line what you are looking at, cross-check anything checkable against the live data with your tools, then give concrete next steps — what to change, where, and what to watch. If the image is unreadable or missing what you need, say exactly what to send instead. The question determines what you fetch — derive the exact date ranges it implies (e.g. "last year vs this year month over month" → fetch each year's window with monthly granularity; "last week" → that week daily). Use yesterday as the end date for current periods, since today is partial. Fetch the minimum needed; use monthly granularity for ranges over ~3 months.
 
 Answer like a data scientist:
 - Quantify. Cite the actual numbers you fetched and show derived calculations briefly (growth rates, CAC = spend ÷ new customers, per-month deltas).
@@ -66,7 +85,7 @@ Format for fast reading on a phone (GitHub-flavored markdown):
 If the operator asks for a report / PDF / shareable document, call create_report with a precise focus, then confirm in one sentence that the report is being built (it opens in a new tab and lands in their Saved reports) — don't rewrite the analysis in the chat.`;
 
   try {
-    let messages: Anthropic.MessageParam[] = [...history];
+    let messages: Anthropic.MessageParam[] = history.map(toParam);
     let answer = '';
     let reportFocus: string | null = null;
 

@@ -18,7 +18,36 @@ const SUGGESTED_QUESTIONS = [
   'Which slow-moving inventory should we discount first?',
 ];
 
-export interface ChatMsg { role: 'user' | 'assistant'; content: string }
+export interface ChatImage { dataUrl: string; name?: string }
+export interface ChatMsg { role: 'user' | 'assistant'; content: string; images?: ChatImage[] }
+
+// Attachments are shrunk on the phone before upload (longest side 1600 px,
+// JPEG) so an Ads Manager screenshot is ~200 KB, not 5 MB.
+async function shrinkImage(file: File): Promise<ChatImage> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('Could not read that image'));
+      el.src = url;
+    });
+    const max = 1600;
+    const scale = Math.min(1, max / Math.max(img.width, img.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return { dataUrl: canvas.toDataURL('image/jpeg', 0.85), name: file.name };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+// History is saved without the image bytes (they would blow past storage limits);
+// a saved message keeps only the names so the bubble can say what was attached.
+function stripImages(list: ChatMsg[]): ChatMsg[] {
+  return list.map(m => (m.images?.length ? { ...m, images: m.images.map(i => ({ dataUrl: '', name: i.name })) } : m));
+}
 
 function isMobile(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
@@ -73,6 +102,14 @@ function ConversationView({ chat, asking, endRef }: { chat: ChatMsg[]; asking: b
           <div className={`max-w-[92%] sm:max-w-[85%] min-w-0 rounded-2xl px-3.5 py-2.5 text-sm break-words ${
             msg.role === 'user' ? 'bg-violet-600 text-white leading-relaxed' : 'bg-gray-50 text-gray-700 border border-gray-100'
           }`}>
+            {msg.role === 'user' && msg.images && msg.images.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {msg.images.map((im, j) => im.dataUrl
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img key={j} src={im.dataUrl} alt={im.name || 'attachment'} className="h-20 rounded-lg border border-white/30 object-cover" />
+                  : <span key={j} className="text-[11px] bg-white/20 rounded-md px-2 py-0.5">📎 {im.name || 'image'}</span>)}
+              </div>
+            )}
             {msg.role === 'assistant' ? <AnswerMarkdown text={msg.content} /> : msg.content}
           </div>
         </div>
@@ -99,6 +136,19 @@ export default function CleoChat() {
   const [chat, setChat] = useState<ChatMsg[]>([]);
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
+  const [pending, setPending] = useState<ChatImage[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  async function addFiles(files: FileList | null) {
+    if (!files) return;
+    const picked = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, 4 - pending.length);
+    try {
+      const shrunk = await Promise.all(picked.map(shrinkImage));
+      setPending(p => [...p, ...shrunk].slice(0, 4));
+    } catch (e) {
+      setAskError(e instanceof Error ? e.message : 'Could not read that image');
+    }
+    if (fileRef.current) fileRef.current.value = '';
+  }
   const [askError, setAskError] = useState<string | null>(null);
 
   // ── Voice input (browser speech recognition, where supported) ──
@@ -233,21 +283,24 @@ export default function CleoChat() {
 
   async function ask(q?: string) {
     const text = (q ?? question).trim();
-    if (!text || asking) return;
-    const next: ChatMsg[] = [...chat, { role: 'user', content: text }];
+    const images = q === undefined ? pending : [];
+    if ((!text && !images.length) || asking) return;
+    const next: ChatMsg[] = [...chat, { role: 'user', content: text, ...(images.length ? { images } : {}) }];
     setChat(next);
     setQuestion('');
+    setPending([]);
     setAsking(true);
     setAskError(null);
     try {
       const res = await fetch('/api/insights/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: next }),
+        // Only the newest message carries image bytes; earlier ones were stripped when saved.
+        body: JSON.stringify({ messages: [...stripImages(next.slice(0, -1)), next[next.length - 1]] }),
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || 'Something went wrong');
-      const withAnswer: ChatMsg[] = [...next, { role: 'assistant', content: data.answer }];
+      const withAnswer: ChatMsg[] = [...stripImages(next), { role: 'assistant', content: data.answer }];
       setChat(withAnswer);
       // Voice conversation: a dictated question gets a spoken answer.
       try {
@@ -270,6 +323,7 @@ export default function CleoChat() {
       setAskError(e instanceof Error ? e.message : 'Something went wrong');
       setChat(chat); // roll back the optimistic user message on failure
       setQuestion(text);
+      setPending(images);
     } finally {
       setAsking(false);
     }
@@ -433,17 +487,43 @@ export default function CleoChat() {
             )}
           </div>
 
+          {/* Attached screenshots waiting to be sent */}
+          {pending.length > 0 && (
+            <div className="flex gap-2 px-3 pt-2 border-t border-gray-100 shrink-0 overflow-x-auto">
+              {pending.map((im, i) => (
+                <div key={i} className="relative shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={im.dataUrl} alt={im.name || 'attachment'} className="h-16 rounded-lg border border-gray-200 object-cover" />
+                  <button type="button" onClick={() => setPending(p => p.filter((_, j) => j !== i))} aria-label="Remove image"
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-gray-800 text-white text-[10px] leading-5 text-center">✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Input pinned at the bottom */}
           <form
             onSubmit={e => { e.preventDefault(); ask(); }}
+            onPaste={e => { const files = e.clipboardData?.files; if (files && files.length) { e.preventDefault(); addFiles(files); } }}
             className="flex gap-2 px-3 py-3 border-t border-gray-100 shrink-0"
             style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
           >
+            <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={e => addFiles(e.target.files)} />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={asking || pending.length >= 4}
+              aria-label="Attach a screenshot"
+              title="Attach a screenshot (or paste one)"
+              className="px-3 py-2.5 rounded-xl border bg-white border-gray-200 hover:bg-gray-50 text-base disabled:opacity-50"
+            >
+              📎
+            </button>
             <input
               type="text"
               value={question}
               onChange={e => setQuestion(e.target.value)}
-              placeholder="Ask Cleo…"
+              placeholder={pending.length ? 'What should I do about this?' : 'Ask Cleo…'}
               disabled={asking}
               className="flex-1 min-w-0 px-3.5 py-2.5 text-base md:text-sm border border-gray-200 rounded-xl bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:opacity-60"
             />
@@ -460,7 +540,7 @@ export default function CleoChat() {
             )}
             <button
               type="submit"
-              disabled={asking || !question.trim()}
+              disabled={asking || (!question.trim() && !pending.length)}
               className="px-4 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
             >
               {asking ? '…' : 'Ask'}
