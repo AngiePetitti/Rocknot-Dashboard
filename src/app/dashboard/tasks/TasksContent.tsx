@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Header from '@/src/components/Header';
+import CallNotesImporter from '@/src/components/CallNotesImporter';
 
 type TaskStatus = 'todo' | 'in_progress' | 'done';
 type Priority = 'low' | 'medium' | 'high';
@@ -76,6 +77,7 @@ export default function TasksContent() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [editDescFor, setEditDescFor] = useState<string | null>(null);
@@ -183,13 +185,29 @@ export default function TasksContent() {
   return (
     <div>
       <Header title="Tasks" subtitle={`Internal task board · ${tasks.length - doneCount} open${overdueCount ? ` · ${overdueCount} overdue` : ''}`}>
-        <button
-          onClick={() => setAdding(a => !a)}
-          className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold rounded-xl transition-colors"
-        >
-          {adding ? 'Close' : '+ New task'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setImporting(i => !i); setAdding(false); }}
+            className="px-4 py-2 bg-white border border-violet-200 hover:bg-violet-50 text-violet-700 text-sm font-semibold rounded-xl transition-colors"
+          >
+            {importing ? 'Close' : '📞 Import call notes'}
+          </button>
+          <button
+            onClick={() => { setAdding(a => !a); setImporting(false); }}
+            className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold rounded-xl transition-colors"
+          >
+            {adding ? 'Close' : '+ New task'}
+          </button>
+        </div>
       </Header>
+
+      {importing && (
+        <CallNotesImporter
+          people={teamNames}
+          onClose={() => setImporting(false)}
+          onCreated={() => { fetch('/api/tasks', { cache: 'no-store' }).then(r => r.json()).then(d => { if (Array.isArray(d?.tasks)) setTasks(d.tasks); }).catch(() => {}); }}
+        />
+      )}
 
       {error && (
         <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-red-700">
