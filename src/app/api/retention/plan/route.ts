@@ -100,7 +100,12 @@ Already scheduled/drafted (do NOT duplicate these): ${d.scheduled.map(c => `${c.
   const brand = getClient();
   const founderLine = brand.brand.founder ? ` Founder ${brand.brand.founder.name} is the face of the brand.` : '';
   const aovLine = brand.brand.aov ? ` AOV ~$${brand.brand.aov}.` : '';
+  const { getBrandBrief } = await import('@/src/lib/brandBrief');
+  const brandBrief = await getBrandBrief().catch(() => '');
   const prompt = `You are ${brand.analyst.name}, ${brand.name}'s retention marketing strategist. ${brand.brand.description}${founderLine}${aovLine}
+
+BRAND BRIEF (who the brand is, who buys, voice, and hard rules — every campaign must follow it; never invent premises like restocks, sell-outs, or occasions the data doesn't show):
+${brandBrief || '(none)'}
 
 BRAND GUIDELINES (ALL copy voice and every design brief must follow these — never invent brand colors, fonts, or aesthetic descriptors that are not in this section. If it is empty, write design briefs that instruct the designer to pull visual identity from ${brand.siteDomain} and note the guidelines doc is pending):
 ${guidelines || '(none uploaded yet)'}

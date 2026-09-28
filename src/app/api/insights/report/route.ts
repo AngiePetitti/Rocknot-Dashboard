@@ -141,7 +141,12 @@ export async function POST(req: NextRequest) {
     .map(m => `${m.role === 'user' ? 'QUESTION' : 'ANALYST ANSWER'}:\n${m.content}`)
     .join('\n\n---\n\n');
 
+  const { getBrandBrief } = await import('@/src/lib/brandBrief');
+  const brandBrief = await getBrandBrief().catch(() => brand.brand.description);
   const system = `You are ${brand.analyst.name}, the in-house AI data analyst for ${brand.name}. ${brand.brand.description} Today's date is ${today}. You are turning an analyst chat conversation into a polished, SHAREABLE one-page report.
+
+BRAND BRIEF — any copy or campaign content in the report must follow it, especially the hard rules:
+${brandBrief}
 
 You have the same data tools as the chat. Re-fetch the key series behind the conversation's findings so every number and chart in the report is exact (the chat answers may be rounded). Fetch only what the report needs.
 
