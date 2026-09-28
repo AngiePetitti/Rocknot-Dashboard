@@ -515,16 +515,30 @@ export default function TasksContent() {
         the full campaign brief. Tasks are shared with the whole team and saved to your Sheet.
       </p>
 
-      {/* ── Full-brief view: a wide reading layout for design/campaign tasks
-            whose description is a complete brief. Checklist lines stay
-            toggleable; section headers (ALL-CAPS lines / "Label:" lines)
-            render as headings so the brief reads like a document. ── */}
+      {/* ── Full-brief view: a wide READING layout for design/campaign tasks.
+            The brief renders as a document — headings, labeled fields, prose —
+            not as a checklist. Only lines someone explicitly wrote as
+            checkboxes ("[ ]" / "[x]") get a toggle. ── */}
       {briefFor && (() => {
         const t = tasks.find(x => x.id === briefFor);
         if (!t) return null;
         const due = dueMeta(t.dueDate, t.status);
-        const items = t.description ? parseChecklist(t.description) : [];
-        const isHeading = (s: string) => /^[A-Z0-9 ()&/™'-]{3,40}:?$/.test(s.trim()) || /^(subject line|preview text|body( copy)?|cta( button)?|hook|angle|format|featured|products?|list|notes?)\s*:/i.test(s.trim());
+        const desc = t.description || '';
+        const CHECKBOX_RE = /^\[( |x)\]\s?/i;
+        const lines = desc.split('\n').map((raw, lineIdx) => ({ raw, text: raw.trim(), lineIdx }));
+        const checkboxCount = lines.filter(l => CHECKBOX_RE.test(l.text)).length;
+        const checkedCount = lines.filter(l => /^\[x\]/i.test(l.text)).length;
+        const toggleBox = (lineIdx: number) => {
+          const all = desc.split('\n');
+          const s = (all[lineIdx] ?? '').trim();
+          all[lineIdx] = /^\[x\]/i.test(s) ? s.replace(/^\[x\]\s?/i, '[ ] ') : s.replace(/^\[ \]\s?/, '[x] ');
+          updateTask(t.id, { description: all.join('\n') });
+        };
+        // Section headings: an ALL-CAPS line ("BODY", "CTA: SHOP…") or a
+        // known brief label. "Label: content" on one line renders as a bold
+        // inline label instead.
+        const isHeading = (s: string) => /^[A-Z0-9 ()&/™:'-]{3,60}$/.test(s) && s === s.toUpperCase();
+        const labelMatch = (s: string) => s.match(/^(subject( line)?|preview( text)?|hook|angle|format( note)?s?|cta( button)?|products?( \(.*\))?|list|audience|send time|notes?)\s*:\s*(.+)/i);
         return (
           <div
             className="fixed inset-0 z-50 bg-black/40 flex items-start md:items-center justify-center p-3 md:p-8 overflow-y-auto"
@@ -542,8 +556,8 @@ export default function TasksContent() {
                     {t.assignee && <span className="text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-100 rounded-full px-2 py-0.5">{t.assignee}</span>}
                     {due && <span className={`text-[11px] ${due.cls}`}>📅 {due.text}</span>}
                     <span className="text-[11px] text-gray-400 capitalize">{t.status.replace('_', ' ')}</span>
-                    {items.length > 0 && (
-                      <span className="text-[11px] font-semibold text-gray-400">☑ {items.filter(i => i.checked).length}/{items.length}</span>
+                    {checkboxCount > 0 && (
+                      <span className="text-[11px] font-semibold text-gray-400">☑ {checkedCount}/{checkboxCount}</span>
                     )}
                   </div>
                 </div>
@@ -552,26 +566,67 @@ export default function TasksContent() {
                 </button>
               </div>
               <div className="px-5 py-4 overflow-y-auto">
-                {items.length ? (
-                  <div className="space-y-1">
-                    {items.map(item => (
-                      isHeading(item.text) && !item.checked ? (
-                        <p key={item.lineIdx} className="text-[11px] font-bold text-gray-400 uppercase tracking-wide pt-3 first:pt-0">{item.text.replace(/:$/, '')}</p>
-                      ) : (
-                        <button
-                          key={item.lineIdx}
-                          onClick={() => t.description && updateTask(t.id, { description: toggleChecklistLine(t.description, item.lineIdx) })}
-                          className="flex items-start gap-2 text-left w-full group"
-                        >
-                          <span className={`mt-1 w-3.5 h-3.5 shrink-0 rounded border text-[9px] font-bold flex items-center justify-center ${item.checked ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 bg-white group-hover:border-violet-400'}`}>
-                            {item.checked ? '✓' : ''}
-                          </span>
-                          <span className={`text-sm leading-relaxed flex-1 ${item.checked ? 'text-gray-300 line-through' : 'text-gray-700'}`}>{item.text}</span>
-                        </button>
-                      )
-                    ))}
-                  </div>
-                ) : (
+                {desc.trim() ? (() => {
+                  // Campaign-brief mode when the text has document structure
+                  // (headings or "Subject:" style labels); otherwise it's a
+                  // plain task and every line stays a toggleable to-do,
+                  // matching the board card.
+                  const isDocument = lines.some(l => l.text && (isHeading(l.text) || labelMatch(l.text)));
+                  if (!isDocument) {
+                    return (
+                      <div className="space-y-1">
+                        {lines.filter(l => l.text).map(l => {
+                          const checked = /^\[x\]/i.test(l.text);
+                          return (
+                            <button
+                              key={l.lineIdx}
+                              onClick={() => updateTask(t.id, { description: toggleChecklistLine(desc, l.lineIdx) })}
+                              className="flex items-start gap-2 text-left w-full group"
+                            >
+                              <span className={`mt-1 w-3.5 h-3.5 shrink-0 rounded border text-[9px] font-bold flex items-center justify-center ${checked ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 bg-white group-hover:border-violet-400'}`}>
+                                {checked ? '✓' : ''}
+                              </span>
+                              <span className={`text-sm leading-relaxed flex-1 ${checked ? 'text-gray-300 line-through' : 'text-gray-700'}`}>{l.text.replace(CHECKED_RE, '')}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="space-y-2">
+                      {lines.map(l => {
+                        if (!l.text) return null;
+                        if (CHECKBOX_RE.test(l.text)) {
+                          const checked = /^\[x\]/i.test(l.text);
+                          const label = l.text.replace(CHECKBOX_RE, '');
+                          return (
+                            <button key={l.lineIdx} onClick={() => toggleBox(l.lineIdx)} className="flex items-start gap-2 text-left w-full group">
+                              <span className={`mt-1 w-3.5 h-3.5 shrink-0 rounded border text-[9px] font-bold flex items-center justify-center ${checked ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 bg-white group-hover:border-violet-400'}`}>
+                                {checked ? '✓' : ''}
+                              </span>
+                              <span className={`text-sm leading-relaxed flex-1 ${checked ? 'text-gray-300 line-through' : 'text-gray-700'}`}>{label}</span>
+                            </button>
+                          );
+                        }
+                        if (isHeading(l.text)) {
+                          return <p key={l.lineIdx} className="text-[11px] font-bold text-gray-400 uppercase tracking-wide pt-4 first:pt-0">{l.text.replace(/:$/, '')}</p>;
+                        }
+                        const lm = labelMatch(l.text);
+                        if (lm) {
+                          const label = l.text.slice(0, l.text.indexOf(':'));
+                          const content = l.text.slice(l.text.indexOf(':') + 1).trim();
+                          return (
+                            <p key={l.lineIdx} className="text-sm leading-relaxed text-gray-700">
+                              <span className="font-bold text-gray-900">{label}:</span> {content}
+                            </p>
+                          );
+                        }
+                        return <p key={l.lineIdx} className="text-sm leading-relaxed text-gray-700 whitespace-pre-wrap">{l.raw}</p>;
+                      })}
+                    </div>
+                  );
+                })() : (
                   <p className="text-sm text-gray-400">No details on this task yet.</p>
                 )}
                 {t.link && (
