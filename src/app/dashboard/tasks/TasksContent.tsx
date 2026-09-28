@@ -79,6 +79,7 @@ export default function TasksContent() {
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [briefFor, setBriefFor] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [editDescFor, setEditDescFor] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<TaskStatus | null>(null);
@@ -349,6 +350,16 @@ export default function TasksContent() {
                         <button onClick={() => setExpanded(isOpen ? null : t.id)} className="text-left flex-1">
                           <p className={`text-sm font-semibold ${t.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{t.title}</p>
                         </button>
+                        {t.description && (
+                          <button
+                            onClick={() => setBriefFor(t.id)}
+                            title="Open full brief"
+                            aria-label="Open full brief"
+                            className="text-gray-300 hover:text-violet-600 p-0.5 shrink-0 text-sm leading-none"
+                          >
+                            ⤢
+                          </button>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 mt-1.5 pl-4 flex-wrap">
                         {t.assignee && (
@@ -500,9 +511,91 @@ export default function TasksContent() {
       </div>
 
       <p className="text-[11px] text-gray-400 mt-4">
-        Drag cards between columns (or use the move buttons on mobile). Tap a title to edit details. Tasks are
-        shared with the whole team and saved to your Sheet.
+        Drag cards between columns (or use the move buttons on mobile). Tap a title to edit details, or ⤢ to open
+        the full campaign brief. Tasks are shared with the whole team and saved to your Sheet.
       </p>
+
+      {/* ── Full-brief view: a wide reading layout for design/campaign tasks
+            whose description is a complete brief. Checklist lines stay
+            toggleable; section headers (ALL-CAPS lines / "Label:" lines)
+            render as headings so the brief reads like a document. ── */}
+      {briefFor && (() => {
+        const t = tasks.find(x => x.id === briefFor);
+        if (!t) return null;
+        const due = dueMeta(t.dueDate, t.status);
+        const items = t.description ? parseChecklist(t.description) : [];
+        const isHeading = (s: string) => /^[A-Z0-9 ()&/™'-]{3,40}:?$/.test(s.trim()) || /^(subject line|preview text|body( copy)?|cta( button)?|hook|angle|format|featured|products?|list|notes?)\s*:/i.test(s.trim());
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-black/40 flex items-start md:items-center justify-center p-3 md:p-8 overflow-y-auto"
+            onClick={() => setBriefFor(null)}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-2xl my-6 md:my-0 max-h-[90dvh] flex flex-col"
+            >
+              <div className="flex items-start gap-3 px-5 py-4 border-b border-gray-100">
+                <span className="mt-1.5 w-2.5 h-2.5 rounded-full shrink-0" style={{ background: PRIORITY_META[t.priority].dot }} />
+                <div className="flex-1 min-w-0">
+                  <h2 className={`text-base font-bold ${t.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{t.title}</h2>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    {t.assignee && <span className="text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-100 rounded-full px-2 py-0.5">{t.assignee}</span>}
+                    {due && <span className={`text-[11px] ${due.cls}`}>📅 {due.text}</span>}
+                    <span className="text-[11px] text-gray-400 capitalize">{t.status.replace('_', ' ')}</span>
+                    {items.length > 0 && (
+                      <span className="text-[11px] font-semibold text-gray-400">☑ {items.filter(i => i.checked).length}/{items.length}</span>
+                    )}
+                  </div>
+                </div>
+                <button onClick={() => setBriefFor(null)} aria-label="Close" className="text-gray-300 hover:text-gray-600 p-1">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 2L14 14M14 2L2 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                </button>
+              </div>
+              <div className="px-5 py-4 overflow-y-auto">
+                {items.length ? (
+                  <div className="space-y-1">
+                    {items.map(item => (
+                      isHeading(item.text) && !item.checked ? (
+                        <p key={item.lineIdx} className="text-[11px] font-bold text-gray-400 uppercase tracking-wide pt-3 first:pt-0">{item.text.replace(/:$/, '')}</p>
+                      ) : (
+                        <button
+                          key={item.lineIdx}
+                          onClick={() => t.description && updateTask(t.id, { description: toggleChecklistLine(t.description, item.lineIdx) })}
+                          className="flex items-start gap-2 text-left w-full group"
+                        >
+                          <span className={`mt-1 w-3.5 h-3.5 shrink-0 rounded border text-[9px] font-bold flex items-center justify-center ${item.checked ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 bg-white group-hover:border-violet-400'}`}>
+                            {item.checked ? '✓' : ''}
+                          </span>
+                          <span className={`text-sm leading-relaxed flex-1 ${item.checked ? 'text-gray-300 line-through' : 'text-gray-700'}`}>{item.text}</span>
+                        </button>
+                      )
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400">No details on this task yet.</p>
+                )}
+                {t.link && (
+                  <a href={t.link} target="_blank" rel="noopener noreferrer" className="inline-block mt-4 text-xs font-semibold text-violet-600 hover:text-violet-800">Open linked brief ↗</a>
+                )}
+              </div>
+              <div className="px-5 py-3 border-t border-gray-100 flex items-center gap-3">
+                <button
+                  onClick={() => { setExpanded(t.id); setBriefFor(null); }}
+                  className="text-xs font-semibold text-violet-600"
+                >
+                  ✏️ Edit on board
+                </button>
+                <button
+                  onClick={() => { if (confirm('Delete this task?')) { deleteTask(t.id); setBriefFor(null); } }}
+                  className="text-xs font-semibold text-gray-400 hover:text-red-500 ml-auto"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
