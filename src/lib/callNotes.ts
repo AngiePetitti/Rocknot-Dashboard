@@ -65,6 +65,6 @@ ${notes.slice(0, 20000)}
     description: typeof r.description === 'string' ? r.description.slice(0, 2000).trim() : undefined,
     assignee: typeof r.assignee === 'string' ? r.assignee.slice(0, 60).trim() : undefined,
     dueDate: typeof r.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.dueDate) ? r.dueDate : undefined,
-    priority: r.priority === 'high' || r.priority === 'low' ? r.priority : 'medium',
+    priority: (r.priority === 'high' || r.priority === 'low' ? r.priority : 'medium') as ActionItem['priority'],
   })).filter(i => i.title);
 }
