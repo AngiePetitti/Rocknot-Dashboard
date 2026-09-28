@@ -118,6 +118,8 @@ ${guidelines || '(none uploaded yet)'}
 
 Today is ${today}. Build the next 30 days of the Email/SMS campaign calendar with COMPLETE briefs a designer can execute without asking questions.
 
+COPY ENERGY: staying factual does not mean sounding flat. Every subject line and body must sell — teasers create genuine anticipation for a real launch (curiosity, attitude, a reason to watch the inbox), launch emails feel like an event. Never open with announcement filler ("Something new is coming", "Here's your heads up", "Stay tuned"). If a draft would read fine coming from a bank, rewrite it.
+
 UPCOMING LAUNCHES & PROMOTIONS (build the calendar around these):
 ${upcoming || 'None on the calendar — use best-practice cadence.'}
 
