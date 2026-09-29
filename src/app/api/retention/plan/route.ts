@@ -68,8 +68,9 @@ export async function PATCH(req: NextRequest) {
 export async function POST(req: NextRequest) {
   if (authConfigured()) {
     const session = await getServerSession(authOptions);
-    if (session?.user?.role !== 'admin') {
-      return NextResponse.json({ error: 'Only admins can regenerate the plan' }, { status: 403 });
+    // Any signed-in team member may regenerate; partner (agency) logins may not.
+    if (!session?.user || session.user.role === 'partner') {
+      return NextResponse.json({ error: 'Sign in as a team member to regenerate the plan' }, { status: 403 });
     }
   }
   if (!process.env.ANTHROPIC_API_KEY) return NextResponse.json({ error: 'Anthropic not configured' }, { status: 500 });
