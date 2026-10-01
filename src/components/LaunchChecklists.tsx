@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Card from '@/src/components/ui/Card';
 import type { MarketingEvent } from '@/src/app/api/calendar/route';
 
@@ -77,21 +77,27 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
   }, [events]);
   const [showAwaiting, setShowAwaiting] = useState(false);
 
-  async function toggle(eventId: string, label: string, done: boolean) {
+  // Saves run one-at-a-time: the server does load-modify-save per toggle, so
+  // rapid checking fired parallel requests that overwrote each other and
+  // silently dropped checks (8/11 after checking all 11).
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  function toggle(eventId: string, label: string, done: boolean) {
     setByEvent(prev => ({
       ...prev,
       [eventId]: { ...(prev[eventId] || {}), [label]: { done, at: new Date().toISOString() } },
     }));
-    try {
-      const res = await fetch('/api/launch/checklist', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId, label, done }),
-      });
-      if (!res.ok) throw new Error('save failed');
-    } catch {
-      setError('Could not save — check your connection and tap again.');
-    }
+    saveQueue.current = saveQueue.current.then(async () => {
+      try {
+        const res = await fetch('/api/launch/checklist', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId, label, done }),
+        });
+        if (!res.ok) throw new Error('save failed');
+      } catch {
+        setError('Could not save — check your connection and tap again.');
+      }
+    });
   }
 
   async function saveTemplate() {
