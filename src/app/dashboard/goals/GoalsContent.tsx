@@ -576,7 +576,12 @@ export default function GoalsContent() {
                       ) : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="py-2.5 pr-4 whitespace-nowrap">
-                      {isAdmin ? (
+                      {/* A finished month's goal is history — hit or missed,
+                          it greys out and locks. The % and ± columns keep
+                          telling the story; only the future stays editable. */}
+                      {isPast ? (
+                        <span className="text-gray-300">{g?.revenueGoal ? formatCurrency(g.revenueGoal) : '—'}</span>
+                      ) : isAdmin ? (
                         <span className="inline-flex items-center gap-1">
                           <input
                             type="number"
@@ -613,7 +618,9 @@ export default function GoalsContent() {
                       ) : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="py-2.5 pr-4 whitespace-nowrap">
-                      {isAdmin ? (
+                      {isPast ? (
+                        <span className="text-gray-300">{g?.adBudget ? formatCurrency(g.adBudget) : '—'}</span>
+                      ) : isAdmin ? (
                         <input
                           type="number"
                           value={g?.adBudget || ''}
