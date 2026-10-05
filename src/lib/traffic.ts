@@ -124,14 +124,16 @@ async function fetchAdLookup(from: string, to: string): Promise<AdLookup> {
   const out: AdLookup = { byId: {}, byName: {} };
   if (!process.env.BQ_DATASET || !process.env.GCP_PROJECT_ID) return out;
   const ds = getDataset();
-  const tables: Array<{ table: string; platform: string; where: string }> = [];
-  if (hasPlatform('meta')) tables.push({ table: 'facebook_ads', platform: 'Meta', where: metaAccountSql() });
-  if (hasPlatform('tiktok')) tables.push({ table: 'tiktok_ads', platform: 'TikTok', where: '' });
-  if (hasPlatform('pinterest')) tables.push({ table: 'pinterest_ads', platform: 'Pinterest', where: '' });
+  // Windsor's Pinterest connector has no ad_name field — the ad group name
+  // is the closest label it offers.
+  const tables: Array<{ table: string; platform: string; where: string; nameCol: string }> = [];
+  if (hasPlatform('meta')) tables.push({ table: 'facebook_ads', platform: 'Meta', where: metaAccountSql(), nameCol: 'ad_name' });
+  if (hasPlatform('tiktok')) tables.push({ table: 'tiktok_ads', platform: 'TikTok', where: '', nameCol: 'ad_name' });
+  if (hasPlatform('pinterest')) tables.push({ table: 'pinterest_ads', platform: 'Pinterest', where: '', nameCol: 'ad_group_name' });
   await Promise.all(tables.map(async t => {
     try {
       const rows = await runQuery<{ ad_id: string; ad_name: string; campaign: string; spend: number }>(
-        `SELECT CAST(ad_id AS STRING) AS ad_id, ANY_VALUE(ad_name) AS ad_name, ANY_VALUE(campaign) AS campaign, SUM(CAST(spend AS FLOAT64)) AS spend
+        `SELECT CAST(ad_id AS STRING) AS ad_id, ANY_VALUE(${t.nameCol}) AS ad_name, ANY_VALUE(campaign) AS campaign, SUM(CAST(spend AS FLOAT64)) AS spend
          FROM \`${ds}.${t.table}\` WHERE DATE(date) BETWEEN @date_from AND @date_to${t.where}
          GROUP BY ad_id`,
         { date_from: from, date_to: to },
