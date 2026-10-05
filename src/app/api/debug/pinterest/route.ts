@@ -40,6 +40,22 @@ export async function GET(request: NextRequest) {
       out.pinterestTables = await runQuery(
         `SELECT table_id, row_count, TIMESTAMP_MILLIS(last_modified_time) AS last_modified
          FROM \`${ds}.__TABLES__\` WHERE LOWER(table_id) LIKE '%pinterest%' ORDER BY last_modified DESC`).catch(e => ({ error: String(e) }));
+      // Row grain for the latest complete day: how many distinct ads / ad
+      // groups / campaigns the rows cover, and the rows themselves — to see
+      // whether the rebuilt task's upload is losing or splitting spend.
+      const probeDay = new Date(Date.parse(`${today}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
+      out.probeDay = probeDay;
+      out.grainByDay = await runQuery(
+        `SELECT FORMAT_DATE('%Y-%m-%d', DATE(date)) AS d, COUNT(*) AS row_count,
+                COUNT(DISTINCT CAST(ad_id AS STRING)) AS ads, COUNT(DISTINCT CAST(ad_group_name AS STRING)) AS ad_groups,
+                COUNT(DISTINCT CAST(campaign_name AS STRING)) AS campaigns, COUNT(DISTINCT CAST(account_id AS STRING)) AS accounts,
+                SUM(CAST(spend AS FLOAT64)) AS spend, COUNTIF(CAST(spend AS FLOAT64) = 0) AS zero_spend_rows
+         FROM \`${ds}.pinterest_ads\` WHERE DATE(date) BETWEEN @f AND @t GROUP BY d ORDER BY d`, { f: from, t: today }).catch(e => ({ error: String(e) }));
+      out.probeRows = await runQuery(
+        `SELECT CAST(ad_id AS STRING) AS ad_id, CAST(ad_group_name AS STRING) AS ad_group_name, CAST(campaign_name AS STRING) AS campaign_name,
+                CAST(account_id AS STRING) AS account_id, CAST(spend AS FLOAT64) AS spend, CAST(clicks AS FLOAT64) AS clicks,
+                CAST(impressions AS FLOAT64) AS impressions, CAST(total_checkout AS FLOAT64) AS total_checkout
+         FROM \`${ds}.pinterest_ads\` WHERE DATE(date) = @d ORDER BY spend DESC LIMIT 60`, { d: probeDay }).catch(e => ({ error: String(e) }));
       // Rows from the rebuilt task carry no total_conversions_value (the new
       // field list dropped it) — split the window's rows by that marker.
       out.rowsByTask = await runQuery(
@@ -76,6 +92,25 @@ export async function GET(request: NextRequest) {
       return { rows: rows.length, totals, sample: rows.slice(0, 1) };
     };
     const options = windsorPinterestOptions();
+    // Same day as the table probe, per ad, with the task's option — the
+    // exact shape the BigQuery task uploads. If this sums to Ads Manager's
+    // spend while the table's rows for the day don't, the loss is in the task.
+    try {
+      const probeDay = String(out.probeDay || today);
+      const qs = new URLSearchParams({ api_key: key, fields: 'date,account_id,ad_id,ad_group_name,campaign_name,spend,clicks,impressions,total_checkout', _renderer: 'json', ...scoped, date_from: probeDay, date_to: probeDay });
+      if (options) qs.set('options', options);
+      const res = await fetch(`https://connectors.windsor.ai/pinterest?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(25000) });
+      const json = await res.json();
+      const rows = (json.data || []) as Array<Record<string, unknown>>;
+      out.windsorLiveProbeDay = json.error ? { error: json.error } : {
+        day: probeDay, rows: rows.length,
+        spend: rows.reduce((s, r) => s + Number(r.spend || 0), 0),
+        clicks: rows.reduce((s, r) => s + Number(r.clicks || 0), 0),
+        total_checkout: rows.reduce((s, r) => s + Number(r.total_checkout || 0), 0),
+        distinctAds: new Set(rows.map(r => String(r.ad_id))).size,
+        sample: rows.slice(0, 5),
+      };
+    } catch (e) { out.windsorProbeError = String(e instanceof Error ? e.message : e); }
     try { out.windsorLiveDefault = await pull({}); } catch (e) { out.windsorError = String(e instanceof Error ? e.message : e); }
     if (options) {
       try { out.windsorLiveTaskOptions = await pull({ options }); } catch (e) { out.windsorOptionsError = String(e instanceof Error ? e.message : e); }
