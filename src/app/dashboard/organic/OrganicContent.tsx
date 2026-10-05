@@ -207,7 +207,7 @@ export default function OrganicContent() {
             {blog?.status === 'error' && <p className="text-xs text-red-600 mb-2">{blog.error}</p>}
             {blog?.status === 'ok' && blogItems.length > 0 && (blog.totals.articlesKnown || 0) === 0 && isAdmin && (
               <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
-                Titles and cover images are missing because the Shopify app lacks the <code className="bg-white px-1 rounded">read_content</code> scope. Shopify admin → Settings → Apps and sales channels → Develop apps → this app → Configuration → tick read_content → Save.
+                Titles and cover images could not be loaded: the Shopify app lacks the <code className="bg-white px-1 rounded">read_content</code> scope and the public blog feed returned nothing. Shopify admin → Settings → Apps and sales channels → Develop apps → this app → Configuration → tick read_content → Save.
               </p>
             )}
             {blog?.status === 'not_connected' && <p className="text-xs text-gray-400">Shopify is not connected on this deployment.</p>}
