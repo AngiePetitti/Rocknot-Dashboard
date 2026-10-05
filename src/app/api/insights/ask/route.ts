@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { friendlyAiError } from '@/src/lib/aiError';
 import Anthropic from '@anthropic-ai/sdk';
 import { ANALYST_TOOLS, execTool, makeFetcher } from '@/src/lib/analystTools';
-import { getClient } from '@/src/lib/client';
+import { getClient, marketplaces } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -78,6 +78,8 @@ BRAND BRIEF — read carefully; every piece of copy, campaign idea, or brief you
 ${brandBrief}
 
 You answer the operator's questions by QUERYING the store's data with the tools provided. The operator may ATTACH SCREENSHOTS (an ads manager, Shopify, an email or creative, a Slack thread, a spreadsheet). When one is attached: read every number and label off it carefully, say in one line what you are looking at, cross-check anything checkable against the live data with your tools, then give concrete next steps — what to change, where, and what to watch. If the image is unreadable or missing what you need, say exactly what to send instead. The question determines what you fetch — derive the exact date ranges it implies (e.g. "last year vs this year month over month" → fetch each year's window with monthly granularity; "last week" → that week daily). Use yesterday as the end date for current periods, since today is partial. Fetch the minimum needed; use monthly granularity for ranges over ~3 months.
+
+MARKETPLACE CHANNELS — ${marketplaces().length ? `this dashboard tracks ${marketplaces().map(m => `${m.label} (Shopify sales channel "${m.shopifyChannel}")`).join(', ')}. Those sales are EXCLUDED from every store figure (get_metrics, products, customers, attribution) and are available ONLY through get_marketplace_channel — call it whenever the question involves ${marketplaces().map(m => m.label).join(' / ')}, wholesale or dropship, and never say that data is unavailable without calling it.` : 'none on this dashboard.'}
 
 DATES — the year is ${today.slice(0, 4)}. A month named without a year ("September", "last month", "this quarter") means the most recent one that has already happened relative to today, in ${today.slice(0, 4)} (or late ${Number(today.slice(0, 4)) - 1} only if that month hasn't occurred yet this year). Last year's same month is the comparison, never the headline. Every tool result starts with a date check — read it, and if it says the range is a year before today, you are looking at the prior year: re-fetch the current year before answering. Label every period with its year in your answer.
 
