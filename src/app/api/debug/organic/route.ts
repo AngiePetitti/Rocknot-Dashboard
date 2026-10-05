@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   const to = todayPst();
   const from = addDays(to, -days);
   const key = (process.env.WINDSOR_API_KEY || '').trim();
-  const out: Record<string, unknown> = { range: { from, to }, scoping: { pinterest_organic: windsorAccount('pinterest_organic'), instagram: windsorAccount('instagram') } };
+  const out: Record<string, unknown> = { generatedAt: new Date().toISOString(), range: { from, to }, scoping: { pinterest_organic: windsorAccount('pinterest_organic'), instagram: windsorAccount('instagram') } };
 
   const listAccounts = async (source: string) => {
     if (!key) return { error: 'WINDSOR_API_KEY missing' };
@@ -48,5 +48,5 @@ export async function GET(request: NextRequest) {
   out.pinterestOrganic = { notConnected: pin.notConnected, fieldSet: pin.fieldSet, rowCount: pin.rows?.length ?? 0, attempts: pin.attempts };
   out.instagram = { notConnected: ig.notConnected, fieldSet: ig.fieldSet, rowCount: ig.rows?.length ?? 0, attempts: ig.attempts };
   out.shopifyArticles = articles;
-  return NextResponse.json(out);
+  return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
 }
