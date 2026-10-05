@@ -8,7 +8,7 @@ import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import MetricCard from '@/src/components/ui/MetricCard';
 import TimeframeSelector from '@/src/components/ui/TimeframeSelector';
-import { AttributionData } from '@/src/app/api/windsor/attribution/route';
+import { AttributionData, ReferrerRow } from '@/src/app/api/windsor/attribution/route';
 import {
   PieChart,
   Pie,
@@ -48,6 +48,8 @@ export default function AttributionContent() {
   const [attribution, setAttribution] = useState<AttributionData[]>([]);
   const [totalRevenue, setTotalRevenue] = useState<number>(0);
   const [totalSpend, setTotalSpend] = useState<number>(0);
+  const [claimedPct, setClaimedPct] = useState<number>(0);
+  const [referrers, setReferrers] = useState<ReferrerRow[]>([]);
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
 
   useEffect(() => {
@@ -63,6 +65,8 @@ export default function AttributionContent() {
           setAttribution(data.attribution || []);
           setTotalRevenue(data.totalRevenue ?? 0);
           setTotalSpend(data.totalSpend ?? 0);
+          setClaimedPct(data.claimedPct ?? 0);
+          setReferrers(data.referrers || []);
           setStatus('ok');
         } else {
           setAttribution([]);
@@ -142,6 +146,16 @@ export default function AttributionContent() {
         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-amber-700">
           <span>⚠</span>
           <span>No attribution data for this period.</span>
+        </div>
+      )}
+
+      {status === 'ok' && claimedPct > 100 && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-amber-700">
+          <span>⚠</span>
+          <span>
+            The ad platforms together claim {formatPercent(claimedPct)} of store revenue — each counts the same order on its own attribution window, so they overlap and the &quot;Direct / Other&quot; remainder collapses to $0.
+            That is not zero direct sales: see <strong>Where orders actually came from</strong> below, Shopify&apos;s one-referrer-per-order split.
+          </span>
         </div>
       )}
 
@@ -312,6 +326,44 @@ export default function AttributionContent() {
           </table>
         </div>
       </Card>
+
+      {/* Shopify order referrer: mutually exclusive, adds up to store net sales */}
+      {referrers.length > 0 && (
+        <Card accentColor="#96BF48" className="mb-6">
+          <h2 className="text-sm font-bold text-gray-700 mb-1">Where orders actually came from</h2>
+          <p className="text-xs text-gray-400 mb-3">
+            Shopify&apos;s order referrer — one referrer per order, so these add up to store net sales. &quot;Direct (no referrer)&quot; = typed the URL, a bookmark, or an untracked app/email click. Unlike the platform figures above, nothing here is double-counted.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4">Referrer</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Orders</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Net Sales</th>
+                  <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 px-3">Share</th>
+                  <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pl-3" />
+                </tr>
+              </thead>
+              <tbody>
+                {referrers.slice(0, 15).map(r => (
+                  <tr key={r.label} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                    <td className="py-2.5 pr-4 font-medium text-gray-700">{r.label}</td>
+                    <td className="py-2.5 px-3 text-right text-gray-600">{r.orders.toLocaleString()}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold text-gray-800">{formatCurrency(r.netSales)}</td>
+                    <td className="py-2.5 px-3 text-right text-gray-600">{formatPercent(r.percentage)}</td>
+                    <td className="py-2.5 pl-3">
+                      <div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full bg-[#96BF48]" style={{ width: `${Math.min(100, r.percentage)}%` }} />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       {/* Mobile cards */}
       <div className="md:hidden space-y-3">
