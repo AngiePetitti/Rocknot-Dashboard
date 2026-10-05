@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { windsorOrganicRows, PINTEREST_ORGANIC_FIELDSETS, INSTAGRAM_FIELDSETS, fetchArticles } from '@/src/lib/organic';
+import { windsorOrganicRows, PINTEREST_ORGANIC_FIELDSETS, INSTAGRAM_FIELDSETS, fetchArticlesRaw } from '@/src/lib/organic';
+import { shopifyql } from '@/src/lib/shopifyql';
 import { windsorAccount } from '@/src/lib/client';
 import { todayPst, addDays } from '@/src/lib/timeframes';
 
@@ -36,8 +37,13 @@ export async function GET(request: NextRequest) {
     listAccounts('instagram'),
     windsorOrganicRows('pinterest_organic', PINTEREST_ORGANIC_FIELDSETS, from, to),
     windsorOrganicRows('instagram', INSTAGRAM_FIELDSETS, from, to),
-    fetchArticles().then(m => Array.from(m.entries()).slice(0, 10).map(([path, a]) => ({ path, title: a.title, image: Boolean(a.imageUrl), publishedAt: a.publishedAt }))).catch(e => ({ error: String(e) })),
+    fetchArticlesRaw().then(r => ({ status: r.status, errors: r.errors, count: r.nodes.length, sample: r.nodes.slice(0, 10).map(a => ({ path: `/blogs/${a.blog.handle}/${a.handle}`, title: a.title, image: Boolean(a.image?.url), publishedAt: a.publishedAt })) })).catch(e => ({ error: String(e) })),
   ]);
+  // Blog landing paths Shopify's sessions report saw in the window (the
+  // traffic half of the blog table, independent of the Admin API scope).
+  out.blogLandingPaths = await shopifyql(`FROM sessions SHOW sessions GROUP BY landing_page_path SINCE ${from} UNTIL ${to} ORDER BY sessions DESC LIMIT 1000`, { timeoutMs: 20000 })
+    .then(rows => rows.filter(r => /^\/blogs\//.test(String(r.landing_page_path || ''))).slice(0, 15))
+    .catch(e => ({ error: e instanceof Error ? e.message : String(e) }));
   out.windsorAccounts = { pinterest_organic: pinAccounts, instagram: igAccounts };
   out.pinterestOrganic = { notConnected: pin.notConnected, fieldSet: pin.fieldSet, rowCount: pin.rows?.length ?? 0, attempts: pin.attempts };
   out.instagram = { notConnected: ig.notConnected, fieldSet: ig.fieldSet, rowCount: ig.rows?.length ?? 0, attempts: ig.attempts };
