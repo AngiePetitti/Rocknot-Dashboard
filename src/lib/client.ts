@@ -41,7 +41,7 @@ export const PLATFORMS: Record<PlatformKey, PlatformDef> = {
 };
 
 /** Windsor REST connector names the dashboard queries directly. */
-export type WindsorSource = 'facebook' | 'google_ads' | 'tiktok' | 'snapchat' | 'pinterest' | 'shopify' | 'quickbooks';
+export type WindsorSource = 'facebook' | 'google_ads' | 'tiktok' | 'snapchat' | 'pinterest' | 'shopify' | 'quickbooks' | 'pinterest_organic' | 'instagram';
 
 /**
  * A wholesale / marketplace channel that lands in Shopify as its own sales
@@ -255,6 +255,10 @@ const ROCKNOT: ClientProfile = {
       // filtered by finance.qbAccountMatch.
       quickbooks: '',
       pinterest: null,
+      // Organic Content tab sources (Windsor "Pinterest Organic" / "Instagram
+      // Insights" data sources). null = not connected: the tab says so.
+      pinterest_organic: null,
+      instagram: null,
     },
   },
   goals: { defaultAnnualTarget: 4_000_000, targetMer: 3.5, targetRoas: 3.5, targetCac: 100 },
@@ -317,6 +321,11 @@ const KAILEEP: ClientProfile = {
       tiktok: null,
       snapchat: null,
       quickbooks: null,
+      // Organic Content tab: set to Kailee's account ids once "Pinterest
+      // Organic" and "Instagram Insights" are connected in Windsor
+      // (/api/debug/organic lists the ids Windsor exposes). null = skipped.
+      pinterest_organic: null,
+      instagram: null,
     },
   },
   // No annual target has been shared yet — the Goals tab asks for one. The
