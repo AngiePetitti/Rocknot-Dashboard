@@ -254,16 +254,62 @@ export async function fetchArticles(): Promise<Map<string, ArticleMeta>> {
   return out;
 }
 
+/**
+ * Fallback when the Admin API lacks read_content: Shopify storefronts publish
+ * a public Atom feed per blog (/blogs/<handle>.atom) with each article's
+ * title, link, publish date and body HTML (first <img> = cover). No token.
+ */
+export async function fetchArticlesFromFeed(blogHandles: string[]): Promise<Map<string, ArticleMeta>> {
+  const out = new Map<string, ArticleMeta>();
+  const domain = getClient().siteDomain;
+  const decode = (t: string) => t.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").trim();
+  await Promise.all(blogHandles.map(async blog => {
+    for (let page = 1; page <= 6; page++) {
+      try {
+        const res = await fetch(`https://${domain}/blogs/${blog}.atom?page=${page}`, { next: { revalidate: 3600 }, signal: AbortSignal.timeout(10000) });
+        if (!res.ok) break;
+        const xml = await res.text();
+        const entries = xml.split('<entry>').slice(1);
+        if (!entries.length) break;
+        for (const e of entries) {
+          const title = decode((e.match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1] || '');
+          const link = (e.match(/<link[^>]*href="([^"]+)"/) || [])[1] || '';
+          const published = ((e.match(/<published>([^<]+)<\/published>/) || [])[1] || '').slice(0, 10);
+          const content = decode((e.match(/<content[^>]*>([\s\S]*?)<\/content>/) || [])[1] || '');
+          const img = (content.match(/<img[^>]+src="([^"]+)"/) || [])[1] || '';
+          const m = link.match(/\/blogs\/([^/?#]+)\/([^/?#]+)/);
+          if (!m) continue;
+          const path = `/blogs/${m[1]}/${m[2]}`;
+          if (!out.has(path)) out.set(path, { title, imageUrl: img.startsWith('//') ? `https:${img}` : img, publishedAt: published, handle: m[2], blogHandle: m[1] });
+        }
+        if (entries.length < 50) break;
+      } catch { break; }
+    }
+  }));
+  return out;
+}
+
 export async function fetchBlogPerformance(from: string, to: string): Promise<SourceBlock<BlogPost>> {
   if (!shopifyConfigured()) return { status: 'not_connected', items: [], totals: {} };
   try {
     // Blog articles sit in the long tail of landing pages, so pull wide;
     // fall back to a smaller page if Shopify refuses the limit.
     const landingQl = (limit: number) => `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY landing_page_path SINCE ${from} UNTIL ${to} ORDER BY sessions DESC LIMIT ${limit}`;
-    const [rows, articles] = await Promise.all([
+    const [rows, adminArticles] = await Promise.all([
       shopifyql(landingQl(5000), { timeoutMs: 25000 }).catch(() => shopifyql(landingQl(1000), { timeoutMs: 20000 })),
       fetchArticles(),
     ]);
+    // No read_content scope → public Atom feeds for the blogs visitors landed on.
+    let articles = adminArticles;
+    if (!articles.size) {
+      const blogs = new Set<string>();
+      for (const r of rows) {
+        const m = str(r.landing_page_path).match(/^\/blogs\/([^/?#]+)/);
+        if (m) blogs.add(m[1]);
+      }
+      if (blogs.size) articles = await fetchArticlesFromFeed(Array.from(blogs));
+    }
     const byPath = new Map<string, BlogPost>();
     for (const r of rows) {
       const raw = str(r.landing_page_path);
