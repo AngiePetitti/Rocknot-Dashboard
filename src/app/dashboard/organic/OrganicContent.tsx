@@ -129,6 +129,9 @@ export default function OrganicContent() {
   const rangeLabel = tfRaw === 'custom' && dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : (TIMEFRAME_LABELS[tfRaw] || 'Last 30 Days');
   const [data, setData] = useState<OrganicResponse | null>(null);
   const [showAllBlog, setShowAllBlog] = useState(false);
+  type BlogSort = 'publishedAt' | 'sessions' | 'cartAdds' | 'completed' | 'cvr';
+  const [blogSort, setBlogSort] = useState<{ key: BlogSort; dir: 'asc' | 'desc' }>({ key: 'sessions', dir: 'desc' });
+  const toggleBlogSort = (key: BlogSort) => setBlogSort(s => (s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' }));
 
   useEffect(() => {
     setData(null);
@@ -142,8 +145,25 @@ export default function OrganicContent() {
   const ig = data?.instagram;
   const blog = data?.blog;
   const traffic = data?.socialTraffic;
-  const blogItems: BlogPost[] = blog?.items || [];
+  const blogItems: BlogPost[] = useMemo(() => {
+    const items = [...(blog?.items || [])];
+    const val = (b: BlogPost) => blogSort.key === 'cvr' ? (b.sessions > 0 ? b.completed / b.sessions : -1)
+      : blogSort.key === 'publishedAt' ? (b.publishedAt || '') : b[blogSort.key];
+    items.sort((a, b) => {
+      const x = val(a), y = val(b);
+      const c = typeof x === 'string' || typeof y === 'string' ? String(x).localeCompare(String(y)) : (x as number) - (y as number);
+      return blogSort.dir === 'desc' ? -c : c;
+    });
+    return items;
+  }, [blog?.items, blogSort]);
   const blogShown = showAllBlog ? blogItems : blogItems.slice(0, 15);
+  const SortTH = ({ k, label }: { k: BlogSort; label: string }) => (
+    <th className="text-right text-xs font-semibold uppercase pb-2 pl-2">
+      <button onClick={() => toggleBlogSort(k)} className={`inline-flex items-center gap-1 ${blogSort.key === k ? 'text-gray-700' : 'text-gray-400 hover:text-gray-600'}`}>
+        {label}<span className="text-[9px]">{blogSort.key === k ? (blogSort.dir === 'desc' ? '▼' : '▲') : '↕'}</span>
+      </button>
+    </th>
+  );
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
@@ -218,11 +238,11 @@ export default function OrganicContent() {
                   <thead>
                     <tr className="border-b border-gray-100">
                       <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-2">Article</th>
-                      <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Published</th>
-                      <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Sessions</th>
-                      <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Add to cart</th>
-                      <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Orders</th>
-                      <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">CVR</th>
+                      <SortTH k="publishedAt" label="Published" />
+                      <SortTH k="sessions" label="Sessions" />
+                      <SortTH k="cartAdds" label="Add to cart" />
+                      <SortTH k="completed" label="Orders" />
+                      <SortTH k="cvr" label="CVR" />
                     </tr>
                   </thead>
                   <tbody>
