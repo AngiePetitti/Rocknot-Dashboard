@@ -46,8 +46,11 @@ export async function GET(request: NextRequest) {
   const key = (process.env.WINDSOR_API_KEY || '').trim();
   const scoped = key ? windsorParams('pinterest', { date_from: from, date_to: today }) : null;
   if (scoped) {
-    const fields = ['account_id', 'spend', 'total_checkout', 'total_checkout_value', 'checkout', 'checkout_value', 'total_conversions', 'total_conversions_value',
-      'conversions', 'conversion_value', 'checkout_roas', 'total_checkout_roas', 'web_checkout', 'web_checkout_value'];
+    // Windsor's real Pinterest field list (from its own error message): checkouts
+    // split by attribution type, each with a value, plus the totals.
+    const fields = ['account_id', 'spend', 'total_checkout', 'total_checkout_value', 'checkout_revenue', 'roas_checkout',
+      'total_click_checkout', 'total_click_checkout_value', 'total_engagement_checkout', 'total_engagement_checkout_value',
+      'total_view_checkout', 'total_view_checkout_value', 'total_conversions', 'total_conversions_value'];
     const pull = async (extra: Record<string, string>) => {
       const qs = new URLSearchParams({ api_key: key, fields: fields.join(','), _renderer: 'json', ...scoped, ...extra });
       const res = await fetch(`https://connectors.windsor.ai/pinterest?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(25000) });
