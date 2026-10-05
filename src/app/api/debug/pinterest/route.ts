@@ -34,6 +34,19 @@ export async function GET(request: NextRequest) {
         `SELECT FORMAT_DATE('%Y-%m-%d', DATE(date)) AS d, COUNT(*) AS row_count, ${sums}
          FROM \`${ds}.pinterest_ads\` WHERE DATE(date) BETWEEN @f AND @t GROUP BY d ORDER BY d`, { f: from, t: today });
       out.latestDay = await runQuery(`SELECT FORMAT_DATE('%Y-%m-%d', MAX(DATE(date))) AS latest FROM \`${ds}.pinterest_ads\``);
+      // Where did the latest Windsor task write? Every table in the dataset
+      // with "pinterest" in its name, with row count and last-modified time,
+      // so a task that landed under another table name is obvious.
+      out.pinterestTables = await runQuery(
+        `SELECT table_id, row_count, TIMESTAMP_MILLIS(last_modified_time) AS last_modified
+         FROM \`${ds}.__TABLES__\` WHERE LOWER(table_id) LIKE '%pinterest%' ORDER BY last_modified DESC`).catch(e => ({ error: String(e) }));
+      // Rows from the rebuilt task carry no total_conversions_value (the new
+      // field list dropped it) — split the window's rows by that marker.
+      out.rowsByTask = await runQuery(
+        `SELECT IF(total_conversions_value IS NULL, 'new_task_fields', 'old_task_fields') AS task_rows,
+                COUNT(*) AS row_count, MIN(DATE(date)) AS first_day, MAX(DATE(date)) AS last_day,
+                SUM(IFNULL(CAST(total_checkout AS FLOAT64), 0)) AS total_checkout
+         FROM \`${ds}.pinterest_ads\` GROUP BY task_rows`).catch(e => ({ error: String(e) }));
     } catch (e) { out.bigqueryError = String(e instanceof Error ? e.message : e); }
   } else {
     out.bigquery = 'not configured';
