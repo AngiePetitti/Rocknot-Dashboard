@@ -6,7 +6,7 @@ import { fetchSnapToday } from '@/src/lib/snapLive';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { keepClientMetaRows, hasPlatform, PLATFORMS, windsorParams } from '@/src/lib/client';
-import { PINTEREST_ATTRIBUTION_NOTE } from '@/src/lib/tiktokLive';
+import { pinterestWindsorNote } from '@/src/lib/tiktokLive';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -130,10 +130,12 @@ function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'Ti
     }
   }
 
+  // Windsor REST reports on Windsor's default window (not the task's): for a
+  // single day (the Today view) every window gives the same result.
   const attribution = platform === 'Pinterest'
     ? (viewConversions > 0 && conversions > 0
-        ? `${PINTEREST_ATTRIBUTION_NOTE} · ${Math.round(viewConversions)} of ${Math.round(conversions)} checkouts are view-through`
-        : PINTEREST_ATTRIBUTION_NOTE)
+        ? `${pinterestWindsorNote()} · ${Math.round(viewConversions)} of ${Math.round(conversions)} checkouts are view-through`
+        : pinterestWindsorNote())
     : undefined;
   return {
     platform,

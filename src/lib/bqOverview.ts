@@ -564,8 +564,12 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
           // Pinterest Ads API on Ads Manager's conversion settings: replaces
           // the synced copy outright so MER inputs equal the Pinterest dashboard.
           pinterestByDate[day.date] = { spend: day.spend, revenue: day.revenue };
-        } else if (!existing || day.spend >= existing.spend) {
-          pinterestByDate[day.date] = { spend: day.spend, revenue: day.revenue || existing?.revenue || 0 };
+        } else if (!existing) {
+          // Day not synced yet: live spend, and live revenue beats nothing.
+          pinterestByDate[day.date] = { spend: day.spend, revenue: day.revenue };
+        } else if (day.spend > existing.spend) {
+          // Spend only — the synced revenue carries the task's attribution window.
+          pinterestByDate[day.date] = { spend: day.spend, revenue: existing.revenue };
         }
       }
     }

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useSession } from 'next-auth/react';
 import { Timeframe } from '@/src/lib/mockData';
 import { cachedJson } from '@/src/lib/clientCache';
 import { formatCurrency, formatROAS, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
@@ -84,8 +83,6 @@ function formatDate(dateStr: string) {
 export default function AdsContent() {
   const searchParams = useSearchParams();
   const client = useClient();
-  const { data: session } = useSession();
-  const isAdmin = session?.user?.role === 'admin';
   const ROAS_GOAL = client.goals.targetRoas;
   const TARGET_CAC = client.goals.targetCac;
   const tfRaw = searchParams.get('tf') || '30d';
@@ -303,14 +300,6 @@ export default function AdsContent() {
             </div>
           )}
 
-          {/* Admin nudge: Pinterest still read through Windsor (Pinterest's
-              30-day defaults) — the direct Ads API connect makes it exact. */}
-          {isAdmin && platforms.some(p => p.platform === 'Pinterest' && !(p.attribution || '').startsWith('Pinterest Ads API')) && (
-            <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800">
-              Pinterest is currently read through Windsor on Pinterest&apos;s 30-day defaults, so it will not match Ads Manager exactly.{' '}
-              <a href="/api/debug/pinterest-oauth" className="font-semibold underline">Connect the Pinterest Ads API</a> once (about 5 minutes) and this row will use Ads Manager&apos;s own conversion settings.
-            </div>
-          )}
           {/* Platform cards */}
           {/* One card per row on phones: a six-metric grid needs the full width. */}
           <div className={`grid gap-4 mb-6 ${platforms.length === 1 ? 'grid-cols-1 max-w-sm' : platforms.length === 2 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'}`}>
