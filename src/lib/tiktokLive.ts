@@ -2,7 +2,7 @@
 // platforms without (or awaiting) a direct API hookup. The BigQuery tables
 // only update on Windsor's daily sync, so the most recent days understate
 // spend badly — the connector endpoint is fresher.
-import { windsorParams } from '@/src/lib/client';
+import { windsorParams, getClient } from '@/src/lib/client';
 
 export interface PlatformDay {
   date: string;
@@ -88,17 +88,24 @@ export function fetchGoogleDailyFromWindsor(since: string, until: string): Promi
 
 // Pinterest via Windsor REST (no direct Pinterest Ads API hookup).
 //
-// Basis — mirrors Kailee's Ads Manager conversion settings (7-day click,
-// 1-day engagement, 1-day view, reported on the ad-event date):
-// total_checkout / total_checkout_value = click + engagement + 1-day view
-// checkouts. Windsor's window parameters are ignored by its API (verified:
-// identical totals with and without them), but for a trailing range reported
-// by ad date the click-window length makes no difference — a click inside the
-// range can't have a checkout more than 7 days later yet. The view split is
-// pulled too so the row can say how much is view-through.
+// Windsor's REST endpoint reports Pinterest conversions on whatever
+// attribution window its API defaults to (30/30/1 — the URL parameters are
+// ignored), while the BigQuery task carries the window set in the task's
+// "Attribution Window" dropdown. The two can disagree, so this feed is used
+// for SPEND only (identical on any window); checkouts and checkout value
+// stay on the BigQuery copy, which the task refreshes hourly. The view
+// split is still fetched for the audit endpoint.
 export const PINTEREST_REVENUE_FIELDS = ['total_checkout_value', 'total_conversions_value', 'conversion_value'];
 export const PINTEREST_CONVERSION_FIELDS = ['total_checkout', 'total_conversions', 'conversions'];
-export const PINTEREST_ATTRIBUTION_NOTE = 'Pinterest checkouts: 7-day click · 1-day engagement · 1-day view, by ad date (matches Ads Manager conversion settings 7/1)';
+// Label for the Windsor/BigQuery path. Assumes the BigQuery task's
+// Attribution Window + Conversion Report Time are set to the profile's
+// values (the task's dropdowns, not the URL — see above).
+export function pinterestWindsorNote(): string {
+  const a = getClient().ads.pinterestAttribution ?? { clickWindowDays: 7, engagementWindowDays: 7, viewWindowDays: 1, conversionReportTime: 'TIME_OF_AD_ACTION' };
+  const when = a.conversionReportTime === 'TIME_OF_CONVERSION' ? 'by conversion date' : 'by ad date';
+  return `Pinterest checkouts · ${a.clickWindowDays}-day click · ${a.engagementWindowDays}-day engagement · ${a.viewWindowDays}-day view, ${when} — Windsor sync (hourly), same conversion settings as Ads Manager`;
+}
+export const PINTEREST_ATTRIBUTION_NOTE = 'Pinterest checkouts (Windsor sync)';
 export async function fetchPinterestDailyFromWindsor(since: string, until: string): Promise<PlatformDay[] | null> {
   const key = (process.env.WINDSOR_API_KEY || '').trim();
   if (!key) return null;
@@ -158,5 +165,5 @@ export async function fetchPinterestDailyLive(since: string, until: string): Pro
     // fall through to Windsor
   }
   const windsor = await fetchPinterestDailyFromWindsor(since, until);
-  return windsor ? { days: windsor, authoritative: false, label: PINTEREST_ATTRIBUTION_NOTE } : null;
+  return windsor ? { days: windsor, authoritative: false, label: pinterestWindsorNote() } : null;
 }

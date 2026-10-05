@@ -1,6 +1,6 @@
 import { runQuery, getDataset } from '@/src/lib/bigquery';
 import { metaAccountSql, hasPlatform, PLATFORMS } from '@/src/lib/client';
-import { PINTEREST_ATTRIBUTION_NOTE } from '@/src/lib/tiktokLive';
+import { pinterestWindsorNote } from '@/src/lib/tiktokLive';
 
 // Ad Performance tab data from the Windsor→BigQuery tables.
 // Mirrors the shape returned by /api/windsor/ads so the frontend is unchanged.
@@ -303,7 +303,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     const d = dateVal(r.d); ensureDate(d); byDate[d].pinterest = Math.round(Number(r.spend || 0));
     pinterestBqDay[d] = { revenue: Number(r.revenue || 0), conversions: Number(r.conversions || 0), clicks: Number(r.clicks || 0), impressions: Number(r.impressions || 0) };
   }
-  if (pinterestPlatform) pinterestPlatform.attribution = PINTEREST_ATTRIBUTION_NOTE;
+  if (pinterestPlatform) pinterestPlatform.attribution = pinterestWindsorNote();
 
   // Patch the most recent 1-2 days from the platforms' own APIs — Windsor's
   // once-a-day sync captures those days part-way through, understating spend
@@ -369,11 +369,6 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
         }
       }
     }
-    // Pinterest: Windsor's live feed is the same source as BigQuery but hours
-    // fresher, and checkouts keep landing for days after the ad date — so a
-    // day the live feed covers at least as fully (spend ≥ synced spend) is
-    // replaced wholesale: spend, checkouts AND checkout value. Spend-only
-    // patching left purchases/ROAS on the stale synced count.
     // When the Pinterest Ads API is connected its days are authoritative —
     // they replace the synced copy outright (spend, checkouts, value, clicks,
     // impressions) so the row equals Ads Manager on the same conversion
@@ -402,19 +397,12 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
         pinterestPlatform.ctr = pinterestPlatform.impressions > 0 ? Math.round((pinterestPlatform.clicks / pinterestPlatform.impressions) * 10000) / 100 : 0;
         continue;
       }
-      if (day.spend >= b.pinterest && pinterestPlatform) {
+      // Windsor's feed: spend only — its checkouts are on Windsor's own
+      // default window, not the one set on the BigQuery task.
+      if (day.spend > b.pinterest && pinterestPlatform) {
         const spendDelta = day.spend - b.pinterest;
         b.pinterest = Math.round(day.spend);
         pinterestPlatform.spend = Math.round((pinterestPlatform.spend + spendDelta) * 100) / 100;
-        if (day.conversions != null) {
-          const bq = pinterestBqDay[day.date] || { revenue: 0, conversions: 0, clicks: 0, impressions: 0 };
-          pinterestPlatform.revenue = Math.round((pinterestPlatform.revenue - bq.revenue + day.revenue) * 100) / 100;
-          pinterestPlatform.conversions = Math.round(pinterestPlatform.conversions - bq.conversions + day.conversions);
-          pinterestBqDay[day.date] = { ...bq, revenue: day.revenue, conversions: day.conversions };
-          pinViewConv += day.viewConversions || 0;
-          pinConv += day.conversions;
-          pinLiveDays += 1;
-        }
         pinterestPlatform.roas = pinterestPlatform.spend > 0 ? Math.round((pinterestPlatform.revenue / pinterestPlatform.spend) * 100) / 100 : 0;
         pinterestPlatform.costPerConversion = pinterestPlatform.conversions > 0 ? Math.round((pinterestPlatform.spend / pinterestPlatform.conversions) * 100) / 100 : 0;
       }
@@ -422,8 +410,8 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     // Say how much of the range is view-through when the live feed covered
     // every day in it (otherwise the share would be for a partial range).
     const rangeDays = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1;
-    if (pinterestPlatform && pinLiveDays >= rangeDays && pinConv > 0) {
-      pinterestPlatform.attribution = `${pinterestPlatform.attribution || PINTEREST_ATTRIBUTION_NOTE} · ${Math.round(pinViewConv)} of ${Math.round(pinConv)} checkouts are view-through`;
+    if (pinterestPlatform && pinAuthoritative && pinLiveDays >= rangeDays && pinConv > 0) {
+      pinterestPlatform.attribution = `${pinterestPlatform.attribution || pinterestWindsorNote()} · ${Math.round(pinViewConv)} of ${Math.round(pinConv)} checkouts are view-through`;
     }
   }
 
