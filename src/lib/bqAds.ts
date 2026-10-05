@@ -42,6 +42,8 @@ interface DailySpendRow {
   spend: number | null;
   revenue?: number | null;
   conversions?: number | null;
+  clicks?: number | null;
+  impressions?: number | null;
 }
 
 function dateVal(d: DailySpendRow['d']): string {
@@ -194,7 +196,9 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   const pinterestDailySqlFor = (revenueCol: string, convCol: string) => `
     SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend,
            SUM(IFNULL(CAST(${revenueCol} AS FLOAT64), 0)) AS revenue,
-           SUM(IFNULL(CAST(${convCol} AS FLOAT64), 0)) AS conversions
+           SUM(IFNULL(CAST(${convCol} AS FLOAT64), 0)) AS conversions,
+           SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
+           SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
     FROM \`${ds}.pinterest_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
   `;
@@ -232,14 +236,14 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     ? (async () => {
         const { fetchMetaDaily } = await import('@/src/lib/metaLive');
         const { fetchSnapDaily } = await import('@/src/lib/snapLive');
-        const { fetchTiktokDaily, fetchSnapDailyFromWindsor, fetchGoogleDailyFromWindsor, fetchPinterestDailyFromWindsor } = await import('@/src/lib/tiktokLive');
+        const { fetchTiktokDaily, fetchSnapDailyFromWindsor, fetchGoogleDailyFromWindsor, fetchPinterestDailyLive } = await import('@/src/lib/tiktokLive');
         const none = Promise.resolve(null);
         return Promise.all([
           fetchMetaDaily(patchFromEarly, dateTo).catch(() => null),
           hasPlatform('snapchat') ? fetchSnapDaily(patchFromEarly, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFromEarly, dateTo)).catch(() => null) : none,
           hasPlatform('tiktok') ? fetchTiktokDaily(patchFromEarly, dateTo).catch(() => null) : none,
           fetchGoogleDailyFromWindsor(patchFromEarly, dateTo).catch(() => null),
-          hasPlatform('pinterest') ? fetchPinterestDailyFromWindsor(patchFromEarly, dateTo).catch(() => null) : none,
+          hasPlatform('pinterest') ? fetchPinterestDailyLive(patchFromEarly, dateTo).catch(() => null) : none,
         ]);
       })()
     : null;
@@ -294,10 +298,10 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   for (const r of googleDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].google = Math.round(Number(r.spend || 0)); }
   for (const r of tiktokDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].tiktok = Math.round(Number(r.spend || 0)); }
   for (const r of snapDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].snapchat = Math.round(Number(r.spend || 0)); }
-  const pinterestBqDay: Record<string, { revenue: number; conversions: number }> = {};
+  const pinterestBqDay: Record<string, { revenue: number; conversions: number; clicks: number; impressions: number }> = {};
   for (const r of pinterestDaily) {
     const d = dateVal(r.d); ensureDate(d); byDate[d].pinterest = Math.round(Number(r.spend || 0));
-    pinterestBqDay[d] = { revenue: Number(r.revenue || 0), conversions: Number(r.conversions || 0) };
+    pinterestBqDay[d] = { revenue: Number(r.revenue || 0), conversions: Number(r.conversions || 0), clicks: Number(r.clicks || 0), impressions: Number(r.impressions || 0) };
   }
   if (pinterestPlatform) pinterestPlatform.attribution = PINTEREST_ATTRIBUTION_NOTE;
 
@@ -370,20 +374,43 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     // day the live feed covers at least as fully (spend ≥ synced spend) is
     // replaced wholesale: spend, checkouts AND checkout value. Spend-only
     // patching left purchases/ROAS on the stale synced count.
+    // When the Pinterest Ads API is connected its days are authoritative —
+    // they replace the synced copy outright (spend, checkouts, value, clicks,
+    // impressions) so the row equals Ads Manager on the same conversion
+    // settings; Windsor's feed only fills in where it is fresher.
     let pinViewConv = 0, pinConv = 0, pinLiveDays = 0;
-    for (const day of pinterestPatch ?? []) {
+    const pinAuthoritative = Boolean(pinterestPatch?.authoritative);
+    if (pinterestPlatform && pinterestPatch?.label) pinterestPlatform.attribution = pinterestPatch.label;
+    for (const day of pinterestPatch?.days ?? []) {
       if (!inRange(day.date)) continue;
       ensureDate(day.date);
       const b = byDate[day.date];
+      if (pinAuthoritative && pinterestPlatform) {
+        const bq = pinterestBqDay[day.date] || { revenue: 0, conversions: 0, clicks: 0, impressions: 0 };
+        pinterestPlatform.spend = Math.round((pinterestPlatform.spend - b.pinterest + day.spend) * 100) / 100;
+        pinterestPlatform.revenue = Math.round((pinterestPlatform.revenue - bq.revenue + day.revenue) * 100) / 100;
+        pinterestPlatform.conversions = Math.round(pinterestPlatform.conversions - bq.conversions + (day.conversions || 0));
+        pinterestPlatform.clicks = Math.round(pinterestPlatform.clicks - bq.clicks + (day.clicks || 0));
+        pinterestPlatform.impressions = Math.round(pinterestPlatform.impressions - bq.impressions + (day.impressions || 0));
+        b.pinterest = Math.round(day.spend);
+        pinterestBqDay[day.date] = { revenue: day.revenue, conversions: day.conversions || 0, clicks: day.clicks || 0, impressions: day.impressions || 0 };
+        pinViewConv += day.viewConversions || 0;
+        pinConv += day.conversions || 0;
+        pinLiveDays += 1;
+        pinterestPlatform.roas = pinterestPlatform.spend > 0 ? Math.round((pinterestPlatform.revenue / pinterestPlatform.spend) * 100) / 100 : 0;
+        pinterestPlatform.costPerConversion = pinterestPlatform.conversions > 0 ? Math.round((pinterestPlatform.spend / pinterestPlatform.conversions) * 100) / 100 : 0;
+        pinterestPlatform.ctr = pinterestPlatform.impressions > 0 ? Math.round((pinterestPlatform.clicks / pinterestPlatform.impressions) * 10000) / 100 : 0;
+        continue;
+      }
       if (day.spend >= b.pinterest && pinterestPlatform) {
         const spendDelta = day.spend - b.pinterest;
         b.pinterest = Math.round(day.spend);
         pinterestPlatform.spend = Math.round((pinterestPlatform.spend + spendDelta) * 100) / 100;
         if (day.conversions != null) {
-          const bq = pinterestBqDay[day.date] || { revenue: 0, conversions: 0 };
+          const bq = pinterestBqDay[day.date] || { revenue: 0, conversions: 0, clicks: 0, impressions: 0 };
           pinterestPlatform.revenue = Math.round((pinterestPlatform.revenue - bq.revenue + day.revenue) * 100) / 100;
           pinterestPlatform.conversions = Math.round(pinterestPlatform.conversions - bq.conversions + day.conversions);
-          pinterestBqDay[day.date] = { revenue: day.revenue, conversions: day.conversions };
+          pinterestBqDay[day.date] = { ...bq, revenue: day.revenue, conversions: day.conversions };
           pinViewConv += day.viewConversions || 0;
           pinConv += day.conversions;
           pinLiveDays += 1;
@@ -396,7 +423,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     // every day in it (otherwise the share would be for a partial range).
     const rangeDays = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1;
     if (pinterestPlatform && pinLiveDays >= rangeDays && pinConv > 0) {
-      pinterestPlatform.attribution = `${PINTEREST_ATTRIBUTION_NOTE} · ${Math.round(pinViewConv)} of ${Math.round(pinConv)} checkouts are view-through`;
+      pinterestPlatform.attribution = `${pinterestPlatform.attribution || PINTEREST_ATTRIBUTION_NOTE} · ${Math.round(pinViewConv)} of ${Math.round(pinConv)} checkouts are view-through`;
     }
   }
 

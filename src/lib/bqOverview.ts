@@ -432,14 +432,14 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     ? (async () => {
         const { fetchMetaDaily } = await import('@/src/lib/metaLive');
         const { fetchSnapDaily } = await import('@/src/lib/snapLive');
-        const { fetchTiktokDaily, fetchSnapDailyFromWindsor, fetchGoogleDailyFromWindsor, fetchPinterestDailyFromWindsor } = await import('@/src/lib/tiktokLive');
+        const { fetchTiktokDaily, fetchSnapDailyFromWindsor, fetchGoogleDailyFromWindsor, fetchPinterestDailyLive } = await import('@/src/lib/tiktokLive');
         const none = Promise.resolve(null);
         return Promise.all([
           fetchMetaDaily(patchFrom, dateTo).catch(() => null),
           hasPlatform('snapchat') ? fetchSnapDaily(patchFrom, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFrom, dateTo)).catch(() => null) : none,
           hasPlatform('tiktok') ? fetchTiktokDaily(patchFrom, dateTo).catch(() => null) : none,
           fetchGoogleDailyFromWindsor(patchFrom, dateTo).catch(() => null),
-          hasPlatform('pinterest') ? fetchPinterestDailyFromWindsor(patchFrom, dateTo).catch(() => null) : none,
+          hasPlatform('pinterest') ? fetchPinterestDailyLive(patchFrom, dateTo).catch(() => null) : none,
         ]);
       })()
     : null;
@@ -558,9 +558,13 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       }
     }
     if (pinterestPatch) {
-      for (const day of pinterestPatch) {
+      for (const day of pinterestPatch.days) {
         const existing = pinterestByDate[day.date];
-        if (!existing || day.spend >= existing.spend) {
+        if (pinterestPatch.authoritative) {
+          // Pinterest Ads API on Ads Manager's conversion settings: replaces
+          // the synced copy outright so MER inputs equal the Pinterest dashboard.
+          pinterestByDate[day.date] = { spend: day.spend, revenue: day.revenue };
+        } else if (!existing || day.spend >= existing.spend) {
           pinterestByDate[day.date] = { spend: day.spend, revenue: day.revenue || existing?.revenue || 0 };
         }
       }

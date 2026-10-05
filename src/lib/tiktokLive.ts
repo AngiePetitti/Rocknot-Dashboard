@@ -13,6 +13,8 @@ export interface PlatformDay {
   /** Pinterest only: the view-through share of conversions / revenue. */
   viewConversions?: number;
   viewRevenue?: number;
+  clicks?: number;
+  impressions?: number;
 }
 
 async function fetchWindsorDaily(
@@ -132,4 +134,29 @@ export async function fetchPinterestDailyFromWindsor(since: string, until: strin
   // Field names drift between Windsor connector versions — fall back to the
   // generic first-field-that-works fetch (spend + revenue only).
   return fetchWindsorDaily('pinterest', PINTEREST_REVENUE_FIELDS, since, until);
+}
+
+export interface PinterestLiveResult {
+  days: PlatformDay[];
+  /**
+   * true = straight from the Pinterest Ads API on Ads Manager's conversion
+   * settings: these days REPLACE the synced copy outright. false = Windsor's
+   * feed (Pinterest's 30-day defaults): only fills in where it's fresher.
+   */
+  authoritative: boolean;
+  label: string;
+}
+
+// Pinterest, best available source: the Pinterest Ads API when connected
+// (exact Ads Manager numbers), otherwise Windsor's live feed.
+export async function fetchPinterestDailyLive(since: string, until: string): Promise<PinterestLiveResult | null> {
+  try {
+    const { fetchPinterestDaily, pinterestAttributionLabel } = await import('@/src/lib/pinterestLive');
+    const direct = await fetchPinterestDaily(since, until);
+    if (direct) return { days: direct, authoritative: true, label: pinterestAttributionLabel() };
+  } catch {
+    // fall through to Windsor
+  }
+  const windsor = await fetchPinterestDailyFromWindsor(since, until);
+  return windsor ? { days: windsor, authoritative: false, label: PINTEREST_ATTRIBUTION_NOTE } : null;
 }

@@ -602,11 +602,13 @@ export async function GET(request: NextRequest) {
           return d ? { spend: d.spend, revenue: d.revenue } : null;
         })().catch(() => null)
       : Promise.resolve(null);
-    // Pinterest: Windsor's per-platform endpoint, same treatment as TikTok.
+    // Pinterest: the Pinterest Ads API when connected (Ads Manager's own
+    // numbers), else Windsor's per-platform endpoint, same treatment as TikTok.
     const pinterestLivePromise = isTodayRange && hasPlatform('pinterest')
       ? (async () => {
-          const { fetchPinterestDailyFromWindsor } = await import('@/src/lib/tiktokLive');
-          const days = await fetchPinterestDailyFromWindsor(currentParams.date_from, currentParams.date_to);
+          const { fetchPinterestDailyLive } = await import('@/src/lib/tiktokLive');
+          const live = await fetchPinterestDailyLive(currentParams.date_from, currentParams.date_to);
+          const days = live?.days;
           const d = days?.find(x => x.date === currentParams.date_from) ?? days?.[days.length - 1];
           return d ? { spend: d.spend, revenue: d.revenue } : null;
         })().catch(() => null)
