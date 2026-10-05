@@ -4,6 +4,8 @@ import { getOverview } from '@/src/lib/bqOverview';
 import { getAdsOverview } from '@/src/lib/bqAds';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
+import { shopifyql, shopifyConfigured } from '@/src/lib/shopifyql';
+import { storeOnlyWhere } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +18,41 @@ export interface AttributionData {
   costPerOrder: number;
   percentage: number;
   color: string;
+}
+
+/** Shopify's own order referrer: ONE bucket per order, so these add up to store revenue. */
+export interface ReferrerRow {
+  label: string;
+  source: string;
+  name: string;
+  orders: number;
+  netSales: number;
+  percentage: number;
+}
+
+// Shopify records a single referrer per order (last touch), so this split
+// is mutually exclusive and sums to the store's net sales — unlike the ad
+// platforms' self-attribution above, which overlaps. "Direct" here is a real
+// bucket (orders with no referrer), not a remainder.
+async function fetchShopifyReferrers(from: string, to: string): Promise<ReferrerRow[]> {
+  if (!shopifyConfigured()) return [];
+  try {
+    const rows = await shopifyql(
+      `FROM sales SHOW orders, net_sales GROUP BY order_referrer_source, order_referrer_name ${storeOnlyWhere()} SINCE ${from} UNTIL ${to} ORDER BY net_sales DESC LIMIT 60`,
+      { timeoutMs: 12000 },
+    );
+    const out: ReferrerRow[] = rows.map(r => {
+      const source = String(r.order_referrer_source || '').trim();
+      const name = String(r.order_referrer_name || '').trim();
+      const label = source && name ? `${source} · ${name}` : (name || source || 'Direct (no referrer)');
+      return { label, source, name, orders: Number(r.orders || 0), netSales: Math.round(Number(r.net_sales || 0)), percentage: 0 };
+    }).filter(r => r.orders > 0 || r.netSales !== 0);
+    const total = out.reduce((s, r) => s + r.netSales, 0) || 1;
+    for (const r of out) r.percentage = Math.round((r.netSales / total) * 1000) / 10;
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 function addDays(dateStr: string, days: number): string {
@@ -62,9 +99,10 @@ export async function GET(request: NextRequest) {
 
   try {
     const range = rangeForTf(tfRaw, dateFrom, dateTo);
-    const [overview, ads] = await Promise.all([
+    const [overview, ads, referrers] = await Promise.all([
       getOverview(range.from, range.to),
       getAdsOverview(range.from, range.to).catch(() => ({ platforms: [], dailySpend: [] })),
+      fetchShopifyReferrers(range.from, range.to),
     ]);
 
     const totalRevenue = overview.metrics.totalRevenue;
@@ -100,6 +138,9 @@ export async function GET(request: NextRequest) {
       attribution.push({ platform: p.platform, revenue, orders, spend, roas, costPerOrder, percentage: 0, color: cfg.color });
     }
 
+    // Remainder after the platforms' own claims. Platforms overlap (each
+    // counts the same order), so this can collapse to 0 even when Shopify
+    // shows plenty of direct orders — see `referrers` for the real split.
     const directRevenue = Math.max(0, totalRevenue - attributedRevenue);
     const directOrders = Math.max(0, totalOrders - attributedOrders);
     attribution.push({ platform: 'Direct / Other', revenue: directRevenue, orders: directOrders, spend: 0, roas: 0, costPerOrder: 0, percentage: 0, color: '#96BF48' });
@@ -108,8 +149,14 @@ export async function GET(request: NextRequest) {
     for (const a of attribution) {
       a.percentage = Math.round((a.revenue / grandTotal) * 1000) / 10;
     }
+    const claimedPct = totalRevenue > 0 ? Math.round((attributedRevenue / totalRevenue) * 1000) / 10 : 0;
 
-    return NextResponse.json({ source: 'bigquery_live', totalRevenue, totalSpend, attribution }, { headers: cacheHeaders(tfRaw === 'today') });
+    return NextResponse.json({
+      source: 'bigquery_live', totalRevenue, totalSpend, attribution,
+      /** Combined platform-claimed revenue as % of store revenue (>100 = overlap). */
+      claimedPct,
+      referrers,
+    }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {
     return NextResponse.json({ source: 'error', error: String(err), attribution: [] });
   }

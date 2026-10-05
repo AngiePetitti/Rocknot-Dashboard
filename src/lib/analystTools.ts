@@ -141,7 +141,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_attribution',
-    description: 'Revenue attribution for a date range: how total Shopify revenue splits across ad platforms (attributed revenue, orders, spend, ROAS, cost per order, % of revenue) plus the Direct/Other remainder.',
+    description: "Revenue attribution for a date range, on TWO bases: (1) each ad platform's own claimed revenue/orders/spend/ROAS — these OVERLAP (Meta, Google and Pinterest each count the same order), so they can add up to more than store revenue and the 'Direct / Other' remainder can be 0 without meaning direct sales are 0; (2) Shopify's order referrer — one bucket per order, adds up to store revenue — which is the right basis for 'how much came direct / from Google / from email'.",
     input_schema: {
       type: 'object',
       properties: {
@@ -397,10 +397,25 @@ By order count: 1 order ${m.oneOrderCount?.toLocaleString?.() ?? '?'} (LTV $${m.
   if (name === 'get_attribution') {
     const d = await get(`/api/windsor/attribution?${params}`);
     const rows = (d?.attribution as { platform: string; revenue: number; orders: number; spend: number; roas: number; costPerOrder: number; percentage: number }[]) ?? [];
-    if (!rows.length) return `No attribution data for ${from} → ${to}.`;
-    return `Revenue attribution ${from} → ${to} (total $${((d?.totalRevenue as number) ?? 0).toLocaleString()}):\n${rows.map(a =>
-      `${a.platform}: $${a.revenue.toLocaleString()} (${a.percentage}%) · ${a.orders} orders${a.spend ? ` · $${a.spend.toLocaleString()} spend · ${a.roas}x ROAS · $${a.costPerOrder}/order` : ''}`
-    ).join('\n')}`;
+    const referrers = (d?.referrers as { label: string; orders: number; netSales: number; percentage: number }[]) ?? [];
+    if (!rows.length && !referrers.length) return `No attribution data for ${from} → ${to}.`;
+    const total = (d?.totalRevenue as number) ?? 0;
+    const claimed = (d?.claimedPct as number) ?? 0;
+    const platformLines = rows.filter(a => a.platform !== 'Direct / Other').map(a =>
+      `${a.platform}: $${a.revenue.toLocaleString()} (${a.percentage}% of combined claims) · ${a.orders} orders${a.spend ? ` · $${a.spend.toLocaleString()} spend · ${a.roas}x ROAS · $${a.costPerOrder}/order` : ''}`
+    );
+    const overlapNote = claimed > 100
+      ? `Together the platforms claim ${claimed}% of store revenue — they overlap (each counts the same order on its own attribution window), so the "Direct / Other" remainder collapses to $0. That does NOT mean direct sales are zero; use the Shopify referrer split below for that.`
+      : `Together the platforms claim ${claimed}% of store revenue (self-attributed, overlapping); the unclaimed remainder is $${Math.max(0, total - rows.filter(a => a.platform !== 'Direct / Other').reduce((s, a) => s + a.revenue, 0)).toLocaleString()}.`;
+    const refLines = referrers.slice(0, 15).map(r => `${r.label}: $${r.netSales.toLocaleString()} (${r.percentage}%) · ${r.orders} orders`);
+    return `Revenue attribution ${from} → ${to} — store revenue $${total.toLocaleString()}.
+
+PLATFORM-CLAIMED (each platform's own attribution, overlapping):
+${platformLines.join('\n') || 'none'}
+${overlapNote}
+
+SHOPIFY ORDER REFERRER (one referrer per order; adds up to store net sales — the true "where did orders come from" split; "Direct (no referrer)" = typed the URL, bookmark, or untracked app/email click):
+${refLines.join('\n') || 'not available (Shopify not connected)'}`;
   }
 
   if (name === 'get_goals') {
