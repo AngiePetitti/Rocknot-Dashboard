@@ -1,0 +1,296 @@
+// Organic Content tab data: how organic Pinterest pins and Instagram posts
+// are performing (Windsor's Pinterest Organic / Instagram Insights feeds,
+// with the post's own image), and how blog articles perform on the site
+// (Shopify sessions that started on a /blogs/ page, joined to the article's
+// title and cover image from the Shopify Admin API).
+import { getClient, shopifyDomain, windsorParams, windsorAccount } from '@/src/lib/client';
+import { shopifyql, shopifyConfigured } from '@/src/lib/shopifyql';
+import { isPaidMedium } from '@/src/lib/traffic';
+
+export type OrganicPlatform = 'Pinterest' | 'Instagram';
+
+export interface OrganicPost {
+  id: string;
+  platform: OrganicPlatform;
+  title: string;
+  imageUrl: string;
+  url: string;
+  publishedAt: string;
+  /** Pinterest board / Instagram media type (IMAGE, VIDEO, CAROUSEL_ALBUM, REEL). */
+  group: string;
+  metrics: Record<string, number>;
+}
+
+export interface BlogPost {
+  path: string;
+  title: string;
+  imageUrl: string;
+  url: string;
+  publishedAt: string;
+  sessions: number;
+  cartAdds: number;
+  completed: number;
+}
+
+export interface SourceBlock<T> {
+  status: 'ok' | 'not_connected' | 'error';
+  error?: string;
+  items: T[];
+  totals: Record<string, number>;
+  /** Which Windsor field set succeeded (debugging aid). */
+  fieldSet?: string;
+}
+
+export interface SocialTraffic { sessions: number; cartAdds: number; completed: number }
+
+export interface OrganicData {
+  range: { from: string; to: string };
+  pinterest: SourceBlock<OrganicPost>;
+  instagram: SourceBlock<OrganicPost>;
+  blog: SourceBlock<BlogPost>;
+  /** Unpaid site sessions whose referrer was the platform (Shopify sessions report). */
+  socialTraffic: Record<OrganicPlatform, SocialTraffic>;
+}
+
+const WINDSOR_KEY = (process.env.WINDSOR_API_KEY || '').trim();
+const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+const str = (v: unknown) => (v == null ? '' : String(v));
+
+// ── Windsor ───────────────────────────────────────────────────────────────
+
+export interface WindsorAttempt { fieldSet: string; fields: string[]; rows?: Array<Record<string, unknown>>; error?: string }
+
+/**
+ * Pull rows from a Windsor organic source, trying richer field sets first:
+ * an unknown field makes Windsor reject the whole request, and its error
+ * message lists the fields it does know — kept for the debug endpoint.
+ */
+export async function windsorOrganicRows(
+  source: 'pinterest_organic' | 'instagram',
+  fieldSets: Array<{ name: string; fields: string[] }>,
+  from: string, to: string,
+): Promise<{ attempts: WindsorAttempt[]; rows: Array<Record<string, unknown>> | null; fieldSet: string | null; notConnected: boolean }> {
+  const attempts: WindsorAttempt[] = [];
+  if (!WINDSOR_KEY) return { attempts, rows: null, fieldSet: null, notConnected: true };
+  const scoped = windsorParams(source, { date_from: from, date_to: to });
+  if (!scoped) return { attempts, rows: null, fieldSet: null, notConnected: true };
+  for (const fs of fieldSets) {
+    const qs = new URLSearchParams({ api_key: WINDSOR_KEY, fields: fs.fields.join(','), _renderer: 'json', ...scoped });
+    try {
+      const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { next: { revalidate: 600 }, signal: AbortSignal.timeout(20000) });
+      const json = await res.json();
+      if (json.error || !Array.isArray(json.data)) {
+        attempts.push({ fieldSet: fs.name, fields: fs.fields, error: String(json.error || json.message || `HTTP ${res.status}`) });
+        continue;
+      }
+      attempts.push({ fieldSet: fs.name, fields: fs.fields, rows: json.data.slice(0, 3) });
+      return { attempts, rows: json.data as Array<Record<string, unknown>>, fieldSet: fs.name, notConnected: false };
+    } catch (e) {
+      attempts.push({ fieldSet: fs.name, fields: fs.fields, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return { attempts, rows: null, fieldSet: null, notConnected: false };
+}
+
+// Windsor field names from its Pinterest Organic / Instagram Insights field
+// references. Media/identity fields first; metrics-only fallbacks after.
+export const PINTEREST_ORGANIC_FIELDSETS = [
+  { name: 'full', fields: ['date', 'pin_id', 'pin_title', 'pin_description', 'pin_permalink', 'pin_media_image_url', 'pin_board_name', 'pin_created_at', 'pin_impression', 'save', 'pin_click', 'pin_outbound_click'] },
+  { name: 'no_media', fields: ['date', 'pin_id', 'pin_title', 'pin_permalink', 'pin_created_at', 'pin_impression', 'save', 'pin_click', 'pin_outbound_click'] },
+  { name: 'minimal', fields: ['date', 'pin_id', 'pin_title', 'pin_impression', 'save', 'pin_click', 'pin_outbound_click'] },
+];
+export const INSTAGRAM_FIELDSETS = [
+  { name: 'full', fields: ['date', 'media_id', 'media_caption', 'media_type', 'media_url', 'media_thumbnail_url', 'media_permalink', 'timestamp', 'media_reach', 'media_impressions', 'media_like_count', 'media_comments_count', 'media_saved', 'media_shares', 'media_views'] },
+  { name: 'no_views', fields: ['date', 'media_id', 'media_caption', 'media_type', 'media_url', 'media_permalink', 'timestamp', 'media_reach', 'media_like_count', 'media_comments_count', 'media_saved'] },
+  { name: 'minimal', fields: ['date', 'media_id', 'media_caption', 'media_permalink', 'media_reach', 'media_like_count', 'media_comments_count'] },
+];
+
+/**
+ * Roll per-day rows up to one record per post. Windsor serves some metrics
+ * per day (sum them) and some as running lifetime totals repeated on every
+ * day (take the latest) — detected per metric: identical on every row → lifetime.
+ */
+function rollUp(rows: Array<Record<string, unknown>>, idKey: string, metricKeys: string[]): Map<string, { rows: Array<Record<string, unknown>>; metrics: Record<string, number> }> {
+  const byId = new Map<string, Array<Record<string, unknown>>>();
+  for (const r of rows) {
+    const id = str(r[idKey]);
+    if (!id) continue;
+    const list = byId.get(id) || [];
+    list.push(r);
+    byId.set(id, list);
+  }
+  const out = new Map<string, { rows: Array<Record<string, unknown>>; metrics: Record<string, number> }>();
+  Array.from(byId.entries()).forEach(([id, list]) => {
+    list.sort((a, b) => str(a.date).localeCompare(str(b.date)));
+    const metrics: Record<string, number> = {};
+    for (const k of metricKeys) {
+      const vals = list.map(r => num(r[k]));
+      const distinct = new Set(vals.filter(v => v !== 0));
+      const lifetime = list.length > 1 && distinct.size <= 1 && vals[vals.length - 1] !== 0;
+      metrics[k] = lifetime ? vals[vals.length - 1] : vals.reduce((s, v) => s + v, 0);
+    }
+    out.set(id, { rows: list, metrics });
+  });
+  return out;
+}
+
+function sumTotals(items: OrganicPost[], keys: string[]): Record<string, number> {
+  const t: Record<string, number> = {};
+  for (const k of keys) t[k] = items.reduce((s, p) => s + (p.metrics[k] || 0), 0);
+  return t;
+}
+
+export const PINTEREST_METRICS = ['impressions', 'saves', 'pinClicks', 'outboundClicks'];
+export const INSTAGRAM_METRICS = ['reach', 'impressions', 'likes', 'comments', 'saves', 'shares', 'views'];
+
+export async function fetchPinterestOrganic(from: string, to: string): Promise<SourceBlock<OrganicPost>> {
+  const r = await windsorOrganicRows('pinterest_organic', PINTEREST_ORGANIC_FIELDSETS, from, to);
+  if (r.notConnected) return { status: 'not_connected', items: [], totals: {} };
+  if (!r.rows) return { status: 'error', error: r.attempts.map(a => `${a.fieldSet}: ${a.error}`).join(' | '), items: [], totals: {} };
+  const rolled = rollUp(r.rows, 'pin_id', ['pin_impression', 'save', 'pin_click', 'pin_outbound_click']);
+  const items: OrganicPost[] = Array.from(rolled.entries()).map(([id, v]) => {
+    const last = v.rows[v.rows.length - 1];
+    return {
+      id, platform: 'Pinterest' as const,
+      title: str(last.pin_title) || str(last.pin_description).slice(0, 80) || `Pin ${id}`,
+      imageUrl: str(last.pin_media_image_url),
+      url: str(last.pin_permalink) || `https://www.pinterest.com/pin/${id}/`,
+      publishedAt: str(last.pin_created_at).slice(0, 10),
+      group: str(last.pin_board_name),
+      metrics: { impressions: v.metrics.pin_impression, saves: v.metrics.save, pinClicks: v.metrics.pin_click, outboundClicks: v.metrics.pin_outbound_click },
+    };
+  }).filter(p => Object.values(p.metrics).some(x => x > 0))
+    .sort((a, b) => b.metrics.impressions - a.metrics.impressions);
+  return { status: 'ok', items, totals: sumTotals(items, PINTEREST_METRICS), fieldSet: r.fieldSet || undefined };
+}
+
+export async function fetchInstagramOrganic(from: string, to: string): Promise<SourceBlock<OrganicPost>> {
+  const r = await windsorOrganicRows('instagram', INSTAGRAM_FIELDSETS, from, to);
+  if (r.notConnected) return { status: 'not_connected', items: [], totals: {} };
+  if (!r.rows) return { status: 'error', error: r.attempts.map(a => `${a.fieldSet}: ${a.error}`).join(' | '), items: [], totals: {} };
+  const rolled = rollUp(r.rows, 'media_id', ['media_reach', 'media_impressions', 'media_like_count', 'media_comments_count', 'media_saved', 'media_shares', 'media_views']);
+  const items: OrganicPost[] = Array.from(rolled.entries()).map(([id, v]) => {
+    const last = v.rows[v.rows.length - 1];
+    const type = str(last.media_type);
+    const caption = str(last.media_caption).replace(/\s+/g, ' ').trim();
+    return {
+      id, platform: 'Instagram' as const,
+      title: caption ? (caption.length > 90 ? `${caption.slice(0, 90)}…` : caption) : `${type || 'Post'} ${id}`,
+      // Videos/reels: media_url is the video; the thumbnail is the image to show.
+      imageUrl: (type === 'VIDEO' || type === 'REEL' ? str(last.media_thumbnail_url) : '') || str(last.media_url) || str(last.media_thumbnail_url),
+      url: str(last.media_permalink),
+      publishedAt: str(last.timestamp).slice(0, 10),
+      group: type,
+      metrics: {
+        reach: v.metrics.media_reach, impressions: v.metrics.media_impressions, likes: v.metrics.media_like_count,
+        comments: v.metrics.media_comments_count, saves: v.metrics.media_saved, shares: v.metrics.media_shares, views: v.metrics.media_views,
+      },
+    };
+  }).filter(p => Object.values(p.metrics).some(x => x > 0))
+    .sort((a, b) => (b.metrics.reach || b.metrics.impressions) - (a.metrics.reach || a.metrics.impressions));
+  return { status: 'ok', items, totals: sumTotals(items, INSTAGRAM_METRICS), fieldSet: r.fieldSet || undefined };
+}
+
+// ── Blog ──────────────────────────────────────────────────────────────────
+
+interface ArticleMeta { title: string; imageUrl: string; publishedAt: string; handle: string; blogHandle: string }
+
+/** Published articles from the Shopify Admin API, keyed by /blogs/<blog>/<article> path. */
+export async function fetchArticles(): Promise<Map<string, ArticleMeta>> {
+  const token = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
+  const out = new Map<string, ArticleMeta>();
+  if (!token || !shopifyDomain()) return out;
+  const query = `{
+    articles(first: 250, sortKey: PUBLISHED_AT, reverse: true, query: "published_status:published") {
+      nodes { title handle publishedAt image { url(transform: { maxWidth: 400 }) } blog { handle } }
+    }
+  }`;
+  try {
+    const res = await fetch(`https://${shopifyDomain()}/admin/api/2026-04/graphql.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
+      body: JSON.stringify({ query }),
+      next: { revalidate: 1800 },
+      signal: AbortSignal.timeout(15000),
+    });
+    const json = await res.json();
+    const nodes = (json?.data?.articles?.nodes || []) as Array<{ title: string; handle: string; publishedAt: string | null; image: { url: string } | null; blog: { handle: string } }>;
+    for (const a of nodes) {
+      out.set(`/blogs/${a.blog.handle}/${a.handle}`, { title: a.title, imageUrl: a.image?.url || '', publishedAt: (a.publishedAt || '').slice(0, 10), handle: a.handle, blogHandle: a.blog.handle });
+    }
+  } catch { /* titles/images are a nicety — the traffic table still renders from paths */ }
+  return out;
+}
+
+export async function fetchBlogPerformance(from: string, to: string): Promise<SourceBlock<BlogPost>> {
+  if (!shopifyConfigured()) return { status: 'not_connected', items: [], totals: {} };
+  try {
+    const [rows, articles] = await Promise.all([
+      shopifyql(`FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY landing_page_path SINCE ${from} UNTIL ${to} ORDER BY sessions DESC LIMIT 1000`, { timeoutMs: 20000 }),
+      fetchArticles(),
+    ]);
+    const byPath = new Map<string, BlogPost>();
+    for (const r of rows) {
+      const raw = str(r.landing_page_path);
+      if (!/^\/blogs\//.test(raw)) continue;
+      // Strip query strings / trailing slashes so one article is one row.
+      const path = raw.split('?')[0].replace(/\/+$/, '');
+      const meta = articles.get(path);
+      const cur = byPath.get(path) || {
+        path,
+        title: meta?.title || path.replace(/^\/blogs\/[^/]+\//, '').replace(/-/g, ' '),
+        imageUrl: meta?.imageUrl || '',
+        url: `https://${getClient().siteDomain}${path}`,
+        publishedAt: meta?.publishedAt || '',
+        sessions: 0, cartAdds: 0, completed: 0,
+      };
+      cur.sessions += num(r.sessions); cur.cartAdds += num(r.sessions_with_cart_additions); cur.completed += num(r.sessions_that_completed_checkout);
+      byPath.set(path, cur);
+    }
+    const items = Array.from(byPath.values()).filter(b => !/^\/blogs\/[^/]+$/.test(b.path)).sort((a, b) => b.sessions - a.sessions);
+    const totals = {
+      sessions: items.reduce((s, b) => s + b.sessions, 0),
+      cartAdds: items.reduce((s, b) => s + b.cartAdds, 0),
+      completed: items.reduce((s, b) => s + b.completed, 0),
+      articles: items.length,
+    };
+    return { status: 'ok', items, totals };
+  } catch (e) {
+    return { status: 'error', error: e instanceof Error ? e.message : String(e), items: [], totals: {} };
+  }
+}
+
+// ── Unpaid site traffic from each platform ────────────────────────────────
+
+export async function fetchSocialTraffic(from: string, to: string): Promise<Record<OrganicPlatform, SocialTraffic>> {
+  const empty = (): SocialTraffic => ({ sessions: 0, cartAdds: 0, completed: 0 });
+  const out: Record<OrganicPlatform, SocialTraffic> = { Pinterest: empty(), Instagram: empty() };
+  if (!shopifyConfigured()) return out;
+  try {
+    const rows = await shopifyql(`FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY referrer_name, utm_medium SINCE ${from} UNTIL ${to} ORDER BY sessions DESC LIMIT 500`, { timeoutMs: 20000 });
+    for (const r of rows) {
+      const name = str(r.referrer_name).toLowerCase();
+      const medium = str(r.utm_medium);
+      if (isPaidMedium(medium)) continue;
+      const key: OrganicPlatform | null = name.includes('pinterest') ? 'Pinterest' : name.includes('instagram') ? 'Instagram' : null;
+      if (!key) continue;
+      out[key].sessions += num(r.sessions); out[key].cartAdds += num(r.sessions_with_cart_additions); out[key].completed += num(r.sessions_that_completed_checkout);
+    }
+  } catch { /* leave zeros */ }
+  return out;
+}
+
+export async function fetchOrganic(from: string, to: string): Promise<OrganicData> {
+  const [pinterest, instagram, blog, socialTraffic] = await Promise.all([
+    fetchPinterestOrganic(from, to),
+    fetchInstagramOrganic(from, to),
+    fetchBlogPerformance(from, to),
+    fetchSocialTraffic(from, to),
+  ]);
+  return { range: { from, to }, pinterest, instagram, blog, socialTraffic };
+}
+
+/** Whether a source is wired for this client (for the tab's setup hints). */
+export function organicSourceConfigured(source: 'pinterest_organic' | 'instagram'): boolean {
+  return Boolean(WINDSOR_KEY) && windsorAccount(source) !== null;
+}

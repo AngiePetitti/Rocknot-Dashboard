@@ -146,6 +146,18 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_organic_content',
+    description: "Organic content performance for a date range (Organic Content tab): top organic Pinterest pins (impressions, saves, pin clicks, outbound clicks), top Instagram posts/reels (reach, likes, comments, saves, shares, views), blog articles by sessions started on them (with add-to-cart, orders, CVR), and unpaid site sessions referred by Pinterest / Instagram. Sources not connected say so.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        date_from: { type: 'string', description: 'YYYY-MM-DD' },
+        date_to: { type: 'string', description: 'YYYY-MM-DD' },
+      },
+      required: ['date_from', 'date_to'],
+    },
+  },
+  {
     name: 'get_goals',
     description: "The company's monthly revenue goals and ad-spend budgets (the Goals tab plan, including which months are pinned/manually set). Compare against get_metrics actuals to judge pace toward the annual target.",
     input_schema: { type: 'object', properties: {} },
@@ -199,7 +211,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
 export async function execTool(get: Getter, name: string, input: Record<string, unknown>): Promise<string> {
   const from = String(input.date_from ?? '');
   const to = String(input.date_to ?? '');
-  const needsRange = ['get_metrics', 'get_top_products', 'get_ad_performance', 'get_returns', 'get_customer_intel', 'get_attribution'].includes(name);
+  const needsRange = ['get_metrics', 'get_top_products', 'get_ad_performance', 'get_returns', 'get_customer_intel', 'get_attribution', 'get_organic_content'].includes(name);
   if (needsRange && (!DATE_RE.test(from) || !DATE_RE.test(to) || from > to)) {
     return 'Error: date_from and date_to must be YYYY-MM-DD with date_from <= date_to.';
   }
@@ -378,6 +390,31 @@ ${overlapNote}
 
 SHOPIFY ORDER REFERRER (one referrer per order; adds up to store net sales — the true "where did orders come from" split; "Direct (no referrer)" = typed the URL, bookmark, or untracked app/email click):
 ${refLines.join('\n') || 'not available (Shopify not connected)'}`;
+  }
+
+  if (name === 'get_organic_content') {
+    const d = await get(`/api/organic?${params}`);
+    if (!d || d.error) return `Organic data unavailable: ${d?.error || 'no response'}`;
+    type Block = { status: string; error?: string; items: Array<{ title: string; group: string; publishedAt: string; url: string; metrics: Record<string, number> }>; totals: Record<string, number> };
+    const pin = d.pinterest as Block; const ig = d.instagram as Block;
+    const blog = d.blog as { status: string; items: Array<{ title: string; path: string; publishedAt: string; sessions: number; cartAdds: number; completed: number }>; totals: Record<string, number> };
+    const st = d.socialTraffic as Record<string, { sessions: number; completed: number }>;
+    const m = (o: Record<string, number>, keys: string[]) => keys.filter(k => o[k]).map(k => `${k} ${Math.round(o[k]).toLocaleString()}`).join(' · ');
+    const postLines = (b: Block, keys: string[]) => b.status !== 'ok'
+      ? (b.status === 'not_connected' ? 'not connected in Windsor yet' : `error: ${b.error}`)
+      : (b.items.slice(0, 12).map(p => `- ${p.title}${p.group ? ` [${p.group}]` : ''}${p.publishedAt ? ` (${p.publishedAt})` : ''}: ${m(p.metrics, keys)}`).join('\n') || 'no activity') + `\nTotals: ${m(b.totals, keys)}`;
+    return `Organic content ${from} → ${to}
+
+PINTEREST ORGANIC PINS (Pinterest's own counts):
+${postLines(pin, ['impressions', 'saves', 'pinClicks', 'outboundClicks'])}
+
+INSTAGRAM POSTS & REELS (Instagram's own counts):
+${postLines(ig, ['reach', 'likes', 'comments', 'saves', 'shares', 'views'])}
+
+BLOG ARTICLES (Shopify sessions that started on the article):
+${blog.status !== 'ok' ? 'unavailable' : (blog.items.slice(0, 12).map(b => `- ${b.title} (${b.publishedAt || 'date n/a'}): ${b.sessions} sessions · ${b.cartAdds} add-to-cart · ${b.completed} orders`).join('\n') || 'no blog sessions') + `\nTotals: ${blog.totals.sessions || 0} sessions · ${blog.totals.completed || 0} orders across ${blog.totals.articles || 0} articles`}
+
+UNPAID SITE SESSIONS REFERRED BY: Pinterest ${st?.Pinterest?.sessions ?? 0} (${st?.Pinterest?.completed ?? 0} orders) · Instagram ${st?.Instagram?.sessions ?? 0} (${st?.Instagram?.completed ?? 0} orders). Many in-app taps hide the referrer, so this is a floor.`;
   }
 
   if (name === 'get_goals') {
