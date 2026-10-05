@@ -321,11 +321,11 @@ const KAILEEP: ClientProfile = {
       tiktok: null,
       snapchat: null,
       quickbooks: null,
-      // Organic Content tab: set to Kailee's account ids once "Pinterest
-      // Organic" and "Instagram Insights" are connected in Windsor
-      // (/api/debug/organic lists the ids Windsor exposes). null = skipped.
+      // Organic Content tab. Instagram Insights: "Kailee P. Wedding Shoes"
+      // (@kaileepweddings). Pinterest Organic stays null until the grant is
+      // done from Kailee's own Pinterest login (/api/debug/organic lists ids).
       pinterest_organic: null,
-      instagram: null,
+      instagram: '17841402329636544',
     },
   },
   // No annual target has been shared yet — the Goals tab asks for one. The
