@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isBigQueryConfigured, runQuery, getDataset } from '@/src/lib/bigquery';
-import { windsorParams } from '@/src/lib/client';
+import { windsorParams, windsorPinterestOptions } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -40,11 +40,12 @@ export async function GET(request: NextRequest) {
   }
 
   // Windsor live, every conversion-ish field the connector will give us —
-  // pulled twice: as the dashboard does today, and with the 7-day click /
-  // 1-day engagement / 1-day view window on the ad-event date basis. If the
-  // second set of totals differs, Windsor honours those parameters.
+  // pulled twice: on Windsor's default window (30/30/1) and with the task's
+  // `options` (the profile's conversion settings, as the dashboard now
+  // sends on every call). Differing totals = the option is honoured.
   const key = (process.env.WINDSOR_API_KEY || '').trim();
   const scoped = key ? windsorParams('pinterest', { date_from: from, date_to: today }) : null;
+  if (scoped) delete scoped.options;
   if (scoped) {
     // Windsor's real Pinterest field list (from its own error message): checkouts
     // split by attribution type, each with a value, plus the totals.
@@ -61,10 +62,12 @@ export async function GET(request: NextRequest) {
       for (const r of rows) for (const f of fields.slice(1)) totals[f] = (totals[f] || 0) + Number(r[f] || 0);
       return { rows: rows.length, totals, sample: rows.slice(0, 1) };
     };
-    const window711 = { click_window_days: '7', engagement_window_days: '1', view_window_days: '1', conversion_report_time: 'TIME_OF_AD_ACTION' };
+    const options = windsorPinterestOptions();
     try { out.windsorLiveDefault = await pull({}); } catch (e) { out.windsorError = String(e instanceof Error ? e.message : e); }
-    try { out.windsorLive711 = await pull(window711); } catch (e) { out.windsor711Error = String(e instanceof Error ? e.message : e); }
-    out.windsor711Params = window711;
+    if (options) {
+      try { out.windsorLiveTaskOptions = await pull({ options }); } catch (e) { out.windsorOptionsError = String(e instanceof Error ? e.message : e); }
+      out.windsorOptions = options;
+    }
   }
   return NextResponse.json(out);
 }

@@ -459,7 +459,30 @@ export function windsorAccount(source: string, profile: ClientProfile = getClien
 export function windsorParams(source: string, params: Record<string, string>, profile: ClientProfile = getClient()): Record<string, string> | null {
   const acct = windsorAccount(source, profile);
   if (acct === null) return null;
-  return acct ? { ...params, select_accounts: acct } : params;
+  const out: Record<string, string> = acct ? { ...params, select_accounts: acct } : { ...params };
+  // Pinterest: Windsor applies the attribution window / report time through
+  // its `options` parameter (the same one the BigQuery task's URL carries),
+  // so every live call reports on the profile's conversion settings —
+  // identical to the synced table and to Ads Manager.
+  const opts = windsorPinterestOptions(profile);
+  if (source === 'pinterest' && opts && !out.options) out.options = opts;
+  return out;
+}
+
+/**
+ * Windsor's `options` JSON for Pinterest, built from the profile's conversion
+ * settings: {"pinterest":{"attribution_window":"7/7/1","conversion_report_time":"TIME_OF_AD_ACTION"}}.
+ * '' when the profile sets none (Windsor then defaults to 30/30/1).
+ */
+export function windsorPinterestOptions(profile: ClientProfile = getClient()): string {
+  const a = profile.ads.pinterestAttribution;
+  if (!a) return '';
+  return JSON.stringify({
+    pinterest: {
+      attribution_window: `${a.clickWindowDays}/${a.engagementWindowDays}/${a.viewWindowDays}`,
+      conversion_report_time: a.conversionReportTime,
+    },
+  });
 }
 
 /** Case-insensitive QuickBooks entity matcher (null = keep every account). */

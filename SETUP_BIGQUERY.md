@@ -57,7 +57,7 @@ Meta/Google/TikTok/Snapchat, Kailee P runs Meta/Google/Pinterest:
 | Google Ads       | date, spend, impressions, clicks, conversions, conversion_value                | `google_ads`        |
 | TikTok Ads       | date, spend, impressions, clicks, conversions, conversion_value                | `tiktok_ads`        |
 | Snapchat Ads     | date, spend, impressions, clicks, swipes, conversion_purchases, conversion_purchases_value | `snapchat_ads` |
-| Pinterest Ads    | date, spend, impressions, clicks, total_checkout, total_checkout_value (or total_conversions, total_conversions_value) | `pinterest_ads` |
+| Pinterest Ads    | date, account_id, campaign, ad_id, ad_group_name, spend, impressions, clicks, total_checkout, total_checkout_value — and set the task's **Attribution Window** to the Ads Manager setting (Kailee P: `7/7/1`, i.e. 7-day click / 1-day view) and **Conversion Report Time** to `TIME_OF_AD_ACTION`; left empty Windsor syncs on 30/30/1 and the row will not match Ads Manager | `pinterest_ads` |
 | Shopify (Order Status) | date, order_id, order_cancelled_at                                       | `shopify_order_status` |
 
 The `shopify_order_status` task is optional. The dashboard does not currently

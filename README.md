@@ -85,10 +85,13 @@ Rocknot-only: `SNAP_CLIENT_ID`, `SNAP_CLIENT_SECRET`, `SNAP_REFRESH_TOKEN`,
    `public/kaileep-logo.png` (until then the sidebar shows a "K" mark).
 2. **BigQuery** — create dataset `kaileep` and Windsor destination tasks for
    `shopify_orders`, `shopify_customers`, `facebook_ads`, `google_ads`,
-   `pinterest_ads` (see `SETUP_BIGQUERY.md`). Verify the Pinterest column
-   names with `/api/debug/bq-schema` after the first sync — the queries try
-   `total_checkout_value`/`total_checkout`, then
-   `total_conversions_value`/`total_conversions`, then spend-only.
+   `pinterest_ads` (see `SETUP_BIGQUERY.md`). The Pinterest task (Windsor
+   task 47651, "Updated 2 Pinterest ads - Kailee P.") must have its
+   Attribution Window set to `7/7/1` and Conversion Report Time to
+   `TIME_OF_AD_ACTION` — Ads Manager's 7-day click / 1-day view — or the
+   row will not match Ads Manager. Verify the column names with
+   `/api/debug/bq-schema` after the first sync and the match with
+   `/api/debug/pinterest?days=7`.
 3. **Vercel** — new project from this repo with `CLIENT=kaileep`,
    `BQ_DATASET=kaileep`, the core variables above, Kailee P's Shopify store
    domain/token, Meta ad account id/token, Klaviyo key, and her own
