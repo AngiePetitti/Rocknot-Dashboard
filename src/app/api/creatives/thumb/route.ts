@@ -17,8 +17,21 @@ export async function GET(req: NextRequest) {
   }
   const platform = (req.nextUrl.searchParams.get('p') || '').trim();
   const id = (req.nextUrl.searchParams.get('id') || '').trim();
+  const kind = (req.nextUrl.searchParams.get('kind') || 'ad').trim();
   const placeholder = () => new NextResponse(PLACEHOLDER(platform || 'ad'), { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'private, max-age=600' } });
   if (!platform || !id) return placeholder();
+  // Organic Instagram / Pinterest posts: resolve from the organic feed (posts
+  // published in the last 6 months).
+  if (kind === 'organic') {
+    try {
+      const res = await fetch(`${req.nextUrl.origin}/api/organic?tf=6m`, { headers: { cookie: req.headers.get('cookie') || '' }, next: { revalidate: 1800 } });
+      const json = await res.json();
+      const block = (platform === 'Pinterest' ? json?.pinterest : json?.instagram) as { items?: Array<{ id: string; imageUrl: string }> } | undefined;
+      const hit = (block?.items || []).find(p => String(p.id) === id);
+      if (hit?.imageUrl) return NextResponse.redirect(hit.imageUrl, { status: 302, headers: { 'Cache-Control': 'private, max-age=3600' } });
+    } catch { /* placeholder */ }
+    return placeholder();
+  }
   try {
     const res = await fetch(`${req.nextUrl.origin}/api/windsor/creatives?tf=6m`, {
       headers: { cookie: req.headers.get('cookie') || '' },

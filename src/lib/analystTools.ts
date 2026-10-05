@@ -511,24 +511,28 @@ ${series}`;
   if (name === 'get_organic_content') {
     const d = await get(`/api/organic?${params}`);
     if (!d || d.error) return `Organic data unavailable: ${d?.error || 'no response'}`;
-    type Block = { status: string; error?: string; items: Array<{ title: string; group: string; publishedAt: string; url: string; metrics: Record<string, number> }>; totals: Record<string, number> };
+    type Post = { id: string; title: string; group: string; publishedAt: string; url: string; imageUrl: string; metrics: Record<string, number> };
+    type Block = { status: string; error?: string; items: Post[]; totals: Record<string, number> };
     const pin = d.pinterest as Block; const ig = d.instagram as Block;
-    const blog = d.blog as { status: string; items: Array<{ title: string; path: string; publishedAt: string; sessions: number; cartAdds: number; completed: number }>; totals: Record<string, number> };
+    const blog = d.blog as { status: string; items: Array<{ title: string; path: string; url: string; imageUrl: string; kind?: string; publishedAt: string; sessions: number; cartAdds: number; completed: number }>; totals: Record<string, number> };
     const st = d.socialTraffic as Record<string, { sessions: number; completed: number }>;
     const m = (o: Record<string, number>, keys: string[]) => keys.filter(k => o[k]).map(k => `${k} ${Math.round(o[k]).toLocaleString()}`).join(' · ');
-    const postLines = (b: Block, keys: string[]) => b.status !== 'ok'
+    // Same-origin image proxy (platform CDN links expire) — see /api/creatives/thumb.
+    const base = getClient().dashboardUrl.replace(/\/$/, '');
+    const postImg = (platform: string, p: Post) => p.imageUrl ? `${base}/api/creatives/thumb?kind=organic&p=${encodeURIComponent(platform)}&id=${encodeURIComponent(p.id)}` : 'none';
+    const postLines = (platform: string, b: Block, keys: string[]) => b.status !== 'ok'
       ? (b.status === 'not_connected' ? 'not connected in Windsor yet' : `error: ${b.error}`)
-      : (b.items.slice(0, 12).map(p => `- ${p.title}${p.group ? ` [${p.group}]` : ''}${p.publishedAt ? ` (${p.publishedAt})` : ''}: ${m(p.metrics, keys)}`).join('\n') || 'no activity') + `\nTotals: ${m(b.totals, keys)}`;
-    return `Organic content ${from} → ${to}
+      : (b.items.slice(0, 12).map(p => `- ${p.title}${p.group ? ` [${p.group}]` : ''}${p.publishedAt ? ` (${p.publishedAt})` : ''}: ${m(p.metrics, keys)}\n   image: ${postImg(platform, p)}\n   link: ${p.url || 'n/a'}`).join('\n') || 'no activity') + `\nTotals: ${m(b.totals, keys)}`;
+    return `Organic content ${from} → ${to}. Each post has an \`image\` URL (its real thumbnail — embed with <img> when a visual is wanted) and a \`link\`.
 
 PINTEREST ORGANIC PINS (Pinterest's own counts):
-${postLines(pin, ['impressions', 'saves', 'pinClicks', 'outboundClicks'])}
+${postLines('Pinterest', pin, ['impressions', 'saves', 'pinClicks', 'outboundClicks'])}
 
 INSTAGRAM POSTS & REELS (Instagram's own counts):
-${postLines(ig, ['reach', 'likes', 'comments', 'saves', 'shares', 'views'])}
+${postLines('Instagram', ig, ['reach', 'likes', 'comments', 'saves', 'shares', 'views'])}
 
-BLOG ARTICLES (Shopify sessions that started on the article):
-${blog.status !== 'ok' ? 'unavailable' : (blog.items.slice(0, 12).map(b => `- ${b.title} (${b.publishedAt || 'date n/a'}): ${b.sessions} sessions · ${b.cartAdds} add-to-cart · ${b.completed} orders`).join('\n') || 'no blog sessions') + `\nTotals: ${blog.totals.sessions || 0} sessions · ${blog.totals.completed || 0} orders across ${blog.totals.articles || 0} articles`}
+BLOG ARTICLES (Shopify sessions that started on the article; blog home / tag pages marked):
+${blog.status !== 'ok' ? 'unavailable' : (blog.items.slice(0, 12).map(b => `- ${b.title}${b.kind && b.kind !== 'article' ? ` [${b.kind === 'index' ? 'blog home' : 'tag page'}]` : ''} (${b.publishedAt || 'date n/a'}): ${b.sessions} sessions · ${b.cartAdds} add-to-cart · ${b.completed} orders\n   image: ${b.imageUrl || 'none'}\n   link: ${b.url}`).join('\n') || 'no blog sessions') + `\nTotals: ${blog.totals.sessions || 0} sessions · ${blog.totals.completed || 0} orders · ${blog.totals.articles || 0} articles`}
 
 UNPAID SITE SESSIONS REFERRED BY: Pinterest ${st?.Pinterest?.sessions ?? 0} (${st?.Pinterest?.completed ?? 0} orders) · Instagram ${st?.Instagram?.sessions ?? 0} (${st?.Instagram?.completed ?? 0} orders). Many in-app taps hide the referrer, so this is a floor.`;
   }
