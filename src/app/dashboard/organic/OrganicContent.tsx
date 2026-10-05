@@ -191,7 +191,7 @@ export default function OrganicContent() {
             <Card className="mb-6">
               <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
                 <h3 className="text-sm font-bold text-gray-800">Instagram Posts &amp; Reels</h3>
-                <p className="text-[11px] text-gray-400">Posts with activity in this period · reach, likes, saves, comments, shares are Instagram&apos;s own counts</p>
+                <p className="text-[11px] text-gray-400">Posts and reels published in this period · reach, likes, saves, comments, shares, views are Instagram&apos;s own lifetime counts for each post</p>
               </div>
               <PostGrid block={ig} sorts={IG_SORTS} ratio="square" emptyText="No Instagram post activity in this period."
                 metricDefs={[{ key: 'reach', label: 'Reach' }, { key: 'likes', label: 'Likes' }, { key: 'saves', label: 'Saves' }, { key: 'comments', label: 'Comments' }, { key: 'shares', label: 'Shares' }, { key: 'views', label: 'Views' }]} />
