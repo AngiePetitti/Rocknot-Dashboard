@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { windsorOrganicRows, PINTEREST_ORGANIC_FIELDSETS, INSTAGRAM_FIELDSETS, fetchArticlesRaw, fetchArticlesFromFeed } from '@/src/lib/organic';
+import { windsorOrganicRows, PINTEREST_ORGANIC_FIELDSETS, INSTAGRAM_FIELDSETS, fetchArticlesRaw, fetchArticlesFromFeed, fetchOgImages } from '@/src/lib/organic';
 import { shopifyql } from '@/src/lib/shopifyql';
 import { windsorAccount } from '@/src/lib/client';
 import { todayPst, addDays } from '@/src/lib/timeframes';
@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
   out.pinterestOrganic = { notConnected: pin.notConnected, fieldSet: pin.fieldSet, rowCount: pin.rows?.length ?? 0, attempts: pin.attempts };
   out.instagram = { notConnected: ig.notConnected, fieldSet: ig.fieldSet, rowCount: ig.rows?.length ?? 0, attempts: ig.attempts };
   out.shopifyArticles = articles;
+  out.ogImageProbe = await fetchOgImages(['/blogs/news/the-most-comfortable-wedding-shoes-that-brides-actually-wear-all-day']).then(m => Array.from(m.entries())).catch(e => ({ error: String(e) }));
   out.blogFeedArticles = await fetchArticlesFromFeed(['news', 'press']).then(m => ({ count: m.size, sample: Array.from(m.entries()).slice(0, 5).map(([path, a]) => ({ path, title: a.title, image: Boolean(a.imageUrl), publishedAt: a.publishedAt })) })).catch(e => ({ error: String(e) }));
   return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
 }

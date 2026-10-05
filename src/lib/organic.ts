@@ -290,6 +290,30 @@ export async function fetchArticlesFromFeed(blogHandles: string[]): Promise<Map<
   return out;
 }
 
+/**
+ * Cover image for articles the feed couldn't give one: the article page's
+ * og:image (the featured image Shopify themes put in the share tags).
+ * Only for the articles actually shown; cached a day; a handful at a time.
+ */
+export async function fetchOgImages(paths: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const domain = getClient().siteDomain;
+  const batch = 6;
+  for (let i = 0; i < paths.length; i += batch) {
+    await Promise.all(paths.slice(i, i + batch).map(async path => {
+      try {
+        const res = await fetch(`https://${domain}${path}`, { next: { revalidate: 86400 }, signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'Mozilla/5.0 (A6 Dashboard)' } });
+        if (!res.ok) return;
+        const html = (await res.text()).slice(0, 200000);
+        const m = html.match(/<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i)
+          || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i);
+        if (m) out.set(path, m[1].startsWith('//') ? `https:${m[1]}` : m[1]);
+      } catch { /* no image for this one */ }
+    }));
+  }
+  return out;
+}
+
 export async function fetchBlogPerformance(from: string, to: string): Promise<SourceBlock<BlogPost>> {
   if (!shopifyConfigured()) return { status: 'not_connected', items: [], totals: {} };
   try {
@@ -335,6 +359,12 @@ export async function fetchBlogPerformance(from: string, to: string): Promise<So
     }
     const items = Array.from(byPath.values()).sort((a, b) => b.sessions - a.sessions);
     const articleItems = items.filter(b => b.kind === 'article');
+    // Fill missing covers from the article pages (top 30 shown articles).
+    const needImg = articleItems.filter(b => !b.imageUrl).slice(0, 30).map(b => b.path);
+    if (needImg.length) {
+      const og = await fetchOgImages(needImg);
+      for (const b of articleItems) if (!b.imageUrl && og.get(b.path)) b.imageUrl = og.get(b.path)!;
+    }
     const totals = {
       sessions: items.reduce((s, b) => s + b.sessions, 0),
       cartAdds: items.reduce((s, b) => s + b.cartAdds, 0),
