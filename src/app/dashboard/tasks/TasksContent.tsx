@@ -79,6 +79,7 @@ export default function TasksContent() {
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [briefFor, setBriefFor] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [editDescFor, setEditDescFor] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<TaskStatus | null>(null);
@@ -349,6 +350,16 @@ export default function TasksContent() {
                         <button onClick={() => setExpanded(isOpen ? null : t.id)} className="text-left flex-1">
                           <p className={`text-sm font-semibold ${t.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{t.title}</p>
                         </button>
+                        {t.description && (
+                          <button
+                            onClick={() => setBriefFor(t.id)}
+                            title="Open full brief"
+                            aria-label="Open full brief"
+                            className="text-gray-300 hover:text-violet-600 p-0.5 shrink-0 text-sm leading-none"
+                          >
+                            ⤢
+                          </button>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 mt-1.5 pl-4 flex-wrap">
                         {t.assignee && (
@@ -500,9 +511,146 @@ export default function TasksContent() {
       </div>
 
       <p className="text-[11px] text-gray-400 mt-4">
-        Drag cards between columns (or use the move buttons on mobile). Tap a title to edit details. Tasks are
-        shared with the whole team and saved to your Sheet.
+        Drag cards between columns (or use the move buttons on mobile). Tap a title to edit details, or ⤢ to open
+        the full campaign brief. Tasks are shared with the whole team and saved to your Sheet.
       </p>
+
+      {/* ── Full-brief view: a wide READING layout for design/campaign tasks.
+            The brief renders as a document — headings, labeled fields, prose —
+            not as a checklist. Only lines someone explicitly wrote as
+            checkboxes ("[ ]" / "[x]") get a toggle. ── */}
+      {briefFor && (() => {
+        const t = tasks.find(x => x.id === briefFor);
+        if (!t) return null;
+        const due = dueMeta(t.dueDate, t.status);
+        const desc = t.description || '';
+        const CHECKBOX_RE = /^\[( |x)\]\s?/i;
+        const lines = desc.split('\n').map((raw, lineIdx) => ({ raw, text: raw.trim(), lineIdx }));
+        const checkboxCount = lines.filter(l => CHECKBOX_RE.test(l.text)).length;
+        const checkedCount = lines.filter(l => /^\[x\]/i.test(l.text)).length;
+        const toggleBox = (lineIdx: number) => {
+          const all = desc.split('\n');
+          const s = (all[lineIdx] ?? '').trim();
+          all[lineIdx] = /^\[x\]/i.test(s) ? s.replace(/^\[x\]\s?/i, '[ ] ') : s.replace(/^\[ \]\s?/, '[x] ');
+          updateTask(t.id, { description: all.join('\n') });
+        };
+        // Section headings: an ALL-CAPS line ("BODY", "CTA: SHOP…") or a
+        // known brief label. "Label: content" on one line renders as a bold
+        // inline label instead.
+        const isHeading = (s: string) => /^[A-Z0-9 ()&/™:'-]{3,60}$/.test(s) && s === s.toUpperCase();
+        const labelMatch = (s: string) => s.match(/^(subject( line)?|preview( text)?|hook|angle|format( note)?s?|cta( button)?|products?( \(.*\))?|list|audience|send time|notes?)\s*:\s*(.+)/i);
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-black/40 flex items-start md:items-center justify-center p-3 md:p-8 overflow-y-auto"
+            onClick={() => setBriefFor(null)}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-2xl my-6 md:my-0 max-h-[90dvh] flex flex-col"
+            >
+              <div className="flex items-start gap-3 px-5 py-4 border-b border-gray-100">
+                <span className="mt-1.5 w-2.5 h-2.5 rounded-full shrink-0" style={{ background: PRIORITY_META[t.priority].dot }} />
+                <div className="flex-1 min-w-0">
+                  <h2 className={`text-base font-bold ${t.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{t.title}</h2>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    {t.assignee && <span className="text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-100 rounded-full px-2 py-0.5">{t.assignee}</span>}
+                    {due && <span className={`text-[11px] ${due.cls}`}>📅 {due.text}</span>}
+                    <span className="text-[11px] text-gray-400 capitalize">{t.status.replace('_', ' ')}</span>
+                    {checkboxCount > 0 && (
+                      <span className="text-[11px] font-semibold text-gray-400">☑ {checkedCount}/{checkboxCount}</span>
+                    )}
+                  </div>
+                </div>
+                <button onClick={() => setBriefFor(null)} aria-label="Close" className="text-gray-300 hover:text-gray-600 p-1">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 2L14 14M14 2L2 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                </button>
+              </div>
+              <div className="px-5 py-4 overflow-y-auto">
+                {desc.trim() ? (() => {
+                  // Campaign-brief mode when the text has document structure
+                  // (headings or "Subject:" style labels); otherwise it's a
+                  // plain task and every line stays a toggleable to-do,
+                  // matching the board card.
+                  const isDocument = lines.some(l => l.text && (isHeading(l.text) || labelMatch(l.text)));
+                  if (!isDocument) {
+                    return (
+                      <div className="space-y-1">
+                        {lines.filter(l => l.text).map(l => {
+                          const checked = /^\[x\]/i.test(l.text);
+                          return (
+                            <button
+                              key={l.lineIdx}
+                              onClick={() => updateTask(t.id, { description: toggleChecklistLine(desc, l.lineIdx) })}
+                              className="flex items-start gap-2 text-left w-full group"
+                            >
+                              <span className={`mt-1 w-3.5 h-3.5 shrink-0 rounded border text-[9px] font-bold flex items-center justify-center ${checked ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 bg-white group-hover:border-violet-400'}`}>
+                                {checked ? '✓' : ''}
+                              </span>
+                              <span className={`text-sm leading-relaxed flex-1 ${checked ? 'text-gray-300 line-through' : 'text-gray-700'}`}>{l.text.replace(CHECKED_RE, '')}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="space-y-2">
+                      {lines.map(l => {
+                        if (!l.text) return null;
+                        if (CHECKBOX_RE.test(l.text)) {
+                          const checked = /^\[x\]/i.test(l.text);
+                          const label = l.text.replace(CHECKBOX_RE, '');
+                          return (
+                            <button key={l.lineIdx} onClick={() => toggleBox(l.lineIdx)} className="flex items-start gap-2 text-left w-full group">
+                              <span className={`mt-1 w-3.5 h-3.5 shrink-0 rounded border text-[9px] font-bold flex items-center justify-center ${checked ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 bg-white group-hover:border-violet-400'}`}>
+                                {checked ? '✓' : ''}
+                              </span>
+                              <span className={`text-sm leading-relaxed flex-1 ${checked ? 'text-gray-300 line-through' : 'text-gray-700'}`}>{label}</span>
+                            </button>
+                          );
+                        }
+                        if (isHeading(l.text)) {
+                          return <p key={l.lineIdx} className="text-[11px] font-bold text-gray-400 uppercase tracking-wide pt-4 first:pt-0">{l.text.replace(/:$/, '')}</p>;
+                        }
+                        const lm = labelMatch(l.text);
+                        if (lm) {
+                          const label = l.text.slice(0, l.text.indexOf(':'));
+                          const content = l.text.slice(l.text.indexOf(':') + 1).trim();
+                          return (
+                            <p key={l.lineIdx} className="text-sm leading-relaxed text-gray-700">
+                              <span className="font-bold text-gray-900">{label}:</span> {content}
+                            </p>
+                          );
+                        }
+                        return <p key={l.lineIdx} className="text-sm leading-relaxed text-gray-700 whitespace-pre-wrap">{l.raw}</p>;
+                      })}
+                    </div>
+                  );
+                })() : (
+                  <p className="text-sm text-gray-400">No details on this task yet.</p>
+                )}
+                {t.link && (
+                  <a href={t.link} target="_blank" rel="noopener noreferrer" className="inline-block mt-4 text-xs font-semibold text-violet-600 hover:text-violet-800">Open linked brief ↗</a>
+                )}
+              </div>
+              <div className="px-5 py-3 border-t border-gray-100 flex items-center gap-3">
+                <button
+                  onClick={() => { setExpanded(t.id); setBriefFor(null); }}
+                  className="text-xs font-semibold text-violet-600"
+                >
+                  ✏️ Edit on board
+                </button>
+                <button
+                  onClick={() => { if (confirm('Delete this task?')) { deleteTask(t.id); setBriefFor(null); } }}
+                  className="text-xs font-semibold text-gray-400 hover:text-red-500 ml-auto"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

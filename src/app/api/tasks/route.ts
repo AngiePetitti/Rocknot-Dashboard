@@ -52,7 +52,7 @@ async function requireUser(): Promise<{ author?: string } | NextResponse> {
 function clean(input: Record<string, unknown>): Partial<Task> {
   const out: Partial<Task> = {};
   if (typeof input.title === 'string') out.title = input.title.slice(0, 200).trim();
-  if (typeof input.description === 'string') out.description = input.description.slice(0, 2000).trim();
+  if (typeof input.description === 'string') out.description = input.description.slice(0, 8000).trim();
   if (typeof input.assignee === 'string') out.assignee = input.assignee.slice(0, 60).trim();
   if (typeof input.dueDate === 'string' && (/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate) || input.dueDate === '')) out.dueDate = input.dueDate;
   if (PRIORITIES.includes(input.priority as typeof PRIORITIES[number])) out.priority = input.priority as Task['priority'];

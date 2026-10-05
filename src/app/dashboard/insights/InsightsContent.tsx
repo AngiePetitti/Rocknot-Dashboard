@@ -275,6 +275,9 @@ export default function InsightsContent() {
         </button>
       </Card>
 
+      {/* ── Brand brief — what Cleo knows about the brand (editable) ── */}
+      <BrandBriefCard />
+
       {/* ── Saved reports (private to this login) ── */}
       {savedReports.length > 0 && (
         <Card accentColor="#86efac" className="mb-5">
@@ -443,5 +446,92 @@ export default function InsightsContent() {
         </p>
       )}
     </div>
+  );
+}
+
+// What Cleo knows about the brand — voice, audience, hard rules. Editable in
+// place (admin) so wrong assumptions ("clutch = bridal", invented restock
+// premises) can be corrected once and stick for chat, reports, and the
+// retention plan alike.
+function BrandBriefCard() {
+  const [brief, setBrief] = useState('');
+  const [draft, setDraft] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/insights/brand', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (typeof d?.brief === 'string') setBrief(d.brief); })
+      .catch(() => {});
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    setNote(null);
+    try {
+      const res = await fetch('/api/insights/brand', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brief: draft }),
+      });
+      const d = await res.json();
+      if (d?.ok) { setBrief(draft.trim()); setEditing(false); setNote('Saved — Cleo uses this from her next answer.'); }
+      else setNote(d?.error || 'Save failed');
+    } catch (e) {
+      setNote(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!brief) return null;
+  return (
+    <Card accentColor="#f9a8d4" className="mb-5">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-base">🎸</span>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-sm font-bold text-gray-700">Brand brief — what Cleo knows</h2>
+          <p className="text-xs text-gray-400">Every campaign, copy line, and report Cleo writes follows this. Edit it whenever she gets the brand wrong.</p>
+        </div>
+        {!editing && (
+          <button
+            onClick={() => { setDraft(brief); setEditing(true); setExpanded(true); setNote(null); }}
+            className="text-xs font-semibold text-violet-600 whitespace-nowrap"
+          >
+            ✏️ Edit
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <div className="mt-2">
+          <textarea
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            rows={14}
+            className="w-full text-xs text-gray-700 border border-gray-200 rounded-xl p-3 font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-violet-200"
+          />
+          <div className="flex items-center gap-2 mt-2">
+            <button onClick={save} disabled={saving} className="text-xs font-semibold bg-violet-600 text-white rounded-lg px-3 py-1.5 disabled:opacity-50">
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button onClick={() => { setEditing(false); setNote(null); }} className="text-xs font-semibold text-gray-400">Cancel</button>
+            {note && <span className="text-[11px] text-red-500">{note}</span>}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-1">
+          <pre className={`text-[11px] text-gray-500 whitespace-pre-wrap font-sans leading-relaxed ${expanded ? '' : 'max-h-20 overflow-hidden'}`}>{brief}</pre>
+          <div className="flex items-center gap-3 mt-1">
+            <button onClick={() => setExpanded(x => !x)} className="text-[11px] font-semibold text-gray-400">
+              {expanded ? 'Show less ▲' : 'Show all ▼'}
+            </button>
+            {note && <span className="text-[11px] text-green-600">{note}</span>}
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

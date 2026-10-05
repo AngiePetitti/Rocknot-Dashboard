@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { friendlyAiError } from '@/src/lib/aiError';
 import Anthropic from '@anthropic-ai/sdk';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
@@ -60,7 +61,7 @@ export async function PATCH(req: NextRequest) {
     await saveLarge('retention_plan', JSON.stringify(payload));
     return NextResponse.json({ ok: true, skippedKeys: payload.skippedKeys });
   } catch (e) {
-    return NextResponse.json({ error: String(e instanceof Error ? e.message : e) }, { status: 500 });
+    return NextResponse.json({ error: friendlyAiError(e) }, { status: 500 });
   }
 }
 
@@ -101,12 +102,24 @@ Already scheduled/drafted (do NOT duplicate these): ${d.scheduled.map(c => `${c.
   const brand = getClient();
   const founderLine = brand.brand.founder ? ` Founder ${brand.brand.founder.name} is the face of the brand.` : '';
   const aovLine = brand.brand.aov ? ` AOV ~$${brand.brand.aov}.` : '';
+  const { getBrandBrief } = await import('@/src/lib/brandBrief');
+  const brandBrief = await getBrandBrief().catch(() => '');
+  const { fetchCatalog, catalogText } = await import('@/src/lib/catalog');
+  const catalog = catalogText(await fetchCatalog().catch(() => []));
   const prompt = `You are ${brand.analyst.name}, ${brand.name}'s retention marketing strategist. ${brand.brand.description}${founderLine}${aovLine}
+
+BRAND BRIEF (who the brand is, who buys, voice, and hard rules — every campaign must follow it; never invent premises like restocks, sell-outs, or occasions the data doesn't show):
+${brandBrief || '(none)'}
+
+PRODUCT CATALOG (the ONLY real products — every product, variant, color, and feature mentioned in any campaign MUST come from this list, named exactly as it appears here; never invent product names, finishes, straps, or capabilities. Anything marked SOLD OUT or OUT OF STOCK must NOT be featured, paired, listed as a shade option, or mentioned at all. Prices are internal reference only — never print a price in the copy unless the operator asked):
+${catalog}
 
 BRAND GUIDELINES (ALL copy voice and every design brief must follow these — never invent brand colors, fonts, or aesthetic descriptors that are not in this section. If it is empty, write design briefs that instruct the designer to pull visual identity from ${brand.siteDomain} and note the guidelines doc is pending):
 ${guidelines || '(none uploaded yet)'}
 
 Today is ${today}. Build the next 30 days of the Email/SMS campaign calendar with COMPLETE briefs a designer can execute without asking questions.
+
+COPY ENERGY: staying factual does not mean sounding flat. Every subject line and body must sell — teasers create genuine anticipation for a real launch (curiosity, attitude, a reason to watch the inbox), launch emails feel like an event. Never open with announcement filler ("Something new is coming", "Here's your heads up", "Stay tuned"). If a draft would read fine coming from a bank, rewrite it.
 
 UPCOMING LAUNCHES & PROMOTIONS (build the calendar around these):
 ${upcoming || 'None on the calendar — use best-practice cadence.'}
@@ -139,6 +152,6 @@ For SMS, subjectLines holds the 2-3 message variants (with emoji, under 160 char
     await saveLarge('retention_plan', JSON.stringify(payload));
     return NextResponse.json(payload);
   } catch (e) {
-    return NextResponse.json({ error: String(e instanceof Error ? e.message : e) }, { status: 500 });
+    return NextResponse.json({ error: friendlyAiError(e) }, { status: 500 });
   }
 }

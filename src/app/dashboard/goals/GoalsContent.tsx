@@ -55,6 +55,7 @@ export default function GoalsContent() {
   const [target, setTarget] = useState<number>(client.goals.defaultAnnualTarget);
   const [targetTouched, setTargetTouched] = useState(false);
   const [actuals, setActuals] = useState<Record<string, MonthActual>>({});
+  const [actualsError, setActualsError] = useState<string | null>(null);
   const [lastYear, setLastYear] = useState<Record<string, MonthActual>>({});
   const [aov, setAov] = useState<number>(0);
   const [stockRetail, setStockRetail] = useState<number | null>(null);
@@ -90,15 +91,43 @@ export default function GoalsContent() {
       })
       .catch(() => {});
 
-    cachedJson<{ source?: string; metrics?: { aov?: number }; revenueData?: { date: string; revenue: number; netSales?: number; adSpend: number }[] }>(
-      `/api/windsor?tf=ytd`,
-      d => {
-        if (d.source === 'windsor_live' || d.source === 'bigquery_live') {
-          setActuals(byMonth(d.revenueData || []));
-          if (d.metrics?.aov) setAov(d.metrics.aov);
+    // Actuals: one YTD call normally, but a 9+ month query can time out on
+    // the server — when it fails (or comes back empty), fall back to
+    // quarter-sized chunks and merge. A silent failure here used to blank
+    // the whole Actual/Forecast column AND corrupt auto-plan's math.
+    (async () => {
+      type Day = { date: string; revenue: number; netSales?: number; adSpend: number };
+      const tryFetch = async (url: string): Promise<{ metrics?: { aov?: number }; revenueData: Day[] } | null> => {
+        try {
+          const r = await fetch(url, { cache: 'no-store' });
+          const d = await r.json();
+          return Array.isArray(d?.revenueData) && d.revenueData.length && d.source !== 'error' ? d : null;
+        } catch { return null; }
+      };
+      let d = await tryFetch('/api/windsor?tf=ytd');
+      if (!d) {
+        const t = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+        const chunks: [string, string][] = [
+          [`${year}-01-01`, `${year}-03-31`],
+          [`${year}-04-01`, `${year}-06-30`],
+          [`${year}-07-01`, `${year}-09-30`],
+          [`${year}-10-01`, `${year}-12-31`],
+        ].filter(([from]) => from <= t) as [string, string][];
+        const merged: Day[] = [];
+        for (const [from, to] of chunks) {
+          const q = await tryFetch(`/api/windsor?tf=custom&date_from=${from}&date_to=${to > t ? t : to}`);
+          if (q) merged.push(...q.revenueData);
         }
+        d = merged.length ? { revenueData: merged } : null;
       }
-    );
+      if (d) {
+        setActuals(byMonth(d.revenueData));
+        if (d.metrics?.aov) setAov(d.metrics.aov);
+        setActualsError(null);
+      } else {
+        setActualsError('Monthly actuals could not be loaded right now — the Actual column and auto-plan need them. Refresh in a minute.');
+      }
+    })();
     cachedJson<{ source?: string; revenueData?: { date: string; revenue: number; netSales?: number; adSpend: number }[] }>(
       `/api/windsor?tf=custom&date_from=${year - 1}-01-01&date_to=${year - 1}-12-31`,
       d => {
@@ -133,16 +162,33 @@ export default function GoalsContent() {
 
   // ── Auto-plan: distribute what's left of the annual target across the
   //    remaining months, weighted by last year's seasonality ──
-  function autoPlan() {
+  function autoPlan(interactive = false) {
     const completed = months.filter((_, i) => i + 1 < curMonth);
     const done = completed.reduce((s, k) => s + (actuals[k]?.revenue || 0), 0);
     const remainingMonths = months.filter((_, i) => i + 1 >= curMonth);
 
+    // Replanning against the target only works if we know what the past
+    // months actually did — with actuals missing, "remaining" would be the
+    // whole target and every month would get an absurd goal.
+    if (interactive && completed.length > 0 && done === 0) {
+      alert('Monthly actuals haven’t loaded yet, and auto-plan needs them to know how much of the target is left. Pull to refresh (or try again in a minute) and re-tap Auto-plan.');
+      return;
+    }
+
     // Months you edited by hand are pinned — auto-plan works AROUND them:
     // their goals are subtracted from the target and only the unpinned
     // months get redistributed.
-    const pinnedMonths = remainingMonths.filter(k => goals[k]?.pinned);
-    const openMonths = remainingMonths.filter(k => !goals[k]?.pinned);
+    let pinnedMonths = remainingMonths.filter(k => goals[k]?.pinned);
+    let openMonths = remainingMonths.filter(k => !goals[k]?.pinned);
+    // When EVERY remaining month is pinned (a fully hand-entered plan),
+    // tapping Auto-plan used to do literally nothing. Now it asks, then
+    // replans the whole remainder.
+    if (!openMonths.length) {
+      if (!interactive) return; // silent auto-rebalance after an edit — never override pins
+      if (!confirm('Every remaining month is pinned from hand edits. Replan ALL remaining months from the annual target (your current numbers will be replaced)?')) return;
+      openMonths = remainingMonths;
+      pinnedMonths = [];
+    }
     const pinnedSum = pinnedMonths.reduce((s, k) => s + (goals[k]?.revenueGoal || 0), 0);
     const remaining = Math.max(0, target - done - pinnedSum);
 
@@ -340,7 +386,7 @@ export default function GoalsContent() {
           </div>
           {isAdmin && (
             <button
-              onClick={autoPlan}
+              onClick={() => autoPlan(true)}
               className="px-4 py-2.5 bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 text-sm font-semibold rounded-xl transition-colors"
             >
               ✨ Auto-plan remaining months
@@ -485,6 +531,11 @@ export default function GoalsContent() {
         <p className="text-xs text-gray-400 mb-4">
           All figures are <b>net sales</b> (after discounts &amp; returns, excl. taxes/shipping) — same basis as the annual target. Past months show actuals. {MONTH_NAMES[curMonth - 1]} compares its month-end forecast to goal. Future months are the plan{isAdmin ? ' — tap a number to edit, then Save' : ''}.
         </p>
+        {actualsError && (
+          <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-3 text-xs text-amber-700">
+            ⚠ {actualsError}
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[640px]">
             <thead>
@@ -525,7 +576,12 @@ export default function GoalsContent() {
                       ) : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="py-2.5 pr-4 whitespace-nowrap">
-                      {isAdmin ? (
+                      {/* A finished month's goal is history — hit or missed,
+                          it greys out and locks. The % and ± columns keep
+                          telling the story; only the future stays editable. */}
+                      {isPast ? (
+                        <span className="text-gray-300">{g?.revenueGoal ? formatCurrency(g.revenueGoal) : '—'}</span>
+                      ) : isAdmin ? (
                         <span className="inline-flex items-center gap-1">
                           <input
                             type="number"
@@ -562,7 +618,9 @@ export default function GoalsContent() {
                       ) : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="py-2.5 pr-4 whitespace-nowrap">
-                      {isAdmin ? (
+                      {isPast ? (
+                        <span className="text-gray-300">{g?.adBudget ? formatCurrency(g.adBudget) : '—'}</span>
+                      ) : isAdmin ? (
                         <input
                           type="number"
                           value={g?.adBudget || ''}

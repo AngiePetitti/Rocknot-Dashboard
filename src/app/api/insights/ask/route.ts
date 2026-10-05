@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { friendlyAiError } from '@/src/lib/aiError';
 import Anthropic from '@anthropic-ai/sdk';
 import { ANALYST_TOOLS, execTool, makeFetcher } from '@/src/lib/analystTools';
 import { getClient } from '@/src/lib/client';
@@ -38,7 +39,7 @@ const CREATE_REPORT_TOOL: Anthropic.Tool = {
   input_schema: {
     type: 'object',
     properties: {
-      focus: { type: 'string', description: 'One or two sentences describing exactly what the report should cover — topic, date range(s), comparisons, products.' },
+      focus: { type: 'string', description: 'A complete brief for the report builder (it does NOT see this chat reliably — everything it must honor goes here): topic, date range(s), comparisons, products, AND every standing instruction or correction the operator has given that applies (naming rules, required content per item, things to include for EVERY entry). If the operator asked for content deliverables (e.g. email campaign copy), say explicitly that each item needs full ready-to-use copy, and list the items.' },
     },
     required: ['focus'],
   },
@@ -55,9 +56,12 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
+  // Keep a long window: standing instructions ("always call it Statement
+  // Strings™ Hoodie") arrive early in a session, and trimming them out made
+  // Cleo "forget" corrections the operator already gave.
   const history = (body.messages ?? [])
     .filter(mm => (mm.role === 'user' || mm.role === 'assistant') && typeof mm.content === 'string' && (mm.content.trim() || (mm.images && mm.images.length)))
-    .slice(-16);
+    .slice(-80);
   if (!history.length || history[history.length - 1].role !== 'user') {
     return NextResponse.json({ error: 'Send at least one user message' }, { status: 400 });
   }
@@ -66,7 +70,12 @@ export async function POST(req: NextRequest) {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 
   const brand = getClient();
+  const { getBrandBrief } = await import('@/src/lib/brandBrief');
+  const brandBrief = await getBrandBrief().catch(() => brand.brand.description);
   const system = `You are ${brand.analyst.name}, the in-house AI data analyst for ${brand.name}. ${brand.brand.description} Today's date is ${today}.
+
+BRAND BRIEF — read carefully; every piece of copy, campaign idea, or brief you write must follow it, especially the hard rules:
+${brandBrief}
 
 You answer the operator's questions by QUERYING the store's data with the tools provided. The operator may ATTACH SCREENSHOTS (an ads manager, Shopify, an email or creative, a Slack thread, a spreadsheet). When one is attached: read every number and label off it carefully, say in one line what you are looking at, cross-check anything checkable against the live data with your tools, then give concrete next steps — what to change, where, and what to watch. If the image is unreadable or missing what you need, say exactly what to send instead. The question determines what you fetch — derive the exact date ranges it implies (e.g. "last year vs this year month over month" → fetch each year's window with monthly granularity; "last week" → that week daily). Use yesterday as the end date for current periods, since today is partial. Fetch the minimum needed; use monthly granularity for ranges over ~3 months.
 
@@ -83,6 +92,10 @@ Format for fast reading on a phone (GitHub-flavored markdown):
 - Use a compact markdown table for any month-over-month, period, or product comparison (short column headers, one metric family per table). Never list months inline in a sentence.
 - Use short bullets for everything else; **bold** the numbers that matter.
 - Keep the whole answer tight — no filler, no headers, no closing pleasantries.
+
+Product truth: before writing ANY copy, campaign, or brief that mentions a product, call get_product_catalog and use only product names, variants, colors, and features that appear there (or that the operator stated), and NEVER feature or mention anything the catalog marks SOLD OUT or OUT OF STOCK — customers clicking to a dead product page is worse than no email. Getting a product's name or features wrong destroys trust in everything else.
+
+Standing instructions: when the operator gives a rule or correction earlier in the conversation ("always use this product name", "every campaign must include full copy"), treat it as binding for the rest of the session — apply it without being reminded, and carry it into any create_report focus.
 
 If the operator asks for a report / PDF / shareable document, call create_report with a precise focus, then confirm in one sentence that the report is being built (it opens in a new tab and lands in their Saved reports) — don't rewrite the analysis in the chat.`;
 
@@ -117,7 +130,7 @@ If the operator asks for a report / PDF / shareable document, call create_report
         // load-modify-save, so parallel writes clobber each other (15 task
         // creates in one turn once collapsed to 5 — every call "succeeded").
         // Reads stay parallel for speed.
-        const WRITE_TOOLS = new Set(['create_task']);
+        const WRITE_TOOLS = new Set(['create_task', 'update_task', 'delete_task']);
         const runOne = async (tu: Anthropic.ToolUseBlock): Promise<Anthropic.ToolResultBlockParam> => {
           if (tu.name === 'create_report') {
             const focus = String((tu.input as { focus?: string })?.focus || '').trim();
@@ -153,6 +166,6 @@ If the operator asks for a report / PDF / shareable document, call create_report
     if (!answer) answer = 'I ran out of analysis steps before finishing — try asking a more specific question.';
     return NextResponse.json({ ok: true, answer, ...(reportFocus ? { reportFocus } : {}) });
   } catch (err) {
-    return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });
+    return NextResponse.json({ error: friendlyAiError(err) }, { status: 500 });
   }
 }
