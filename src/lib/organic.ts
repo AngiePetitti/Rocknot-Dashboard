@@ -23,6 +23,8 @@ export interface OrganicPost {
 
 export interface BlogPost {
   path: string;
+  /** article = a post; index = a blog's home page; tag = a /tagged/ listing. */
+  kind: 'article' | 'index' | 'tag';
   title: string;
   imageUrl: string;
   url: string;
@@ -223,7 +225,7 @@ export async function fetchArticlesRaw(): Promise<{ nodes: ArticleNode[]; errors
     const nodes = (a.json?.data?.articles?.nodes || []) as ArticleNode[];
     if (nodes.length || !a.errors.length) return { nodes, errors: a.errors, status: a.status };
     // Fallback: walk blogs → articles.
-    const b = await run(`{ blogs(first: 20) { nodes { handle articles(first: 100, sortKey: PUBLISHED_AT, reverse: true) {
+    const b = await run(`{ blogs(first: 20) { nodes { handle articles(first: 250) {
       nodes { title handle publishedAt image { url(transform: { maxWidth: 400 }) } } } } } }`);
     const blogs = (b.json?.data?.blogs?.nodes || []) as Array<{ handle: string; articles: { nodes: Array<Omit<ArticleNode, 'blog'>> } }>;
     const flat: ArticleNode[] = [];
@@ -248,8 +250,11 @@ export async function fetchArticles(): Promise<Map<string, ArticleMeta>> {
 export async function fetchBlogPerformance(from: string, to: string): Promise<SourceBlock<BlogPost>> {
   if (!shopifyConfigured()) return { status: 'not_connected', items: [], totals: {} };
   try {
+    // Blog articles sit in the long tail of landing pages, so pull wide;
+    // fall back to a smaller page if Shopify refuses the limit.
+    const landingQl = (limit: number) => `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY landing_page_path SINCE ${from} UNTIL ${to} ORDER BY sessions DESC LIMIT ${limit}`;
     const [rows, articles] = await Promise.all([
-      shopifyql(`FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY landing_page_path SINCE ${from} UNTIL ${to} ORDER BY sessions DESC LIMIT 1000`, { timeoutMs: 20000 }),
+      shopifyql(landingQl(5000), { timeoutMs: 25000 }).catch(() => shopifyql(landingQl(1000), { timeoutMs: 20000 })),
       fetchArticles(),
     ]);
     const byPath = new Map<string, BlogPost>();
@@ -258,10 +263,15 @@ export async function fetchBlogPerformance(from: string, to: string): Promise<So
       if (!/^\/blogs\//.test(raw)) continue;
       // Strip query strings / trailing slashes so one article is one row.
       const path = raw.split('?')[0].replace(/\/+$/, '');
+      const parts = path.split('/').filter(Boolean); // ['blogs', blog, article?]
+      const kind: BlogPost['kind'] = parts.length <= 2 ? 'index' : parts[2] === 'tagged' ? 'tag' : 'article';
       const meta = articles.get(path);
+      const fallbackTitle = kind === 'index' ? `Blog home · ${parts[1] || ''}`
+        : kind === 'tag' ? `Tag page · ${(parts[3] || '').replace(/-/g, ' ')}`
+        : (parts[2] || '').replace(/-/g, ' ');
       const cur = byPath.get(path) || {
-        path,
-        title: meta?.title || path.replace(/^\/blogs\/[^/]+\//, '').replace(/-/g, ' '),
+        path, kind,
+        title: meta?.title || fallbackTitle,
         imageUrl: meta?.imageUrl || '',
         url: `https://${getClient().siteDomain}${path}`,
         publishedAt: meta?.publishedAt || '',
@@ -270,12 +280,15 @@ export async function fetchBlogPerformance(from: string, to: string): Promise<So
       cur.sessions += num(r.sessions); cur.cartAdds += num(r.sessions_with_cart_additions); cur.completed += num(r.sessions_that_completed_checkout);
       byPath.set(path, cur);
     }
-    const items = Array.from(byPath.values()).filter(b => !/^\/blogs\/[^/]+$/.test(b.path)).sort((a, b) => b.sessions - a.sessions);
+    const items = Array.from(byPath.values()).sort((a, b) => b.sessions - a.sessions);
+    const articleItems = items.filter(b => b.kind === 'article');
     const totals = {
       sessions: items.reduce((s, b) => s + b.sessions, 0),
       cartAdds: items.reduce((s, b) => s + b.cartAdds, 0),
       completed: items.reduce((s, b) => s + b.completed, 0),
-      articles: items.length,
+      articles: articleItems.length,
+      articleSessions: articleItems.reduce((s, b) => s + b.sessions, 0),
+      articlesKnown: articles.size,
     };
     return { status: 'ok', items, totals };
   } catch (e) {
