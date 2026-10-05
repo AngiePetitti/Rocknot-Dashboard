@@ -1,4 +1,4 @@
-import { getClient } from '@/src/lib/client';
+import { getClient, marketplaces } from '@/src/lib/client';
 import type Anthropic from '@anthropic-ai/sdk';
 
 // ── Internal data access ─────────────────────────────────────────────────
@@ -38,7 +38,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_metrics',
     description:
-      'Sales & marketing metrics for any date range: revenue, orders, AOV, MER, ad spend (total and per platform), new/returning customers, conversion rate — plus a daily or monthly series of revenue/orders/adSpend/newCustomers/totalBuyers. Call this once per period you want to compare (e.g. once for last year, once for this year). Data availability varies by source; missing periods come back as zeros/N-A — report gaps honestly.',
+      'ONLINE STORE sales & marketing metrics for any date range (marketplace channels such as Nordstrom are excluded — use get_marketplace_channel for those): revenue, orders, AOV, MER, ad spend (total and per platform), new/returning customers, conversion rate — plus a daily or monthly series of revenue/orders/adSpend/newCustomers/totalBuyers. Call this once per period you want to compare (e.g. once for last year, once for this year). Data availability varies by source; missing periods come back as zeros/N-A — report gaps honestly.',
     input_schema: {
       type: 'object',
       properties: {
@@ -152,6 +152,20 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_marketplace_channel',
+    description: `Marketplace / retail-partner channel performance for a date range${marketplaces().length ? ` — this dashboard tracks: ${marketplaces().map(m => `${m.label} (key "${m.key}", Shopify sales channel "${m.shopifyChannel}", ${m.returnWindowDays}-day return window)`).join('; ')}` : ' (none configured on this dashboard)'}. Returns orders, gross, discounts, returns and return rate, net sales, AOV, customers; the online store's same figures for comparison; gross still inside the return window; daily series; breakdowns by product line, product, size and ship-to region; and economics (commission, COGS basis, contribution). IMPORTANT: every other tool's revenue figures are ONLINE STORE ONLY — marketplace sales are excluded from them and live only here. Use this whenever the question mentions ${marketplaces().map(m => m.label).join(' / ') || 'a marketplace'} or wholesale/dropship.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: `Channel key${marketplaces().length ? `: ${marketplaces().map(m => `"${m.key}"`).join(' or ')}` : ''}` },
+        date_from: { type: 'string', description: 'YYYY-MM-DD' },
+        date_to: { type: 'string', description: 'YYYY-MM-DD' },
+        compare: { type: 'boolean', description: 'Also return the preceding period of equal length' },
+      },
+      required: ['key', 'date_from', 'date_to'],
+    },
+  },
+  {
     name: 'get_organic_content',
     description: "Organic content performance for a date range (Organic Content tab): top organic Pinterest pins (impressions, saves, pin clicks, outbound clicks), top Instagram posts/reels (reach, likes, comments, saves, shares, views), blog articles by sessions started on them (with add-to-cart, orders, CVR), and unpaid site sessions referred by Pinterest / Instagram. Sources not connected say so.",
     input_schema: {
@@ -243,7 +257,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
 async function execToolInner(get: Getter, name: string, input: Record<string, unknown>, onGuard: (g: string) => void): Promise<string> {
   const from = String(input.date_from ?? '');
   const to = String(input.date_to ?? '');
-  const needsRange = ['get_metrics', 'get_top_products', 'get_ad_performance', 'get_returns', 'get_customer_intel', 'get_attribution', 'get_organic_content'].includes(name);
+  const needsRange = ['get_metrics', 'get_top_products', 'get_ad_performance', 'get_returns', 'get_customer_intel', 'get_attribution', 'get_organic_content', 'get_marketplace_channel'].includes(name);
   if (needsRange && (!DATE_RE.test(from) || !DATE_RE.test(to) || from > to)) {
     return 'Error: date_from and date_to must be YYYY-MM-DD with date_from <= date_to.';
   }
@@ -446,6 +460,43 @@ ${overlapNote}
 
 SHOPIFY ORDER REFERRER (one referrer per order; adds up to store net sales — the true "where did orders come from" split; "Direct (no referrer)" = typed the URL, bookmark, or untracked app/email click):
 ${refLines.join('\n') || 'not available (Shopify not connected)'}`;
+  }
+
+  if (name === 'get_marketplace_channel') {
+    const key = String(input.key || marketplaces()[0]?.key || '').trim();
+    if (!marketplaces().length) return 'This dashboard has no marketplace channels configured.';
+    const d = await get(`/api/channel/${encodeURIComponent(key)}?${params}${input.compare ? '&compare=true' : ''}`);
+    if (!d || d.error) return `Marketplace data unavailable for "${key}": ${d?.error || 'no response'}`;
+    type T = { orders: number; gross: number; discounts: number; returns: number; net: number; totalSales: number; aov: number; customers: number; returningCustomers: number };
+    const ch = d.channel as { label: string; shopifyChannel: string; returnWindowDays: number; commissionPct: number | null; description?: string };
+    const t = d.totals as T; const st = d.store as T;
+    const fmtT = (x: T) => `${x.orders} orders · gross $${Math.round(x.gross).toLocaleString()} · discounts $${Math.round(x.discounts).toLocaleString()} · returns $${Math.round(x.returns).toLocaleString()} (${x.gross > 0 ? Math.round((x.returns / x.gross) * 100) : 0}% of gross) · net $${Math.round(x.net).toLocaleString()} · total sales $${Math.round(x.totalSales).toLocaleString()} · AOV $${Math.round(x.aov)} · customers ${x.customers} (${x.returningCustomers} returning)`;
+    const rows = (k: string, n = 10) => ((d[k] as Array<{ label: string; orders: number; gross: number; returns: number; net: number }>) || []).slice(0, n).map(r => `- ${r.label}: ${r.orders} orders · gross $${Math.round(r.gross).toLocaleString()} · returns $${Math.round(r.returns).toLocaleString()} · net $${Math.round(r.net).toLocaleString()}`).join('\n') || 'none';
+    const ow = d.openWindow as { from: string; gross: number; orders: number } | null;
+    const eco = d.economics as { commissionPct: number | null; commission: number | null; cogsPct: number | null; cogs: number | null; contribution: number | null; contributionPct: number | null };
+    const prior = d.prior as { range: { from: string; to: string }; totals: T; store: T } | null | undefined;
+    const daily = (d.daily as Array<{ date: string; orders: number; gross: number; returns: number; net: number }>) || [];
+    const byMonth = new Map<string, { o: number; g: number; r: number; n: number }>();
+    for (const r of daily) { const k = r.date.slice(0, 7); const b = byMonth.get(k) || { o: 0, g: 0, r: 0, n: 0 }; b.o += r.orders; b.g += r.gross; b.r += r.returns; b.n += r.net; byMonth.set(k, b); }
+    const series = daily.length > 62
+      ? `Monthly (month,orders,gross,returns,net):\n${Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([k, b]) => `${k},${b.o},${Math.round(b.g)},${Math.round(b.r)},${Math.round(b.n)}`).join('\n')}`
+      : `Daily (date,orders,gross,returns,net):\n${daily.map(r => `${r.date},${r.orders},${Math.round(r.gross)},${Math.round(r.returns)},${Math.round(r.net)}`).join('\n')}`;
+    return `${ch.label.toUpperCase()} (Shopify sales channel "${ch.shopifyChannel}", ${ch.returnWindowDays}-day return window) ${from} → ${to}
+${ch.description ? ch.description + '\n' : ''}Recorded at full retail in Shopify; ${ch.commissionPct == null ? 'the partner commission is NOT in Shopify and is not yet configured, so net sales here are before commission.' : `commission ${ch.commissionPct}% is applied in economics below.`}
+
+${ch.label}: ${fmtT(t)}
+Online store, same period (for comparison): ${fmtT(st)}
+All channels net: $${Math.round(Number(d.allNet || 0)).toLocaleString()} · ${ch.label} share of net ${Number(d.allNet) > 0 ? Math.round((t.net / Number(d.allNet)) * 100) : 0}%
+${ow ? `Still inside the return window (sold since ${ow.from}): ${ow.orders} orders · $${Math.round(ow.gross).toLocaleString()} gross that can still come back.` : ''}
+Economics: commission ${eco.commission == null ? 'n/a' : `$${Math.round(eco.commission).toLocaleString()}`} · COGS ${eco.cogs == null ? 'n/a' : `$${Math.round(eco.cogs).toLocaleString()} (${eco.cogsPct}%)`} · contribution ${eco.contribution == null ? 'n/a' : `$${Math.round(eco.contribution).toLocaleString()} (${eco.contributionPct}%)`}
+${prior ? `Prior period ${prior.range.from} → ${prior.range.to}: ${fmtT(prior.totals)}` : ''}
+
+By product line:\n${rows('byLine', 6)}
+By product:\n${rows('byProduct', 10)}
+By size:\n${rows('bySize', 10)}
+By ship-to region:\n${rows('byRegion', 8)}
+
+${series}`;
   }
 
   if (name === 'get_organic_content') {

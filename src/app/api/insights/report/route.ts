@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { friendlyAiError } from '@/src/lib/aiError';
-import { getClient } from '@/src/lib/client';
+import { getClient, marketplaces } from '@/src/lib/client';
 import Anthropic from '@anthropic-ai/sdk';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
@@ -171,6 +171,8 @@ BRAND BRIEF — any copy or campaign content in the report must follow it, espec
 ${brandBrief}
 
 You have the same data tools as the chat. Re-fetch the key series behind the conversation's findings so every number and chart in the report is exact (the chat answers may be rounded). Fetch only what the report needs.
+
+MARKETPLACE CHANNELS — ${marketplaces().length ? `this dashboard tracks ${marketplaces().map(m => `${m.label} (Shopify sales channel "${m.shopifyChannel}")`).join(', ')}. Those sales are EXCLUDED from every store figure (get_metrics, products, customers, attribution) and are available ONLY through get_marketplace_channel — call it whenever the question involves ${marketplaces().map(m => m.label).join(' / ')}, wholesale or dropship, and never say that data is unavailable without calling it.` : 'none on this dashboard.'}
 
 DATES — the year is ${today.slice(0, 4)}. "September" with no year means September ${today.slice(0, 4)} (the most recent one that has happened); last year's September is only the comparison side. Every tool result starts with a date check — if it says the range is a year before today, that is the PRIOR year: fetch the current-year range too and headline that. Label every period and every chart axis with its year. A report whose headline figures come from a past year is wrong; do not ship it.
 
