@@ -68,6 +68,10 @@ function AnswerMarkdown({ text }: { text: string }) {
         h2: ({ children }) => <p className="font-bold text-gray-800 mb-1">{children}</p>,
         h3: ({ children }) => <p className="font-bold text-gray-800 mb-1">{children}</p>,
         code: ({ children }) => <code className="bg-gray-100 rounded px-1 text-[12px]">{children}</code>,
+        // Ad thumbnails Cleo includes from get_ad_creatives (same-origin proxy URLs).
+        // eslint-disable-next-line @next/next/no-img-element
+        img: ({ src, alt }) => <img src={src} alt={alt || ''} loading="lazy" className="inline-block w-28 h-28 object-cover rounded-xl border border-gray-200 bg-gray-50 mr-2 mb-2 align-top" />,
+        a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer" className="text-indigo-600 underline">{children}</a>,
         table: ({ children }) => (
           <div className="overflow-x-auto -mx-1 mb-2">
             <table className="text-xs border-collapse min-w-full">{children}</table>

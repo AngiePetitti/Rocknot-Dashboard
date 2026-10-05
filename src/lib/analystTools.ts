@@ -119,11 +119,13 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_ad_creatives',
-    description: 'Per-AD creative performance (individual ads, not platform totals) across the social ad platforms: spend, attributed revenue, ROAS, CTR, conversions, cost per conversion, campaign and ad set. Use to find winning/losing creatives.',
+    description: 'Per-AD creative performance (individual ads, not platform totals) across the social ad platforms: spend, attributed revenue, ROAS, CTR, conversions, cost per conversion, campaign and ad set — PLUS each ad\'s thumbnail image URL (`image`) and its ads-manager link, so the ad can be SHOWN, not just named. Use to find winning/losing creatives and whenever the operator wants to see the ads.',
     input_schema: {
       type: 'object',
       properties: {
-        timeframe: { type: 'string', enum: ['today', 'yesterday', '7d', '14d', '30d', 'mtd', 'last_month', '6m', 'ytd'], description: 'Period preset (default 30d)' },
+        timeframe: { type: 'string', enum: ['today', 'yesterday', '7d', '14d', '30d', 'mtd', 'last_month', '6m', 'ytd'], description: 'Period preset (default 30d). Ignored when date_from/date_to are given.' },
+        date_from: { type: 'string', description: 'Optional exact start, YYYY-MM-DD (e.g. a specific month)' },
+        date_to: { type: 'string', description: 'Optional exact end, YYYY-MM-DD' },
       },
     },
   },
@@ -418,12 +420,19 @@ Scheduled/drafts: ${scheduled.map(c => `${c.name} (${c.channel}, ${c.sendTime?.s
   }
 
   if (name === 'get_ad_creatives') {
-    const tf = String(input.timeframe || '30d');
-    const d = await get(`/api/windsor/creatives?tf=${encodeURIComponent(tf)}`);
-    const rows = (d?.creatives as { name: string; platform: string; campaign: string; adset: string; spend: number; revenue: number; roas: number; ctr: number; conversions: number; costPerConversion: number }[]) ?? [];
-    if (!rows.length) return `No per-ad creative data for ${tf}.`;
-    return `Per-ad creative performance (${tf}), by spend:\n${rows.slice(0, 40).map((c, i) =>
-      `${i + 1}. [${c.platform}] ${c.name} — $${c.spend.toLocaleString()} spend · $${c.revenue.toLocaleString()} rev · ${c.roas}x ROAS · ${c.ctr}% CTR · ${c.conversions} conv${c.costPerConversion ? ` @ $${c.costPerConversion}` : ''} · campaign ${c.campaign || '?'}`
+    const cf = String(input.date_from ?? ''); const ct = String(input.date_to ?? '');
+    const custom = DATE_RE.test(cf) && DATE_RE.test(ct) && cf <= ct;
+    const tf = custom ? 'custom' : String(input.timeframe || '30d');
+    const d = await get(`/api/windsor/creatives?tf=${encodeURIComponent(tf)}${custom ? `&date_from=${cf}&date_to=${ct}` : ''}`);
+    const rows = (d?.creatives as { id: string; name: string; platform: string; campaign: string; adset: string; spend: number; revenue: number; roas: number; ctr: number; conversions: number; costPerConversion: number; thumbnailUrl: string | null; adUrl: string | null; catalog?: boolean }[]) ?? [];
+    const label = custom ? `${cf} → ${ct}` : tf;
+    if (!rows.length) return `No per-ad creative data for ${label}.`;
+    // Stable, same-origin thumbnail URL: platform CDN links expire within days,
+    // so saved reports point at the proxy, which re-resolves the live image.
+    const base = getClient().dashboardUrl.replace(/\/$/, '');
+    const img = (c: typeof rows[number]) => c.thumbnailUrl ? `${base}/api/creatives/thumb?p=${encodeURIComponent(c.platform)}&id=${encodeURIComponent(c.id)}` : (c.catalog ? 'none (catalog ad — image comes from the product feed)' : 'none');
+    return `Per-ad creative performance (${label}), by spend. Each ad has an \`image\` URL (the ad's actual thumbnail — embed it with <img> when a visual is wanted) and an ads-manager \`link\`.\n${rows.slice(0, 40).map((c, i) =>
+      `${i + 1}. [${c.platform}] ${c.name} — $${c.spend.toLocaleString()} spend · $${c.revenue.toLocaleString()} rev · ${c.roas}x ROAS · ${c.ctr}% CTR · ${c.conversions} conv${c.costPerConversion ? ` @ $${c.costPerConversion}` : ''} · campaign ${c.campaign || '?'} · ad set ${c.adset || '?'}\n   image: ${img(c)}\n   link: ${c.adUrl || 'n/a'}`
     ).join('\n')}`;
   }
 

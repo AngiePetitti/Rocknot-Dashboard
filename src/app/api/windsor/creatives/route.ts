@@ -17,9 +17,13 @@ function addDays(dateStr: string, days: number): string {
   return d.toISOString().split('T')[0];
 }
 
-function buildDateParams(tfRaw: string): Record<string, string> {
+function buildDateParams(tfRaw: string, dateFrom = '', dateTo = ''): Record<string, string> {
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const yesterdayStr = addDays(todayStr, -1);
+
+  if (tfRaw === 'custom' && /^\d{4}-\d{2}-\d{2}$/.test(dateFrom) && /^\d{4}-\d{2}-\d{2}$/.test(dateTo) && dateFrom <= dateTo) {
+    return { date_from: dateFrom, date_to: dateTo };
+  }
 
   if (tfRaw === 'today') return { date_from: todayStr, date_to: todayStr };
   if (tfRaw === 'yesterday') return { date_from: yesterdayStr, date_to: yesterdayStr };
@@ -281,7 +285,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ source: 'error', error: 'Windsor API key not configured', creatives: [] });
   }
 
-  const params = buildDateParams(tfRaw);
+  const params = buildDateParams(tfRaw, searchParams.get('date_from') || '', searchParams.get('date_to') || '');
   // Fixed wide window for thumbnail/video URL lookups, independent of `tf`,
   // so the request URL — and Next's revalidate: 3600 fetch cache — is
   // identical across timeframe switches.
