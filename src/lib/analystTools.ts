@@ -240,7 +240,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   },
 ];
 
-export async function execTool(get: Getter, name: string, input: Record<string, unknown>): Promise<string> {
+async function execToolInner(get: Getter, name: string, input: Record<string, unknown>, onGuard: (g: string) => void): Promise<string> {
   const from = String(input.date_from ?? '');
   const to = String(input.date_to ?? '');
   const needsRange = ['get_metrics', 'get_top_products', 'get_ad_performance', 'get_returns', 'get_customer_intel', 'get_attribution', 'get_organic_content'].includes(name);
@@ -248,6 +248,24 @@ export async function execTool(get: Getter, name: string, input: Record<string, 
     return 'Error: date_from and date_to must be YYYY-MM-DD with date_from <= date_to.';
   }
   const params = `tf=custom&date_from=${from}&date_to=${to}`;
+
+  // Year guard. The model has mistaken "September" for last year's September
+  // and reported it as the current month. Every ranged result is prefixed
+  // with where the range sits relative to today, and a range entirely in a
+  // past year gets an explicit warning plus the current-year equivalent.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const yearGuard = (() => {
+    if (!needsRange) return '';
+    const curYear = Number(today.slice(0, 4));
+    const toYear = Number(to.slice(0, 4));
+    if (to > today) return `NOTE: range ${from} → ${to} runs past today (${today}); later dates have no data.\n`;
+    if (toYear < curYear) {
+      const shift = (d: string) => `${Number(d.slice(0, 4)) + (curYear - toYear)}${d.slice(4)}`;
+      return `⚠ DATE CHECK: ${from} → ${to} is ${curYear - toYear} year(s) BEFORE today (${today}). Today's year is ${curYear}. Use this range ONLY as the prior-year side of a year-over-year comparison and label it with its year (e.g. "${to.slice(0, 4)}"). If the operator meant the current period, fetch ${shift(from)} → ${shift(to)} instead.\n`;
+    }
+    return `Range ${from} → ${to} (current year ${curYear}; today ${today}).\n`;
+  })();
+  onGuard(yearGuard);
 
   if (name === 'get_product_catalog') {
     const { fetchCatalog, catalogText } = await import('@/src/lib/catalog');
@@ -553,4 +571,10 @@ Recently received: ${received.map(r => `${r.product}${r.variant ? ' – ' + r.va
   }
 
   return `Unknown tool: ${name}`;
+}
+
+export async function execTool(get: Getter, name: string, input: Record<string, unknown>): Promise<string> {
+  let guard = '';
+  const out = await execToolInner(get, name, input, g => { guard = g; });
+  return guard && !out.startsWith('Error') ? guard + out : out;
 }

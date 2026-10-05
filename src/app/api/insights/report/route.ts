@@ -5,7 +5,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
 import { ANALYST_TOOLS, execTool, makeFetcher } from '@/src/lib/analystTools';
-import { saveReport, isChatStoreConfigured } from '@/src/lib/chatStore';
+import { saveReport, isChatStoreConfigured, setKV } from '@/src/lib/chatStore';
+import { waitUntil } from '@vercel/functions';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -111,17 +112,28 @@ function extractHtml(text: string): string | null {
   return candidate.slice(start);
 }
 
+// Job status the viewer tab polls (/api/insights/report/status?since=…).
+// Written server-side at every stage, so a sleeping laptop or a closed tab
+// never hides a failure — and never stops the build.
+interface ReportJob { status: 'running' | 'done' | 'error'; stage?: string; error?: string; reportId?: string; updatedAt: string }
+const jobKey = (since: number) => `report_job_${since}`;
+async function setJob(since: number, job: Omit<ReportJob, 'updatedAt'>): Promise<void> {
+  if (!since || !isChatStoreConfigured()) return;
+  try { await setKV(jobKey(since), JSON.stringify({ ...job, updatedAt: new Date().toISOString() })); } catch { /* status is best-effort */ }
+}
+
 export async function POST(req: NextRequest) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 500 });
   }
 
-  let body: { messages?: ChatMessage[]; focus?: string };
+  let body: { messages?: ChatMessage[]; focus?: string; since?: number; wait?: boolean };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
+  const since = Number(body.since || 0) || 0;
   // The focus is the builder's full brief — truncating it to a sentence
   // silently dropped the operator's per-item requirements (e.g. "every
   // campaign needs full copy"), so keep it generous. Same for history.
@@ -131,6 +143,15 @@ export async function POST(req: NextRequest) {
     .slice(-40);
   if (!focus && !history.some(m => m.role === 'assistant')) {
     return NextResponse.json({ error: `Ask ${getClient().analyst.name} at least one question first — the report is built from the conversation.` }, { status: 400 });
+  }
+
+  // Resolve the signed-in user NOW (the request is still open); the save
+  // step later runs in the background without a request to read from.
+  let email: string | null = null;
+  if (authConfigured()) {
+    const session = await getServerSession(authOptions);
+    email = session?.user?.email?.toLowerCase() || null;
+    if (!email) return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
   }
 
   const brand = getClient();
@@ -150,6 +171,8 @@ BRAND BRIEF — any copy or campaign content in the report must follow it, espec
 ${brandBrief}
 
 You have the same data tools as the chat. Re-fetch the key series behind the conversation's findings so every number and chart in the report is exact (the chat answers may be rounded). Fetch only what the report needs.
+
+DATES — the year is ${today.slice(0, 4)}. "September" with no year means September ${today.slice(0, 4)} (the most recent one that has happened); last year's September is only the comparison side. Every tool result starts with a date check — if it says the range is a year before today, that is the PRIOR year: fetch the current-year range too and headline that. Label every period and every chart axis with its year. A report whose headline figures come from a past year is wrong; do not ship it.
 
 Then output a COMPLETE standalone HTML document — and nothing else. No commentary before or after, no markdown fence. Requirements:
 
@@ -188,6 +211,11 @@ SPEED — the operator is waiting on this report:
 HONESTY
 - Only report numbers you fetched. If a period had no data, either omit it or mark it "no data" — never fabricate.`;
 
+  // The whole build runs here. Returned early via waitUntil (the browser can
+  // sleep, close the tab, lose Wi-Fi — the server keeps going until the
+  // report is saved), or awaited directly when the caller asks to wait.
+  const run = async (): Promise<{ status: number; body: Record<string, unknown> }> => {
+  await setJob(since, { status: 'running', stage: 'Fetching the data behind the conversation' });
   try {
     let messages: Anthropic.MessageParam[] = [
       {
@@ -218,7 +246,9 @@ HONESTY
       }).finalMessage();
 
       if (response.stop_reason === 'refusal') {
-        return NextResponse.json({ error: 'The model declined to build this report. Try again.' }, { status: 502 });
+        const error = 'The model declined to build this report. Try again.';
+        await setJob(since, { status: 'error', error });
+        return { status: 502, body: { error } };
       }
 
       if (response.stop_reason === 'tool_use') {
@@ -232,6 +262,7 @@ HONESTY
           }))
         );
         messages.push({ role: 'user', content: results });
+        await setJob(since, { status: 'running', stage: iter === 0 ? 'Re-checking the numbers' : 'Drawing the charts and writing the report' });
         continue;
       }
 
@@ -239,7 +270,9 @@ HONESTY
       // copy) was cut off mid-document — fail loudly instead of returning a
       // silently incomplete report.
       if (response.stop_reason === 'max_tokens') {
-        return NextResponse.json({ error: 'The report ran too long and was cut off — split it into two smaller reports (e.g. by week or by campaign group).' }, { status: 502 });
+        const error = 'The report ran too long and was cut off — split it into two smaller reports (e.g. by week or by campaign group).';
+        await setJob(since, { status: 'error', error });
+        return { status: 502, body: { error } };
       }
       finalText = response.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
       break;
@@ -247,19 +280,21 @@ HONESTY
 
     const html = finalText ? extractHtml(finalText) : null;
     if (!html) {
-      return NextResponse.json({ error: 'Report generation didn\'t complete — try again, or ask a more specific question first.' }, { status: 502 });
+      const error = 'Report generation didn\'t complete — try again, or ask a more specific question first.';
+      await setJob(since, { status: 'error', error });
+      return { status: 502, body: { error } };
     }
-    // Auto-save the finished report to the user's saved list so it survives
-    // even if they closed the tab while it was generating. Save failures are
-    // reported so the client can surface them instead of waiting forever.
+    // Auto-save the finished report to the user's saved list — the viewer tab
+    // opens it from there. Save failures are recorded on the job.
     let saved = false;
     let saveError: string | null = null;
+    let reportId: string | undefined;
     if (isChatStoreConfigured() && authConfigured()) {
       try {
-        const session = await getServerSession(authOptions);
-        const email = session?.user?.email?.toLowerCase();
         if (email) {
-          await saveReport(email, titleOf(html), injectToolbar(html, true));
+          await setJob(since, { status: 'running', stage: 'Saving the report' });
+          const meta = await saveReport(email, titleOf(html), injectToolbar(html, true));
+          reportId = meta.id;
           saved = true;
         } else {
           saveError = 'No signed-in session on the save step';
@@ -270,8 +305,28 @@ HONESTY
     } else {
       saveError = 'Report storage not configured (PRIVATE_SHEET_ID / GCP_SERVICE_ACCOUNT_KEY)';
     }
-    return NextResponse.json({ ok: true, html: injectToolbar(html, saved), ...(saveError ? { saveError } : {}) });
+    if (saveError) await setJob(since, { status: 'error', error: `Report built but saving failed: ${saveError}` });
+    else await setJob(since, { status: 'done', reportId });
+    return { status: 200, body: { ok: true, html: injectToolbar(html, saved), ...(saveError ? { saveError } : {}), ...(reportId ? { reportId } : {}) } };
   } catch (err) {
-    return NextResponse.json({ error: friendlyAiError(err) }, { status: 500 });
+    const error = friendlyAiError(err);
+    await setJob(since, { status: 'error', error });
+    return { status: 500, body: { error } };
   }
+  };
+
+  // Default: hand the build to the platform and answer at once. The browser's
+  // connection is no longer part of the job.
+  if (!body.wait) {
+    await setJob(since, { status: 'running', stage: 'Starting' });
+    try {
+      waitUntil(run());
+      return NextResponse.json({ queued: true, since }, { status: 202 });
+    } catch {
+      // No request context to attach to (local dev without the Vercel
+      // runtime) — fall through and build inline.
+    }
+  }
+  const result = await run();
+  return NextResponse.json(result.body, { status: result.status });
 }
