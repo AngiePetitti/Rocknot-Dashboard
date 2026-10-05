@@ -67,6 +67,7 @@ Core (every client):
 | `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` | only for the one-time `/api/shopify/auth` token flow |
 | `META_AD_ACCOUNT_ID`, `META_ACCESS_TOKEN` | live Meta spend + creative media; the account id also filters Windsor's multi-client feed |
 | `META_ACCOUNT_NAME` | optional override of the profile's Meta account-name filter |
+| `PINTEREST_APP_ID`, `PINTEREST_APP_SECRET` | Pinterest Ads API — exact Ads Manager numbers on the profile's conversion settings; connect once via `/api/debug/pinterest-oauth` (`PINTEREST_ACCESS_TOKEN` overrides for a quick test) |
 | `ANTHROPIC_API_KEY` | Cleo, insights, briefs, retention plans, brand-guide extraction |
 | `KLAVIYO_API_KEY` | Retention tab |
 | `QB_CLIENT_ID`, `QB_CLIENT_SECRET`, `QB_REFRESH_TOKEN`, `QB_REALM_ID` | QuickBooks P&L (Financials tab); set up via `/api/debug/qb-oauth` |

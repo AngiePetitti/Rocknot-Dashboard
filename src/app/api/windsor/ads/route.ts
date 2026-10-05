@@ -336,6 +336,27 @@ export async function GET(request: NextRequest) {
     if (snapchat.spend > 0) platforms.push(snapchat);
 
     const pinterest = aggregatePlatform(pinterestTotals, 'Pinterest', PLATFORMS.pinterest.color);
+    // Pinterest Ads API numbers when connected — the exact Ads Manager figures
+    // on its conversion settings (this path serves "today" and BigQuery outages).
+    if (hasPlatform('pinterest')) {
+      const { fetchPinterestDailyLive } = await import('@/src/lib/tiktokLive');
+      const live = await fetchPinterestDailyLive(params.date_from, params.date_to).catch(() => null);
+      if (live?.authoritative) {
+        const t = live.days.reduce((a, d) => ({
+          spend: a.spend + d.spend, revenue: a.revenue + d.revenue, conversions: a.conversions + (d.conversions || 0),
+          clicks: a.clicks + (d.clicks || 0), impressions: a.impressions + (d.impressions || 0), view: a.view + (d.viewConversions || 0),
+        }), { spend: 0, revenue: 0, conversions: 0, clicks: 0, impressions: 0, view: 0 });
+        pinterest.spend = Math.round(t.spend * 100) / 100;
+        pinterest.revenue = Math.round(t.revenue * 100) / 100;
+        pinterest.conversions = Math.round(t.conversions);
+        pinterest.clicks = Math.round(t.clicks);
+        pinterest.impressions = Math.round(t.impressions);
+        pinterest.roas = pinterest.spend > 0 ? Math.round((pinterest.revenue / pinterest.spend) * 100) / 100 : 0;
+        pinterest.costPerConversion = pinterest.conversions > 0 ? Math.round((pinterest.spend / pinterest.conversions) * 100) / 100 : 0;
+        pinterest.ctr = pinterest.impressions > 0 ? Math.round((pinterest.clicks / pinterest.impressions) * 10000) / 100 : 0;
+        pinterest.attribution = t.conversions > 0 ? `${live.label} · ${Math.round(t.view)} of ${Math.round(t.conversions)} checkouts are view-through` : live.label;
+      }
+    }
     if (pinterest.spend > 0) platforms.push(pinterest);
 
     const dailySpend = buildDailySpend(metaDaily, googleDaily, tiktokDaily, snapDaily, pinterestDaily);

@@ -130,6 +130,18 @@ export interface ClientProfile {
     metaAccountNameMode: 'exact' | 'contains';
     /** Fallback when META_AD_ACCOUNT_ID isn't set ('' = env only). */
     metaAccountIdDefault: string;
+    /**
+     * Pinterest Ads Manager's conversion settings, applied verbatim to every
+     * direct Pinterest API call so the dashboard's Pinterest row equals the
+     * Pinterest dashboard. Omit = Pinterest's 7-day click / 7-day
+     * engagement / 1-day view, reported by ad date.
+     */
+    pinterestAttribution?: {
+      clickWindowDays: 1 | 7 | 30;
+      engagementWindowDays: 1 | 7 | 30;
+      viewWindowDays: 1 | 7 | 30;
+      conversionReportTime: 'TIME_OF_AD_ACTION' | 'TIME_OF_CONVERSION';
+    };
   };
   finance: {
     /** Case-insensitive regex source matched against QuickBooks account_name ('' = keep all). */
@@ -287,6 +299,9 @@ const KAILEEP: ClientProfile = {
     metaAccountNameMatch: 'kailee',
     metaAccountNameMode: 'contains',
     metaAccountIdDefault: '449159425278819',
+    // Ads Manager → Conversion settings (7/1): 7-day click, 7-day engagement,
+    // 1-day view, reported on the ad-event date.
+    pinterestAttribution: { clickWindowDays: 7, engagementWindowDays: 7, viewWindowDays: 1, conversionReportTime: 'TIME_OF_AD_ACTION' },
   },
   finance: { qbAccountMatch: 'kailee', grossMarginPct: 89 }, // per Airin, Sep 2026: ~89% gross margin across the board
   revenue: { includeReturnFees: true }, // Kailee P charges a return fee and keeps it
