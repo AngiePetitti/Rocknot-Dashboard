@@ -29,6 +29,7 @@ interface PlatformData {
   conversions?: number;
   costPerConversion?: number;
   color: string;
+  attribution?: string;
 }
 
 interface DaySpend {
@@ -338,6 +339,7 @@ export default function AdsContent() {
                     <p className="font-bold text-gray-800">{p.revenue > 0 ? formatCurrency(p.revenue) : <span className="text-gray-400" title="No purchase value reported for this platform">—</span>}</p>
                   </div>
                 </div>
+                {p.attribution && <p className="text-[10px] text-gray-400 mt-3 leading-snug">{p.attribution}</p>}
               </Card>
             ))}
           </div>

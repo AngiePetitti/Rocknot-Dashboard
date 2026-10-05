@@ -1,5 +1,6 @@
 import { runQuery, getDataset } from '@/src/lib/bigquery';
 import { metaAccountSql, hasPlatform, PLATFORMS } from '@/src/lib/client';
+import { PINTEREST_ATTRIBUTION_NOTE } from '@/src/lib/tiktokLive';
 
 // Ad Performance tab data from the Windsor→BigQuery tables.
 // Mirrors the shape returned by /api/windsor/ads so the frontend is unchanged.
@@ -15,6 +16,8 @@ export interface PlatformData {
   conversions: number;
   costPerConversion: number;
   color: string;
+  /** Which attribution basis the purchases/revenue use, when it needs saying (Pinterest). */
+  attribution?: string;
 }
 
 export interface DaySpend {
@@ -37,6 +40,8 @@ interface RawRow {
 interface DailySpendRow {
   d: { value: string } | string;
   spend: number | null;
+  revenue?: number | null;
+  conversions?: number | null;
 }
 
 function dateVal(d: DailySpendRow['d']): string {
@@ -184,8 +189,19 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     FROM \`${ds}.pinterest_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to
   `;
-  const pinterestDailySql = `
-    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
+  // Per-day revenue + checkouts too (not just spend): the live Windsor patch
+  // below replaces whole days, so it needs the BigQuery value it displaces.
+  const pinterestDailySqlFor = (revenueCol: string, convCol: string) => `
+    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend,
+           SUM(IFNULL(CAST(${revenueCol} AS FLOAT64), 0)) AS revenue,
+           SUM(IFNULL(CAST(${convCol} AS FLOAT64), 0)) AS conversions
+    FROM \`${ds}.pinterest_ads\`
+    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+  `;
+  const pinterestDailySql = pinterestDailySqlFor('total_checkout_value', 'total_checkout');
+  const pinterestDailySqlAlt = pinterestDailySqlFor('total_conversions_value', 'total_conversions');
+  const pinterestDailySqlMin = `
+    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend, 0 AS revenue, 0 AS conversions
     FROM \`${ds}.pinterest_ads\`
     WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
   `;
@@ -252,7 +268,10 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     runQuery<DailySpendRow>(googleDailySql, params).catch(() => [] as DailySpendRow[]),
     hasPlatform('tiktok') ? runQuery<DailySpendRow>(tiktokDailySql, params).catch(() => [] as DailySpendRow[]) : noDaily,
     hasPlatform('snapchat') ? runQuery<DailySpendRow>(snapDailySql, params).catch(() => [] as DailySpendRow[]) : noDaily,
-    hasPlatform('pinterest') ? runQuery<DailySpendRow>(pinterestDailySql, params).catch(() => [] as DailySpendRow[]) : noDaily,
+    hasPlatform('pinterest') ? runQuery<DailySpendRow>(pinterestDailySql, params)
+      .catch(() => runQuery<DailySpendRow>(pinterestDailySqlAlt, params))
+      .catch(() => runQuery<DailySpendRow>(pinterestDailySqlMin, params))
+      .catch(() => [] as DailySpendRow[]) : noDaily,
   ]);
 
   const platforms: PlatformData[] = [];
@@ -275,7 +294,12 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   for (const r of googleDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].google = Math.round(Number(r.spend || 0)); }
   for (const r of tiktokDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].tiktok = Math.round(Number(r.spend || 0)); }
   for (const r of snapDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].snapchat = Math.round(Number(r.spend || 0)); }
-  for (const r of pinterestDaily) { const d = dateVal(r.d); ensureDate(d); byDate[d].pinterest = Math.round(Number(r.spend || 0)); }
+  const pinterestBqDay: Record<string, { revenue: number; conversions: number }> = {};
+  for (const r of pinterestDaily) {
+    const d = dateVal(r.d); ensureDate(d); byDate[d].pinterest = Math.round(Number(r.spend || 0));
+    pinterestBqDay[d] = { revenue: Number(r.revenue || 0), conversions: Number(r.conversions || 0) };
+  }
+  if (pinterestPlatform) pinterestPlatform.attribution = PINTEREST_ATTRIBUTION_NOTE;
 
   // Patch the most recent 1-2 days from the platforms' own APIs — Windsor's
   // once-a-day sync captures those days part-way through, understating spend
@@ -341,18 +365,38 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
         }
       }
     }
+    // Pinterest: Windsor's live feed is the same source as BigQuery but hours
+    // fresher, and checkouts keep landing for days after the ad date — so a
+    // day the live feed covers at least as fully (spend ≥ synced spend) is
+    // replaced wholesale: spend, checkouts AND checkout value. Spend-only
+    // patching left purchases/ROAS on the stale synced count.
+    let pinViewConv = 0, pinConv = 0, pinLiveDays = 0;
     for (const day of pinterestPatch ?? []) {
       if (!inRange(day.date)) continue;
       ensureDate(day.date);
       const b = byDate[day.date];
-      if (day.spend > b.pinterest) {
-        const delta = day.spend - b.pinterest;
+      if (day.spend >= b.pinterest && pinterestPlatform) {
+        const spendDelta = day.spend - b.pinterest;
         b.pinterest = Math.round(day.spend);
-        if (pinterestPlatform) {
-          pinterestPlatform.spend = Math.round((pinterestPlatform.spend + delta) * 100) / 100;
-          pinterestPlatform.roas = pinterestPlatform.spend > 0 ? Math.round((pinterestPlatform.revenue / pinterestPlatform.spend) * 100) / 100 : 0;
+        pinterestPlatform.spend = Math.round((pinterestPlatform.spend + spendDelta) * 100) / 100;
+        if (day.conversions != null) {
+          const bq = pinterestBqDay[day.date] || { revenue: 0, conversions: 0 };
+          pinterestPlatform.revenue = Math.round((pinterestPlatform.revenue - bq.revenue + day.revenue) * 100) / 100;
+          pinterestPlatform.conversions = Math.round(pinterestPlatform.conversions - bq.conversions + day.conversions);
+          pinterestBqDay[day.date] = { revenue: day.revenue, conversions: day.conversions };
+          pinViewConv += day.viewConversions || 0;
+          pinConv += day.conversions;
+          pinLiveDays += 1;
         }
+        pinterestPlatform.roas = pinterestPlatform.spend > 0 ? Math.round((pinterestPlatform.revenue / pinterestPlatform.spend) * 100) / 100 : 0;
+        pinterestPlatform.costPerConversion = pinterestPlatform.conversions > 0 ? Math.round((pinterestPlatform.spend / pinterestPlatform.conversions) * 100) / 100 : 0;
       }
+    }
+    // Say how much of the range is view-through when the live feed covered
+    // every day in it (otherwise the share would be for a partial range).
+    const rangeDays = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1;
+    if (pinterestPlatform && pinLiveDays >= rangeDays && pinConv > 0) {
+      pinterestPlatform.attribution = `${PINTEREST_ATTRIBUTION_NOTE} · ${Math.round(pinViewConv)} of ${Math.round(pinConv)} checkouts are view-through`;
     }
   }
 

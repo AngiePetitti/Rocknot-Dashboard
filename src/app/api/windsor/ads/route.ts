@@ -6,6 +6,7 @@ import { fetchSnapToday } from '@/src/lib/snapLive';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { keepClientMetaRows, hasPlatform, PLATFORMS, windsorParams } from '@/src/lib/client';
+import { PINTEREST_ATTRIBUTION_NOTE } from '@/src/lib/tiktokLive';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -45,6 +46,7 @@ export interface PlatformData {
   conversions: number;
   costPerConversion: number;
   color: string;
+  attribution?: string;
 }
 
 // Totals request: no date field — Windsor returns per-ad aggregated rows (avoids row-limit truncation)
@@ -56,7 +58,7 @@ async function fetchSourceTotals(source: AdSource, params: Record<string, string
     google_ads: 'source,spend,impressions,clicks,conversions_value,conversion_value,conversions',
     tiktok:     'source,spend,impressions,clicks,complete_payment,total_complete_payment_rate,onsite_total_purchase_value,conversion_value',
     snapchat:   'source,spend,impressions,clicks,conversion_purchases,conversion_purchases_value',
-    pinterest:  'source,spend,impressions,clicks,total_checkout,total_checkout_value',
+    pinterest:  'source,spend,impressions,clicks,total_checkout,total_checkout_value,total_view_checkout',
   };
   const scoped = windsorParams(source, params);
   if (!scoped) return [];
@@ -95,7 +97,7 @@ async function fetchSourceDaily(source: AdSource, params: Record<string, string>
 }
 
 function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'TikTok' | 'Snapchat' | 'Pinterest', color: string): PlatformData {
-  let spend = 0, impressions = 0, clicks = 0, revenue = 0, conversions = 0;
+  let spend = 0, impressions = 0, clicks = 0, revenue = 0, conversions = 0, viewConversions = 0;
 
   // Purchases are the platform's own count — the same "Purchases" / "Conversions"
   // column each ads manager divides spend by for its cost per purchase.
@@ -115,6 +117,7 @@ function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'Ti
     } else if (platform === 'Pinterest') {
       revenue += Number(r.total_checkout_value || r.total_conversions_value || row.conversion_value || 0);
       conversions += Number(r.total_checkout || r.total_conversions || row.conversions || 0);
+      viewConversions += Number(r.total_view_checkout || 0);
     } else if (platform === 'TikTok') {
       // total_complete_payment_rate is TikTok's total purchase value (Windsor's
       // misleading name); complete_payment_value is empty for this account.
@@ -127,6 +130,11 @@ function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'Ti
     }
   }
 
+  const attribution = platform === 'Pinterest'
+    ? (viewConversions > 0 && conversions > 0
+        ? `${PINTEREST_ATTRIBUTION_NOTE} · ${Math.round(viewConversions)} of ${Math.round(conversions)} checkouts are view-through`
+        : PINTEREST_ATTRIBUTION_NOTE)
+    : undefined;
   return {
     platform,
     spend: Math.round(spend * 100) / 100,
@@ -138,6 +146,7 @@ function aggregatePlatform(rows: WindsorRow[], platform: 'Meta' | 'Google' | 'Ti
     conversions: Math.round(conversions),
     costPerConversion: conversions > 0 ? Math.round((spend / conversions) * 100) / 100 : 0,
     color,
+    ...(attribution ? { attribution } : {}),
   };
 }
 
