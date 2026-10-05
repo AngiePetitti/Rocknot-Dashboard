@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
       'total_view_checkout', 'total_view_checkout_value', 'total_conversions', 'total_conversions_value'];
     const pull = async (extra: Record<string, string>) => {
       const qs = new URLSearchParams({ api_key: key, fields: fields.join(','), _renderer: 'json', ...scoped, ...extra });
-      const res = await fetch(`https://connectors.windsor.ai/pinterest?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(25000) });
+      const res = await fetch(`https://connectors.windsor.ai/pinterest?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(22000) });
       const json = await res.json();
       if (json.error) return { error: json.error };
       const rows = (json.data || []) as Array<Record<string, unknown>>;
@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
       const probeDay = String(out.probeDay || today);
       const qs = new URLSearchParams({ api_key: key, fields: 'date,account_id,ad_id,ad_group_name,campaign_name,spend,clicks,impressions,total_checkout', _renderer: 'json', ...scoped, date_from: probeDay, date_to: probeDay });
       if (options) qs.set('options', options);
-      const res = await fetch(`https://connectors.windsor.ai/pinterest?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(25000) });
+      const res = await fetch(`https://connectors.windsor.ai/pinterest?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(20000) });
       const json = await res.json();
       const rows = (json.data || []) as Array<Record<string, unknown>>;
       out.windsorLiveProbeDay = json.error ? { error: json.error } : {
@@ -117,25 +117,26 @@ export async function GET(request: NextRequest) {
       const probeDay = String(out.probeDay || today);
       const qs = new URLSearchParams({ api_key: key, fields, _renderer: 'json', ...scoped, date_from: probeDay, date_to: probeDay });
       if (withOptions && options) qs.set('options', options);
-      const res = await fetch(`https://connectors.windsor.ai/pinterest?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(25000) });
-      const json = await res.json();
-      if (json.error) return { error: json.error };
-      const rows = (json.data || []) as Array<Record<string, unknown>>;
-      return { rows: rows.length, spend: Math.round(rows.reduce((s, r) => s + Number(r.spend || 0), 0) * 100) / 100, total_checkout: rows.reduce((s, r) => s + Number(r.total_checkout || 0), 0), sample: rows.slice(0, 2) };
+      try {
+        const res = await fetch(`https://connectors.windsor.ai/pinterest?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(22000) });
+        const json = await res.json();
+        if (json.error) return { error: json.error };
+        const rows = (json.data || []) as Array<Record<string, unknown>>;
+        return { rows: rows.length, spend: Math.round(rows.reduce((s, r) => s + Number(r.spend || 0), 0) * 100) / 100, total_checkout: rows.reduce((s, r) => s + Number(r.total_checkout || 0), 0), sample: rows.slice(0, 2) };
+      } catch (e) { return { error: e instanceof Error ? e.message : String(e) }; }
     };
-    try {
-      out.grainProbes = {
-        perAd_noOptions: await grainPull('date,account_id,ad_id,ad_group_name,campaign_name,spend,clicks,impressions,total_checkout', false),
-        perAdGroup_withOptions: await grainPull('date,account_id,ad_group_name,campaign_name,spend,clicks,impressions,total_checkout,total_checkout_value', true),
-        perCampaign_withOptions: await grainPull('date,account_id,campaign_name,spend,clicks,impressions,total_checkout,total_checkout_value', true),
-        account_withOptions: await grainPull('date,account_id,spend,clicks,impressions,total_checkout,total_checkout_value', true),
-      };
-    } catch (e) { out.grainProbesError = String(e instanceof Error ? e.message : e); }
-    try { out.windsorLiveDefault = await pull({}); } catch (e) { out.windsorError = String(e instanceof Error ? e.message : e); }
-    if (options) {
-      try { out.windsorLiveTaskOptions = await pull({ options }); } catch (e) { out.windsorOptionsError = String(e instanceof Error ? e.message : e); }
-      out.windsorOptions = options;
-    }
+    // Everything live runs in parallel — sequential pulls blew the 60s budget.
+    const [perAd_noOptions, perAdGroup_withOptions, perCampaign_withOptions, account_withOptions, liveDefault, liveOptions] = await Promise.all([
+      grainPull('date,account_id,ad_id,ad_group_name,campaign_name,spend,clicks,impressions,total_checkout', false),
+      grainPull('date,account_id,ad_group_name,campaign_name,spend,clicks,impressions,total_checkout,total_checkout_value', true),
+      grainPull('date,account_id,campaign_name,spend,clicks,impressions,total_checkout,total_checkout_value', true),
+      grainPull('date,account_id,spend,clicks,impressions,total_checkout,total_checkout_value', true),
+      pull({}).catch(e => ({ error: String(e instanceof Error ? e.message : e) })),
+      options ? pull({ options }).catch(e => ({ error: String(e instanceof Error ? e.message : e) })) : Promise.resolve(null),
+    ]);
+    out.grainProbes = { perAd_noOptions, perAdGroup_withOptions, perCampaign_withOptions, account_withOptions };
+    out.windsorLiveDefault = liveDefault;
+    if (options) { out.windsorLiveTaskOptions = liveOptions; out.windsorOptions = options; }
   }
   return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
 }
