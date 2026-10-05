@@ -164,7 +164,7 @@ export default function OrganicContent() {
               subtitle={ig?.status === 'ok' ? `${n(ig.totals.likes)} likes · ${n(ig.totals.saves)} saves · ${n(ig.totals.comments)} comments` : 'Instagram Insights not connected'} />
             <MetricCard title="Blog Sessions" accentColor="#34d399"
               value={blog?.status === 'ok' ? n(blog.totals.sessions) : '—'}
-              subtitle={blog?.status === 'ok' ? `${n(blog.totals.articles)} articles read · ${n(blog.totals.completed)} orders · ${pct(blog.totals.completed || 0, blog.totals.sessions || 0)} CVR` : 'Shopify not connected'} />
+              subtitle={blog?.status === 'ok' ? `${n(blog.totals.articles)} articles (${n(blog.totals.articleSessions)} sessions) · incl. blog home & tag pages ${n(blog.totals.sessions)} · ${n(blog.totals.completed)} orders · ${pct(blog.totals.completed || 0, blog.totals.sessions || 0)} CVR` : 'Shopify not connected'} />
             <MetricCard title="Organic Social Visits" accentColor="#818cf8"
               value={n((traffic?.Pinterest.sessions || 0) + (traffic?.Instagram.sessions || 0))}
               subtitle={`Pinterest ${n(traffic?.Pinterest.sessions)} (${n(traffic?.Pinterest.completed)} orders) · Instagram ${n(traffic?.Instagram.sessions)} (${n(traffic?.Instagram.completed)} orders) · unpaid taps to ${client.siteDomain}`} />
@@ -205,6 +205,11 @@ export default function OrganicContent() {
               <p className="text-[11px] text-gray-400">Sessions that started on the article · Shopify sessions report · titles and covers from the Shopify blog</p>
             </div>
             {blog?.status === 'error' && <p className="text-xs text-red-600 mb-2">{blog.error}</p>}
+            {blog?.status === 'ok' && blogItems.length > 0 && (blog.totals.articlesKnown || 0) === 0 && isAdmin && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                Titles and cover images are missing because the Shopify app lacks the <code className="bg-white px-1 rounded">read_content</code> scope. Shopify admin → Settings → Apps and sales channels → Develop apps → this app → Configuration → tick read_content → Save.
+              </p>
+            )}
             {blog?.status === 'not_connected' && <p className="text-xs text-gray-400">Shopify is not connected on this deployment.</p>}
             {blog?.status === 'ok' && blogItems.length === 0 && <p className="text-xs text-gray-400 py-3">No sessions started on a /blogs/ page of {client.siteDomain} in this period.</p>}
             {blogItems.length > 0 && (
@@ -227,7 +232,10 @@ export default function OrganicContent() {
                           <a href={b.url} target="_blank" rel="noreferrer" className="flex items-center gap-3 group">
                             <div className="w-16 shrink-0"><Thumb src={b.imageUrl} alt={b.title} ratio="wide" /></div>
                             <div className="min-w-0">
-                              <p className="text-sm font-semibold text-gray-800 group-hover:underline line-clamp-2">{b.title}</p>
+                              <p className="text-sm font-semibold text-gray-800 group-hover:underline line-clamp-2">
+                                {b.title}
+                                {b.kind !== 'article' && <span className="ml-1.5 text-[10px] font-semibold uppercase text-gray-400 align-middle">{b.kind === 'index' ? 'blog home' : 'tag page'}</span>}
+                              </p>
                               <p className="text-[10px] text-gray-400 font-mono truncate">{b.path.replace(/^\/blogs\//, '')}</p>
                             </div>
                           </a>
