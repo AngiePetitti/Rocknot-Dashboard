@@ -264,7 +264,7 @@ export default function OverviewContent() {
 
   // Platform-reported purchases and cost per purchase — the same numbers Ads
   // Manager / Google Ads / TikTok / Pinterest show, keyed by platform name.
-  const [platformPurchases, setPlatformPurchases] = useState<Record<string, { purchases: number; costPerPurchase: number }>>({});
+  const [platformPurchases, setPlatformPurchases] = useState<Record<string, { purchases: number; costPerPurchase: number; attribution?: string }>>({});
 
   function buildLivePlatformSpend(m: LiveMetrics): PlatformSpend[] | null {
     if (!m.metaSpend && !m.googleSpend && !m.tiktokSpend && !m.snapchatSpend && !m.pinterestSpend) return null;
@@ -331,12 +331,12 @@ export default function OverviewContent() {
     const adsParams = new URLSearchParams({ tf: tfRaw });
     if (dateFrom) adsParams.set('date_from', dateFrom);
     if (dateTo) adsParams.set('date_to', dateTo);
-    cachedJson<{ platforms?: Array<{ platform: string; conversions?: number; costPerConversion?: number }> }>(
+    cachedJson<{ platforms?: Array<{ platform: string; conversions?: number; costPerConversion?: number; attribution?: string }> }>(
       `/api/windsor/ads?${adsParams}`,
       d => {
         if (activeReqKey.current !== reqKey) return;
-        const map: Record<string, { purchases: number; costPerPurchase: number }> = {};
-        for (const p of d.platforms || []) map[p.platform] = { purchases: Number(p.conversions || 0), costPerPurchase: Number(p.costPerConversion || 0) };
+        const map: Record<string, { purchases: number; costPerPurchase: number; attribution?: string }> = {};
+        for (const p of d.platforms || []) map[p.platform] = { purchases: Number(p.conversions || 0), costPerPurchase: Number(p.costPerConversion || 0), attribution: p.attribution };
         setPlatformPurchases(map);
       },
       () => {},
@@ -1383,6 +1383,7 @@ export default function OverviewContent() {
                       />
                       <span className="font-semibold text-gray-700">{p.platform}</span>
                     </div>
+                    {pp?.attribution && <p className="text-[10px] text-gray-400 mt-0.5 leading-snug">{pp.attribution}</p>}
                   </td>
                   <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(p.spend)}</td>
                   <td className="py-3 px-4 text-right text-gray-600">{formatCurrency(p.revenue)}</td>
