@@ -397,12 +397,22 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
         pinterestPlatform.ctr = pinterestPlatform.impressions > 0 ? Math.round((pinterestPlatform.clicks / pinterestPlatform.impressions) * 10000) / 100 : 0;
         continue;
       }
-      // Windsor's feed: spend only — its checkouts are on Windsor's own
-      // default window, not the one set on the BigQuery task.
-      if (day.spend > b.pinterest && pinterestPlatform) {
+      // Windsor's feed on the task's own attribution window (options param):
+      // same basis as the table, hours fresher. A day it covers at least as
+      // fully (spend ≥ synced spend) refreshes spend, checkouts and value.
+      if (day.spend >= b.pinterest && pinterestPlatform) {
         const spendDelta = day.spend - b.pinterest;
         b.pinterest = Math.round(day.spend);
         pinterestPlatform.spend = Math.round((pinterestPlatform.spend + spendDelta) * 100) / 100;
+        if (day.conversions != null) {
+          const bq = pinterestBqDay[day.date] || { revenue: 0, conversions: 0, clicks: 0, impressions: 0 };
+          pinterestPlatform.revenue = Math.round((pinterestPlatform.revenue - bq.revenue + day.revenue) * 100) / 100;
+          pinterestPlatform.conversions = Math.round(pinterestPlatform.conversions - bq.conversions + day.conversions);
+          pinterestBqDay[day.date] = { ...bq, revenue: day.revenue, conversions: day.conversions };
+          pinViewConv += day.viewConversions || 0;
+          pinConv += day.conversions;
+          pinLiveDays += 1;
+        }
         pinterestPlatform.roas = pinterestPlatform.spend > 0 ? Math.round((pinterestPlatform.revenue / pinterestPlatform.spend) * 100) / 100 : 0;
         pinterestPlatform.costPerConversion = pinterestPlatform.conversions > 0 ? Math.round((pinterestPlatform.spend / pinterestPlatform.conversions) * 100) / 100 : 0;
       }
@@ -410,7 +420,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     // Say how much of the range is view-through when the live feed covered
     // every day in it (otherwise the share would be for a partial range).
     const rangeDays = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1;
-    if (pinterestPlatform && pinAuthoritative && pinLiveDays >= rangeDays && pinConv > 0) {
+    if (pinterestPlatform && pinLiveDays >= rangeDays && pinConv > 0) {
       pinterestPlatform.attribution = `${pinterestPlatform.attribution || pinterestWindsorNote()} · ${Math.round(pinViewConv)} of ${Math.round(pinConv)} checkouts are view-through`;
     }
   }

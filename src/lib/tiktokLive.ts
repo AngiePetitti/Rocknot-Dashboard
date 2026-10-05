@@ -86,15 +86,12 @@ export function fetchGoogleDailyFromWindsor(since: string, until: string): Promi
   return fetchWindsorDaily('google_ads', ['conversions_value', 'conversion_value'], since, until);
 }
 
-// Pinterest via Windsor REST (no direct Pinterest Ads API hookup).
-//
-// Windsor's REST endpoint reports Pinterest conversions on whatever
-// attribution window its API defaults to (30/30/1 — the URL parameters are
-// ignored), while the BigQuery task carries the window set in the task's
-// "Attribution Window" dropdown. The two can disagree, so this feed is used
-// for SPEND only (identical on any window); checkouts and checkout value
-// stay on the BigQuery copy, which the task refreshes hourly. The view
-// split is still fetched for the audit endpoint.
+// Pinterest via Windsor REST (no direct Pinterest Ads API hookup). The
+// call carries Windsor's `options` parameter (see windsorParams) so its
+// checkouts are on the same attribution window / report time as the
+// BigQuery task and Ads Manager. Fresher than the hourly sync, so a day it
+// covers at least as fully (spend ≥ synced spend) also refreshes checkouts
+// and checkout value. The view split is pulled for the row's note.
 export const PINTEREST_REVENUE_FIELDS = ['total_checkout_value', 'total_conversions_value', 'conversion_value'];
 export const PINTEREST_CONVERSION_FIELDS = ['total_checkout', 'total_conversions', 'conversions'];
 // Label for the Windsor/BigQuery path. Assumes the BigQuery task's
@@ -103,7 +100,7 @@ export const PINTEREST_CONVERSION_FIELDS = ['total_checkout', 'total_conversions
 export function pinterestWindsorNote(): string {
   const a = getClient().ads.pinterestAttribution ?? { clickWindowDays: 7, engagementWindowDays: 7, viewWindowDays: 1, conversionReportTime: 'TIME_OF_AD_ACTION' };
   const when = a.conversionReportTime === 'TIME_OF_CONVERSION' ? 'by conversion date' : 'by ad date';
-  return `Pinterest checkouts · ${a.clickWindowDays}-day click · ${a.engagementWindowDays}-day engagement · ${a.viewWindowDays}-day view, ${when} — Windsor sync (hourly), same conversion settings as Ads Manager`;
+  return `Pinterest checkouts · ${a.clickWindowDays}-day click · ${a.engagementWindowDays}-day engagement · ${a.viewWindowDays}-day view, ${when} — same conversion settings as Ads Manager (via Windsor)`;
 }
 export const PINTEREST_ATTRIBUTION_NOTE = 'Pinterest checkouts (Windsor sync)';
 export async function fetchPinterestDailyFromWindsor(since: string, until: string): Promise<PlatformDay[] | null> {
