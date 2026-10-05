@@ -39,25 +39,29 @@ export async function GET(request: NextRequest) {
     out.bigquery = 'not configured';
   }
 
-  // Windsor live, every conversion-ish field the connector will give us.
+  // Windsor live, every conversion-ish field the connector will give us —
+  // pulled twice: as the dashboard does today, and with the 7-day click /
+  // 1-day engagement / 1-day view window on the ad-event date basis. If the
+  // second set of totals differs, Windsor honours those parameters.
   const key = (process.env.WINDSOR_API_KEY || '').trim();
   const scoped = key ? windsorParams('pinterest', { date_from: from, date_to: today }) : null;
   if (scoped) {
     const fields = ['account_id', 'spend', 'total_checkout', 'total_checkout_value', 'checkout', 'checkout_value', 'total_conversions', 'total_conversions_value',
       'conversions', 'conversion_value', 'checkout_roas', 'total_checkout_roas', 'web_checkout', 'web_checkout_value'];
-    try {
-      const qs = new URLSearchParams({ api_key: key, fields: fields.join(','), _renderer: 'json', ...scoped });
-      const res = await fetch(`https://connectors.windsor.ai/pinterest?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(20000) });
+    const pull = async (extra: Record<string, string>) => {
+      const qs = new URLSearchParams({ api_key: key, fields: fields.join(','), _renderer: 'json', ...scoped, ...extra });
+      const res = await fetch(`https://connectors.windsor.ai/pinterest?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(25000) });
       const json = await res.json();
-      if (json.error) {
-        out.windsorError = json.error;
-      } else {
-        const rows = (json.data || []) as Array<Record<string, unknown>>;
-        const totals: Record<string, number> = {};
-        for (const r of rows) for (const f of fields.slice(1)) totals[f] = (totals[f] || 0) + Number(r[f] || 0);
-        out.windsorLive = { rows: rows.length, totals, sample: rows.slice(0, 2) };
-      }
-    } catch (e) { out.windsorError = String(e instanceof Error ? e.message : e); }
+      if (json.error) return { error: json.error };
+      const rows = (json.data || []) as Array<Record<string, unknown>>;
+      const totals: Record<string, number> = {};
+      for (const r of rows) for (const f of fields.slice(1)) totals[f] = (totals[f] || 0) + Number(r[f] || 0);
+      return { rows: rows.length, totals, sample: rows.slice(0, 1) };
+    };
+    const window711 = { click_window_days: '7', engagement_window_days: '1', view_window_days: '1', conversion_report_time: 'TIME_OF_AD_ACTION' };
+    try { out.windsorLiveDefault = await pull({}); } catch (e) { out.windsorError = String(e instanceof Error ? e.message : e); }
+    try { out.windsorLive711 = await pull(window711); } catch (e) { out.windsor711Error = String(e instanceof Error ? e.message : e); }
+    out.windsor711Params = window711;
   }
   return NextResponse.json(out);
 }
