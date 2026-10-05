@@ -111,6 +111,26 @@ export async function GET(request: NextRequest) {
         sample: rows.slice(0, 5),
       };
     } catch (e) { out.windsorProbeError = String(e instanceof Error ? e.message : e); }
+    // Which grain keeps the full spend? Same probe day: per ad without the
+    // option, per campaign with it, per ad group with it, account-level with it.
+    const grainPull = async (fields: string, withOptions: boolean) => {
+      const probeDay = String(out.probeDay || today);
+      const qs = new URLSearchParams({ api_key: key, fields, _renderer: 'json', ...scoped, date_from: probeDay, date_to: probeDay });
+      if (withOptions && options) qs.set('options', options);
+      const res = await fetch(`https://connectors.windsor.ai/pinterest?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(25000) });
+      const json = await res.json();
+      if (json.error) return { error: json.error };
+      const rows = (json.data || []) as Array<Record<string, unknown>>;
+      return { rows: rows.length, spend: Math.round(rows.reduce((s, r) => s + Number(r.spend || 0), 0) * 100) / 100, total_checkout: rows.reduce((s, r) => s + Number(r.total_checkout || 0), 0), sample: rows.slice(0, 2) };
+    };
+    try {
+      out.grainProbes = {
+        perAd_noOptions: await grainPull('date,account_id,ad_id,ad_group_name,campaign_name,spend,clicks,impressions,total_checkout', false),
+        perAdGroup_withOptions: await grainPull('date,account_id,ad_group_name,campaign_name,spend,clicks,impressions,total_checkout,total_checkout_value', true),
+        perCampaign_withOptions: await grainPull('date,account_id,campaign_name,spend,clicks,impressions,total_checkout,total_checkout_value', true),
+        account_withOptions: await grainPull('date,account_id,spend,clicks,impressions,total_checkout,total_checkout_value', true),
+      };
+    } catch (e) { out.grainProbesError = String(e instanceof Error ? e.message : e); }
     try { out.windsorLiveDefault = await pull({}); } catch (e) { out.windsorError = String(e instanceof Error ? e.message : e); }
     if (options) {
       try { out.windsorLiveTaskOptions = await pull({ options }); } catch (e) { out.windsorOptionsError = String(e instanceof Error ? e.message : e); }
