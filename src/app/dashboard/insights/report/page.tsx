@@ -15,6 +15,7 @@ function ReportBuilder() {
   const [status, setStatus] = useState<'working' | 'waiting' | 'error'>('working');
   const [error, setError] = useState('');
   const [elapsed, setElapsed] = useState(0);
+  const [stage, setStage] = useState('');
   const started = useRef(false);
   const baselineIds = useRef<Set<string>>(new Set());
 
@@ -63,23 +64,35 @@ function ReportBuilder() {
       const since = Number(params.get('since') || 0);
       if (since) {
         setStatus('working');
-        for (let i = 0; i < 150; i++) {
+        const open = async (id: string) => {
+          const rep = await fetch(`/api/insights/reports/${encodeURIComponent(id)}`, { cache: 'no-store' });
+          const repData = await rep.json().catch(() => null);
+          if (repData?.html) { render(repData.html); return true; }
+          return false;
+        };
+        for (let i = 0; i < 225; i++) {
           // The chat records generation/save failures here — surface them.
           try {
             const err = localStorage.getItem(`rk_report_err_${since}`);
             if (err) { setStatus('error'); setError(err); return; }
           } catch { /* ignore */ }
+          // Server-side job status: progress stage, errors, and the saved id —
+          // written by the build itself, so it is there even if this device slept.
+          try {
+            const js = await fetch(`/api/insights/report/status?since=${since}`, { cache: 'no-store' });
+            const jd = await js.json().catch(() => null);
+            const job = jd?.job as { status: string; stage?: string; error?: string; reportId?: string } | null;
+            if (job?.status === 'error') { setStatus('error'); setError(job.error || 'The report failed.'); return; }
+            if (job?.stage) setStage(job.stage);
+            if (job?.status === 'done' && job.reportId && await open(job.reportId)) return;
+          } catch { /* keep polling */ }
           try {
             const res = await fetch('/api/insights/reports', { cache: 'no-store' });
             const data = await res.json().catch(() => null);
             const reports = (data?.reports as { id: string; createdAt: string }[] | undefined) ?? [];
             // 2-minute clock-skew allowance between this device and the server.
             const fresh = reports.find(r => Date.parse(r.createdAt) >= since - 120000);
-            if (fresh) {
-              const rep = await fetch(`/api/insights/reports/${encodeURIComponent(fresh.id)}`, { cache: 'no-store' });
-              const repData = await rep.json().catch(() => null);
-              if (repData?.html) { render(repData.html); return; }
-            }
+            if (fresh && await open(fresh.id)) return;
           } catch { /* keep polling */ }
           await new Promise(r => setTimeout(r, 4000));
         }
@@ -186,6 +199,7 @@ function ReportBuilder() {
           <>
             <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center text-2xl mx-auto mb-4 animate-pulse">✦</div>
             <p className="text-sm font-semibold text-gray-800 mb-1">Cleo is building your report…</p>
+            {stage && <p className="text-xs text-violet-600 mb-1">{stage}</p>}
             <p className="text-xs text-gray-400 mb-2">Re-checking the numbers and drawing the charts. This can take a few minutes for bigger questions. ({elapsed}s)</p>
             <p className="text-[11px] text-gray-400">You don&apos;t have to wait here — it builds in the background even if you close this tab, and lands under <strong>Saved reports</strong> on the AI Insights tab.</p>
           </>

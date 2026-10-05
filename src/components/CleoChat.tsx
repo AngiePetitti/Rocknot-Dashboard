@@ -349,7 +349,10 @@ export default function CleoChat() {
   // The viewer can be closed or backgrounded freely — generation continues.
   function kickoffReport(payload: { messages: ChatMsg[]; focus?: string }): void {
     const since = Date.now();
-    const body = JSON.stringify(payload);
+    // `since` doubles as the job id: the server records progress/errors under
+    // it, and the viewer tab polls that — so this tab (or this computer)
+    // going to sleep no longer matters once the request has been accepted.
+    const body = JSON.stringify({ ...payload, since });
     try {
       // keepalive lets the request survive tab switches (64KB body limit).
       // Record failures so the viewer tab can surface them instead of
@@ -363,6 +366,7 @@ export default function CleoChat() {
         .then(async r => {
           const d = await r.json().catch(() => null);
           const problem = !r.ok ? (d?.error || `Report generation failed (HTTP ${r.status})`) : d?.saveError ? `Report built but saving failed: ${d.saveError}` : null;
+          if (r.status === 202) return; // accepted — the server owns it from here
           if (problem) { try { localStorage.setItem(`rk_report_err_${since}`, problem); } catch { /* ignore */ } }
         })
         .catch(e => { try { localStorage.setItem(`rk_report_err_${since}`, `Report request died: ${String(e)}`); } catch { /* ignore */ } });
