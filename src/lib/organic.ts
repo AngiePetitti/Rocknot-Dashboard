@@ -195,17 +195,16 @@ export async function fetchInstagramOrganic(from: string, to: string): Promise<S
 
 interface ArticleMeta { title: string; imageUrl: string; publishedAt: string; handle: string; blogHandle: string }
 
-/** Published articles from the Shopify Admin API, keyed by /blogs/<blog>/<article> path. */
-export async function fetchArticles(): Promise<Map<string, ArticleMeta>> {
+type ArticleNode = { title: string; handle: string; publishedAt: string | null; image: { url: string } | null; blog: { handle: string } };
+
+/**
+ * Published articles from the Shopify Admin API (needs the read_content
+ * scope on the token). Returns Shopify's errors too, for the debug endpoint.
+ */
+export async function fetchArticlesRaw(): Promise<{ nodes: ArticleNode[]; errors: string[]; status: number | null }> {
   const token = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
-  const out = new Map<string, ArticleMeta>();
-  if (!token || !shopifyDomain()) return out;
-  const query = `{
-    articles(first: 250, sortKey: PUBLISHED_AT, reverse: true, query: "published_status:published") {
-      nodes { title handle publishedAt image { url(transform: { maxWidth: 400 }) } blog { handle } }
-    }
-  }`;
-  try {
+  if (!token || !shopifyDomain()) return { nodes: [], errors: ['Shopify not configured'], status: null };
+  const run = async (query: string) => {
     const res = await fetch(`https://${shopifyDomain()}/admin/api/2026-04/graphql.json`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
@@ -214,11 +213,35 @@ export async function fetchArticles(): Promise<Map<string, ArticleMeta>> {
       signal: AbortSignal.timeout(15000),
     });
     const json = await res.json();
-    const nodes = (json?.data?.articles?.nodes || []) as Array<{ title: string; handle: string; publishedAt: string | null; image: { url: string } | null; blog: { handle: string } }>;
-    for (const a of nodes) {
-      out.set(`/blogs/${a.blog.handle}/${a.handle}`, { title: a.title, imageUrl: a.image?.url || '', publishedAt: (a.publishedAt || '').slice(0, 10), handle: a.handle, blogHandle: a.blog.handle });
-    }
-  } catch { /* titles/images are a nicety — the traffic table still renders from paths */ }
+    const errors = ((json?.errors as Array<{ message?: string }> | undefined) || []).map(e => e.message || String(e));
+    return { status: res.status, json, errors };
+  };
+  try {
+    // Preferred: the top-level articles query (2024-10+).
+    const a = await run(`{ articles(first: 250, sortKey: PUBLISHED_AT, reverse: true, query: "published_status:published") {
+      nodes { title handle publishedAt image { url(transform: { maxWidth: 400 }) } blog { handle } } } }`);
+    const nodes = (a.json?.data?.articles?.nodes || []) as ArticleNode[];
+    if (nodes.length || !a.errors.length) return { nodes, errors: a.errors, status: a.status };
+    // Fallback: walk blogs → articles.
+    const b = await run(`{ blogs(first: 20) { nodes { handle articles(first: 100, sortKey: PUBLISHED_AT, reverse: true) {
+      nodes { title handle publishedAt image { url(transform: { maxWidth: 400 }) } } } } } }`);
+    const blogs = (b.json?.data?.blogs?.nodes || []) as Array<{ handle: string; articles: { nodes: Array<Omit<ArticleNode, 'blog'>> } }>;
+    const flat: ArticleNode[] = [];
+    for (const bl of blogs) for (const ar of bl.articles.nodes) flat.push({ ...ar, blog: { handle: bl.handle } });
+    return { nodes: flat, errors: [...a.errors, ...b.errors], status: b.status };
+  } catch (e) {
+    return { nodes: [], errors: [e instanceof Error ? e.message : String(e)], status: null };
+  }
+}
+
+/** Published articles keyed by /blogs/<blog>/<article> path. */
+export async function fetchArticles(): Promise<Map<string, ArticleMeta>> {
+  const out = new Map<string, ArticleMeta>();
+  const { nodes } = await fetchArticlesRaw();
+  for (const a of nodes) {
+    if (!a.publishedAt) continue;
+    out.set(`/blogs/${a.blog.handle}/${a.handle}`, { title: a.title, imageUrl: a.image?.url || '', publishedAt: a.publishedAt.slice(0, 10), handle: a.handle, blogHandle: a.blog.handle });
+  }
   return out;
 }
 
