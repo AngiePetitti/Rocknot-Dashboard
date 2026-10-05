@@ -166,6 +166,12 @@ export async function fetchPinterestOrganic(from: string, to: string): Promise<S
   return { status: 'ok', items, totals: sumTotals(items, PINTEREST_METRICS), fieldSet: r.fieldSet || undefined };
 }
 
+function pickImage(type: string, mediaUrl: string, thumbUrl: string): string {
+  const isVideo = /REEL|VIDEO/i.test(type) || /\.mp4(\?|$)/i.test(mediaUrl);
+  if (isVideo) return thumbUrl || '';
+  return mediaUrl || thumbUrl;
+}
+
 export async function fetchInstagramOrganic(from: string, to: string): Promise<SourceBlock<OrganicPost>> {
   const r = await windsorOrganicRows('instagram', INSTAGRAM_FIELDSETS, from, to);
   if (r.notConnected) return { status: 'not_connected', items: [], totals: {} };
@@ -178,8 +184,9 @@ export async function fetchInstagramOrganic(from: string, to: string): Promise<S
     return {
       id, platform: 'Instagram' as const,
       title: caption ? (caption.length > 90 ? `${caption.slice(0, 90)}…` : caption) : `${type || 'Post'} ${id}`,
-      // Videos/reels: media_url is the video; the thumbnail is the image to show.
-      imageUrl: (type === 'VIDEO' || type === 'REEL' ? str(last.media_thumbnail_url) : '') || str(last.media_url) || str(last.media_thumbnail_url),
+      // Reels/videos (media_type REELS / VIDEO): media_url is the .mp4 — show
+      // the thumbnail instead. Carousels and images have no thumbnail field.
+      imageUrl: pickImage(str(last.media_type), str(last.media_url), str(last.media_thumbnail_url)),
       url: str(last.media_permalink),
       publishedAt: str(last.timestamp).slice(0, 10),
       group: type,

@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   const days = Math.max(1, Math.min(60, Number(request.nextUrl.searchParams.get('days') || 7)));
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const from = new Date(Date.parse(`${today}T12:00:00Z`) - days * 86400000).toISOString().slice(0, 10);
-  const out: Record<string, unknown> = { range: { from, to: today } };
+  const out: Record<string, unknown> = { generatedAt: new Date().toISOString(), range: { from, to: today } };
 
   if (isBigQueryConfigured()) {
     const ds = getDataset();
@@ -82,5 +82,5 @@ export async function GET(request: NextRequest) {
       out.windsorOptions = options;
     }
   }
-  return NextResponse.json(out);
+  return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
 }
