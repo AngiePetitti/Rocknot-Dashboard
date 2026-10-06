@@ -203,15 +203,27 @@ export default function CleoChat() {
   useEffect(() => {
     if (!reportJob || reportJob.status !== 'building') return;
     let cancelled = false;
+    let lastNudge = 0;
     const tick = async () => {
       try {
         const r = await fetch(`/api/insights/report/status?since=${reportJob.since}`, { cache: 'no-store' });
         const d = await r.json().catch(() => null);
-        const job = d?.job as { status: string; stage?: string; error?: string; reportId?: string } | null;
+        const job = d?.job as { status: string; stage?: string; error?: string; reportId?: string; claimedAt?: string; updatedAt?: string } | null;
         if (cancelled || !job) return;
         if (job.status === 'done') setReportJob(j => j && { ...j, status: 'ready', url: job.reportId ? `/dashboard/insights/report?saved=${encodeURIComponent(job.reportId)}` : j.url });
         else if (job.status === 'error') setReportJob(j => j && { ...j, status: 'error', error: job.error });
-        else if (job.stage) setReportJob(j => j && { ...j, stage: job.stage });
+        else {
+          if (job.stage) setReportJob(j => j && { ...j, stage: job.stage });
+          // The report is built one step at a time. A step that nobody has
+          // claimed (or whose runner the platform froze) is idle — ask the
+          // server to run it. Idempotent on the server, so nudging is safe.
+          const claimFresh = job.claimedAt ? Date.now() - Date.parse(job.claimedAt) < 5.5 * 60 * 1000 : false;
+          if (!claimFresh && Date.now() - lastNudge > 15000) { lastNudge = Date.now(); nudgeReport(reportJob.since, 0); }
+          // Stalled for 12 minutes with no progress at all — stop pretending.
+          if (job.updatedAt && Date.now() - Date.parse(job.updatedAt) > 12 * 60 * 1000) {
+            setReportJob(j => j && { ...j, status: 'error', error: 'The report stalled. Ask Cleo to build it again.' });
+          }
+        }
       } catch { /* keep polling */ }
     };
     tick();
@@ -388,14 +400,14 @@ export default function CleoChat() {
   // The viewer can be closed or backgrounded freely — generation continues.
   // Ask the server to run a queued report inline (idempotent — a job that
   // has already started is left alone). Fired automatically, never by a click.
-  function nudgeReport(since: number): void {
+  function nudgeReport(since: number, delayMs = 4000): void {
     setTimeout(() => {
       fetch('/api/insights/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ since, resume: true, wait: true }),
       }).catch(() => { /* status polling will show the outcome */ });
-    }, 4000);
+    }, delayMs);
   }
 
   function kickoffReport(payload: { messages: ChatMsg[]; focus?: string }): void {
@@ -519,7 +531,7 @@ export default function CleoChat() {
                   {reportJob.status === 'ready' ? 'Your report is ready' : reportJob.status === 'error' ? 'The report failed' : 'Cleo is building your report…'}
                 </p>
                 <p className="text-[11px] opacity-80 leading-snug">
-                  {reportJob.status === 'error' ? (reportJob.error || 'Try again.') : reportJob.status === 'ready' ? 'Also saved under Saved reports on the AI Insights tab.' : (reportJob.stage || 'Fetching the data…') + (reportJob.openedTab ? '' : ' · it keeps building even if you close this.')}
+                  {reportJob.status === 'error' ? (reportJob.error || 'Try again.') : reportJob.status === 'ready' ? 'Also saved under Saved reports on the AI Insights tab.' : (reportJob.stage || 'Planning the report…') + (reportJob.openedTab ? '' : ' · it keeps building even if you close this.')}
                 </p>
               </div>
               {reportJob.status !== 'error' && (

@@ -70,14 +70,16 @@ function ReportBuilder() {
           if (repData?.html) { render(repData.html); return true; }
           return false;
         };
-        let nudged = false;
-        for (let i = 0; i < 225; i++) {
-          // Queued but not started after ~12s (background runner frozen) —
-          // ask the server to run it from this tab, once. Idempotent.
-          if (!nudged && i >= 3) {
-            nudged = true;
-            fetch('/api/insights/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ since, resume: true, wait: true }) }).catch(() => {});
-          }
+        // The report is built one step at a time (plan → sections → assemble);
+        // each step persists, so a big report can take a while but never
+        // dies. Give up only when the job itself stops making progress.
+        const startedAt = Date.now();
+        let lastNudge = 0;
+        const nudge = () => {
+          lastNudge = Date.now();
+          fetch('/api/insights/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ since, resume: true, wait: true }) }).catch(() => {});
+        };
+        for (let i = 0; Date.now() - startedAt < 60 * 60 * 1000; i++) {
           // The chat records generation/save failures here — surface them.
           try {
             const err = localStorage.getItem(`rk_report_err_${since}`);
@@ -88,10 +90,19 @@ function ReportBuilder() {
           try {
             const js = await fetch(`/api/insights/report/status?since=${since}`, { cache: 'no-store' });
             const jd = await js.json().catch(() => null);
-            const job = jd?.job as { status: string; stage?: string; error?: string; reportId?: string } | null;
+            const job = jd?.job as { status: string; stage?: string; error?: string; reportId?: string; claimedAt?: string; updatedAt?: string } | null;
             if (job?.status === 'error') { setStatus('error'); setError(job.error || 'The report failed.'); return; }
             if (job?.stage) setStage(job.stage);
             if (job?.status === 'done' && job.reportId && await open(job.reportId)) return;
+            if (job?.status === 'running') {
+              // A step nobody is running (or whose runner the platform froze)
+              // — run it from here. Idempotent on the server.
+              const claimFresh = job.claimedAt ? Date.now() - Date.parse(job.claimedAt) < 5.5 * 60 * 1000 : false;
+              if (!claimFresh && Date.now() - lastNudge > 15000 && i >= 2) nudge();
+              if (job.updatedAt && Date.now() - Date.parse(job.updatedAt) > 12 * 60 * 1000) {
+                setStatus('error'); setError('The report stalled with no progress for 12 minutes. Ask Cleo to build it again.'); return;
+              }
+            }
           } catch { /* keep polling */ }
           try {
             const res = await fetch('/api/insights/reports', { cache: 'no-store' });
@@ -104,7 +115,7 @@ function ReportBuilder() {
           await new Promise(r => setTimeout(r, 4000));
         }
         setStatus('error');
-        setError('The report is taking unusually long. Check Saved reports on the AI Insights tab in a few minutes.');
+        setError('The report is taking unusually long. Check Saved reports on the AI Insights tab — it may still finish there.');
         return;
       }
 
@@ -176,6 +187,11 @@ function ReportBuilder() {
           body: JSON.stringify(focus ? { messages: chat.slice(-8), focus } : { messages: chat }),
         });
         const data = await res.json().catch(() => null);
+        if (res.status === 202 && data?.since && !data?.html) {
+          // Bigger report — it keeps building as a job; follow it instead.
+          location.replace(`/dashboard/insights/report?since=${encodeURIComponent(String(data.since))}`);
+          return;
+        }
         if (!res.ok || !data?.html) {
           // The server answered but with an error — a real failure.
           setStatus('error');
@@ -207,7 +223,7 @@ function ReportBuilder() {
             <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center text-2xl mx-auto mb-4 animate-pulse">✦</div>
             <p className="text-sm font-semibold text-gray-800 mb-1">Cleo is building your report…</p>
             {stage && <p className="text-xs text-violet-600 mb-1">{stage}</p>}
-            <p className="text-xs text-gray-400 mb-2">Re-checking the numbers and drawing the charts. This can take a few minutes for bigger questions. ({elapsed}s)</p>
+            <p className="text-xs text-gray-400 mb-2">Built one section at a time — checking the numbers, drawing the charts. A full monthly report can take 10–15 minutes. ({elapsed}s)</p>
             <p className="text-[11px] text-gray-400">You don&apos;t have to wait here — it builds in the background even if you close this tab, and lands under <strong>Saved reports</strong> on the AI Insights tab.</p>
           </>
         ) : (
