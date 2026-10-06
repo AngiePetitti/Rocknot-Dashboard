@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isBigQueryConfigured, runQuery, getDataset, tableExists, columnExists, googleSource } from '@/src/lib/bigquery';
-import { getClient } from '@/src/lib/client';
+import { getClient, metaAccountSql } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -59,5 +59,49 @@ export async function GET(request: NextRequest) {
     } catch (e) { out.googleAsRead = { error: e instanceof Error ? e.message : String(e) }; }
   }
   out.tables = result;
+
+  // Meta grain check. Sep 2025 reads exactly 2× Ads Manager while the exact-
+  // duplicate check finds nothing, so the extra rows differ in SOME column —
+  // the signature of two uploads at different grains (ad set rows + ad rows)
+  // or an extra breakdown. Shows which columns exist, per-month row shape, and
+  // raw rows for one day so the right de-duplication key can be chosen.
+  if (await tableExists('facebook_ads')) {
+    try {
+      const acct = metaAccountSql();
+      const probeMonth = request.nextUrl.searchParams.get('probe_month') || '2025-09';
+      const probeDay = request.nextUrl.searchParams.get('probe_day') || `${probeMonth}-15`;
+      const columns = await runQuery<{ column_name: string; data_type: string }>(
+        `SELECT column_name, data_type FROM \`${ds}.INFORMATION_SCHEMA.COLUMNS\` WHERE table_name = 'facebook_ads' ORDER BY ordinal_position`);
+      const names = columns.map(c => c.column_name);
+      const has = (c: string) => names.includes(c);
+      const idCols = ['account_id', 'campaign_id', 'adset_id', 'adset_name', 'ad_id', 'ad_name', 'campaign'].filter(has);
+      const breakdownCols = ['publisher_platform', 'platform_position', 'device_platform', 'impression_device', 'country', 'region', 'age', 'gender', 'placement', 'objective', 'date_start', 'date_stop', 'attribution_setting', 'action_attribution_windows'].filter(has);
+      const distinctSel = [...idCols, ...breakdownCols].map(c => `COUNT(DISTINCT CAST(${c} AS STRING)) AS distinct_${c}, COUNTIF(${c} IS NULL) AS null_${c}`).join(', ');
+      const byMonth = await runQuery(
+        `SELECT FORMAT_DATE('%Y-%m', DATE(date)) AS month, COUNT(*) AS row_count, ROUND(SUM(CAST(spend AS FLOAT64)), 2) AS spend${distinctSel ? ', ' + distinctSel : ''}
+         FROM \`${ds}.facebook_ads\` WHERE DATE(date) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL ${months} MONTH)${acct}
+         GROUP BY month ORDER BY month DESC`);
+      // Duplicates at progressively looser keys, with the spend the extra rows carry.
+      const dupAt = async (key: string[]) => {
+        if (!key.every(has)) return { key, skipped: 'column missing' };
+        const r = await runQuery(
+          `SELECT COUNT(*) AS duplicate_groups, SUM(n - 1) AS extra_rows, ROUND(SUM(sp - sp / n), 2) AS extra_spend_if_rows_identical, ROUND(SUM(sp) / 2, 2) AS half_of_group_spend FROM (
+             SELECT ${key.map(c => `CAST(${c} AS STRING)`).join(', ')}, COUNT(*) AS n, SUM(CAST(spend AS FLOAT64)) AS sp
+             FROM \`${ds}.facebook_ads\` WHERE FORMAT_DATE('%Y-%m', DATE(date)) = '${probeMonth.replace(/[^0-9-]/g, '')}'${acct}
+             GROUP BY ${key.map((_, i) => i + 1).join(', ')} HAVING n > 1)`);
+        return { key, ...(r[0] || {}) };
+      };
+      const dupes = await Promise.all([
+        dupAt(['date', 'ad_id']), dupAt(['date', 'adset_id']), dupAt(['date', 'campaign', 'ad_name']), dupAt(['date', 'campaign']),
+        dupAt(['date', 'ad_id', 'spend']),
+      ]);
+      // Every row for one day, as JSON, so the differing column is visible.
+      const dayRows = await runQuery<{ row: string }>(
+        `SELECT TO_JSON_STRING(t) AS row FROM \`${ds}.facebook_ads\` t WHERE DATE(date) = '${probeDay.replace(/[^0-9-]/g, '')}'${acct} ORDER BY CAST(ad_id AS STRING), CAST(spend AS FLOAT64) LIMIT 40`);
+      const dayTotal = await runQuery(
+        `SELECT COUNT(*) AS row_count, ROUND(SUM(CAST(spend AS FLOAT64)), 2) AS spend FROM \`${ds}.facebook_ads\` WHERE DATE(date) = '${probeDay.replace(/[^0-9-]/g, '')}'${acct}`);
+      out.metaGrain = { columns, probeMonth, probeDay, byMonth, duplicatesInProbeMonth: dupes, probeDayTotal: dayTotal[0] || null, probeDayRows: dayRows.map(r => { try { return JSON.parse(r.row); } catch { return r.row; } }) };
+    } catch (e) { out.metaGrain = { error: e instanceof Error ? e.message : String(e) }; }
+  }
   return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store' } });
 }
