@@ -180,6 +180,18 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_site_analytics',
+    description: "Google Analytics 4 for a date range (Traffic tab → Google Analytics view): sessions, users, engagement rate, page views, add-to-carts, purchases; channel groups; top sources (source / medium); landing pages with sessions, engagement, purchases and conversion rate — including the BEST and WORST converting landing pages (≥100 sessions); most-viewed pages. Use for 'which pages convert', 'where is traffic coming from', 'what are people looking at'. GA4 counts differ from Shopify — never mix them: Shopify (get_metrics / get_attribution) is the order and revenue truth.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        date_from: { type: 'string', description: 'YYYY-MM-DD' },
+        date_to: { type: 'string', description: 'YYYY-MM-DD' },
+      },
+      required: ['date_from', 'date_to'],
+    },
+  },
+  {
     name: 'get_goals',
     description: "The company's monthly revenue goals and ad-spend budgets (the Goals tab plan, including which months are pinned/manually set). Compare against get_metrics actuals to judge pace toward the annual target.",
     input_schema: { type: 'object', properties: {} },
@@ -259,7 +271,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
 async function execToolInner(get: Getter, name: string, input: Record<string, unknown>, onGuard: (g: string) => void): Promise<string> {
   const from = String(input.date_from ?? '');
   const to = String(input.date_to ?? '');
-  const needsRange = ['get_metrics', 'get_top_products', 'get_ad_performance', 'get_returns', 'get_customer_intel', 'get_attribution', 'get_organic_content', 'get_marketplace_channel'].includes(name);
+  const needsRange = ['get_metrics', 'get_top_products', 'get_ad_performance', 'get_returns', 'get_customer_intel', 'get_attribution', 'get_organic_content', 'get_marketplace_channel', 'get_site_analytics'].includes(name);
   if (needsRange && (!DATE_RE.test(from) || !DATE_RE.test(to) || from > to)) {
     return 'Error: date_from and date_to must be YYYY-MM-DD with date_from <= date_to.';
   }
@@ -506,6 +518,13 @@ By size:\n${rows('bySize', 10)}
 By ship-to region:\n${rows('byRegion', 8)}
 
 ${series}`;
+  }
+
+  if (name === 'get_site_analytics') {
+    const d = await get(`/api/traffic/ga4?${params}`);
+    if (!d) return 'Google Analytics unavailable: no response';
+    const { ga4Text } = await import('@/src/lib/ga4');
+    return ga4Text(d as unknown as import('@/src/lib/ga4').GaData, from, to);
   }
 
   if (name === 'get_organic_content') {
