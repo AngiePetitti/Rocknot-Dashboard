@@ -355,6 +355,11 @@ ${parts.join('\n')}
   if (!payload.email) throw new Error('No signed-in user to save the report for');
   const meta = await saveReport(payload.email, title.slice(0, 200), injectToolbar(html, true));
   await patchJob(since, { status: 'done', step: 'done', stage: 'Done', reportId: meta.id, claimedStep: undefined, claimedAt: undefined, claimToken: undefined });
+  // Browser notification to whoever asked (best-effort).
+  try {
+    const { notifyUser } = await import('@/src/lib/push');
+    await notifyUser(payload.email, 'reports', { title: `${brand.analyst.name} finished your report`, body: title.slice(0, 120), url: `${brand.dashboardUrl.replace(/\/$/, '')}/dashboard/insights/report?saved=${encodeURIComponent(meta.id)}`, tag: `report-${since}` });
+  } catch { /* the report is saved regardless */ }
 }
 
 // ── Orchestration ──────────────────────────────────────────────────────────

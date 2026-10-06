@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import LaunchChecklists from '@/src/components/LaunchChecklists';
+import MyTasksBanner from '@/src/components/MyTasksBanner';
 import { useSession } from 'next-auth/react';
 import type { MarketingEvent } from '@/src/app/api/calendar/route';
 
@@ -389,6 +390,8 @@ export default function CalendarContent() {
           </button>
         </div>
       </Header>
+      {/* The same personal task reminder as the Overview — only this person's open tasks. */}
+      <MyTasksBanner />
 
       {status === 'error' && (
         <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-red-700">

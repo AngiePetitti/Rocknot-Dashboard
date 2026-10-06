@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
 import { loadDoc, saveDoc } from '@/src/lib/docStore';
+import { notifyAssignee } from '@/src/lib/push';
+import { getClient } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +31,13 @@ export interface Task {
 }
 
 const DOC = 'tasks';
+
+// Browser notification to whoever the task names (best-effort, never blocks the save).
+function pingAssignee(req: NextRequest, t: Task, verb: string): void {
+  if (!t.assignee) return;
+  const due = t.dueDate ? ` · due ${t.dueDate}` : '';
+  notifyAssignee(t.assignee, { title: `${getClient().name}: ${verb}`, body: `${t.title}${due}`, url: `${req.nextUrl.origin}/dashboard/tasks`, tag: `task-${t.id}` }).catch(() => {});
+}
 const STATUSES: TaskStatus[] = ['todo', 'in_progress', 'done'];
 const PRIORITIES = ['low', 'medium', 'high'] as const;
 
@@ -101,6 +110,12 @@ export async function POST(req: NextRequest) {
         });
       }
       await saveDoc(DOC, JSON.stringify(tasks));
+      // One ping per assignee for a batch (a 15-task calendar is one notification, not fifteen).
+      const byAssignee = new Map<string, Task[]>();
+      for (const t of tasks.slice(-cleaned.length)) if (t.assignee) byAssignee.set(t.assignee, [...(byAssignee.get(t.assignee) || []), t]);
+      byAssignee.forEach((list, assignee) => {
+        notifyAssignee(assignee, { title: `${getClient().name}: ${list.length} new task${list.length > 1 ? 's' : ''} for you`, body: list.slice(0, 3).map(t => t.title).join(' · ') + (list.length > 3 ? ` · +${list.length - 3} more` : ''), url: `${req.nextUrl.origin}/dashboard/tasks`, tag: 'tasks-batch' }).catch(() => {});
+      });
       return NextResponse.json({ ok: true, created: cleaned.length, tasks });
     } catch (err) {
       return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });
@@ -129,6 +144,7 @@ export async function POST(req: NextRequest) {
     };
     tasks.push(task);
     await saveDoc(DOC, JSON.stringify(tasks));
+    pingAssignee(req, task, 'New task for you');
     return NextResponse.json({ ok: true, tasks });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });
@@ -148,12 +164,14 @@ export async function PUT(req: NextRequest) {
     if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 });
     const fields = clean(body);
     const wasDone = task.status === 'done';
+    const prevAssignee = task.assignee;
     Object.assign(task, fields, { updatedAt: new Date().toISOString() });
     if (fields.dueDate === '') task.dueDate = undefined;
     if (fields.assignee === '') task.assignee = undefined;
     if (task.status === 'done' && !wasDone) task.completedAt = new Date().toISOString();
     if (task.status !== 'done') task.completedAt = undefined;
     await saveDoc(DOC, JSON.stringify(tasks));
+    if (task.assignee && task.assignee !== prevAssignee && task.status !== 'done') pingAssignee(req, task, 'Task assigned to you');
     return NextResponse.json({ ok: true, tasks });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });

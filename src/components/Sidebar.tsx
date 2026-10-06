@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
+import NotificationBell from '@/src/components/NotificationBell';
 import { useClient } from '@/src/components/ClientProvider';
 import { PARTNER_PAGES } from '@/src/lib/access';
 
@@ -130,6 +131,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       {/* Footer — signed-in user + sign out (only when authenticated) */}
       {session?.user && (
         <div className="px-4 py-3 border-t border-gray-100">
+          <div className="mb-2"><NotificationBell /></div>
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-full bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center shrink-0">
               {(session.user.email || '?').charAt(0).toUpperCase()}
