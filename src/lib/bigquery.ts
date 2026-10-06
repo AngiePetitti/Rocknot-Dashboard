@@ -204,3 +204,24 @@ export async function googleAccountSql(): Promise<string> {
   }
   return googleAccountPredicate || '';
 }
+
+// ── Google Ads row de-duplication ─────────────────────────────────────────
+// Windsor's Google feed can emit the SAME campaign-day more than once (a
+// per-conversion-action field in the task's field list makes Google split
+// each row per action and repeat spend, clicks and the account-level
+// conversion value on every copy — Kailee's table had every day doubled).
+// All Google reads go through this source, which keeps one row per
+// (date, campaign[, ad group, ad]) with ANY_VALUE of the repeated metrics.
+// On a clean table it is a no-op. Columns absent from the table become NULL.
+let googleSourceSql: string | undefined;
+export async function googleSource(): Promise<string> {
+  if (googleSourceSql !== undefined) return googleSourceSql;
+  const ds = getDataset();
+  const names = ['campaign', 'campaign_id', 'ad_group_name', 'ad_group', 'ad_group_id', 'ad_id', 'conversions_value', 'conversion_value', 'conversions', 'clicks', 'impressions'];
+  const present = Object.fromEntries(await Promise.all(names.map(async n => [n, await columnExists('google_ads', n)] as const)));
+  const key = ['date', ...names.slice(0, 6).filter(n => present[n])];
+  const acct = await googleAccountSql();
+  const col = (n: string) => (present[n] ? `ANY_VALUE(CAST(${n} AS FLOAT64))` : 'NULL');
+  googleSourceSql = `(SELECT ${key.join(', ')}, ANY_VALUE(CAST(spend AS FLOAT64)) AS spend, ${col('conversions_value')} AS conversions_value, ${col('conversion_value')} AS conversion_value, ${col('conversions')} AS conversions, ${col('clicks')} AS clicks, ${col('impressions')} AS impressions FROM \`${ds}.google_ads\` WHERE 1=1${acct} GROUP BY ${key.join(', ')})`;
+  return googleSourceSql;
+}

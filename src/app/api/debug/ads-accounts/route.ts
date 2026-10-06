@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isBigQueryConfigured, runQuery, getDataset, tableExists, columnExists } from '@/src/lib/bigquery';
+import { isBigQueryConfigured, runQuery, getDataset, tableExists, columnExists, googleSource } from '@/src/lib/bigquery';
 import { getClient } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
@@ -45,6 +45,18 @@ export async function GET(request: NextRequest) {
     } catch (e) {
       result[t] = { error: e instanceof Error ? e.message : String(e) };
     }
+  }
+  // What the dashboard now reads for Google after de-duplication — compare
+  // these months against the Google Ads UI.
+  if (await tableExists('google_ads')) {
+    try {
+      const gsrc = await googleSource();
+      out.googleAsRead = await runQuery(
+        `SELECT FORMAT_DATE('%Y-%m', DATE(date)) AS month, COUNT(*) AS rows_after_dedupe, ROUND(SUM(spend), 2) AS spend,
+                ROUND(SUM(COALESCE(conversions_value, conversion_value, 0)), 2) AS revenue, ROUND(SUM(IFNULL(conversions, 0)), 1) AS conversions
+         FROM ${gsrc} WHERE DATE(date) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL ${months} MONTH)
+         GROUP BY month ORDER BY month DESC`);
+    } catch (e) { out.googleAsRead = { error: e instanceof Error ? e.message : String(e) }; }
   }
   out.tables = result;
   return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store' } });
