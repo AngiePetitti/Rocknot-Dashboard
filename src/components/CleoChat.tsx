@@ -340,9 +340,18 @@ export default function CleoChat() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: withAnswer.slice(-24) }),
       }).catch(() => {});
-      // Cleo decided to build a report — start it in the background right away
-      // and open a viewer tab (tap-through link if the popup is blocked).
-      if (typeof data.reportFocus === 'string' && data.reportFocus) {
+      // Cleo decided to build a report. The server already started the build
+      // (reportSince is its job id) — show the pinned banner and try to open
+      // the viewer; if a browser blocks the tab, the banner's button works.
+      if (typeof data.reportSince === 'number' && data.reportSince) {
+        const url = `/dashboard/insights/report?since=${data.reportSince}`;
+        const w = window.open(url, '_blank');
+        setReportLink(null);
+        setReportJob(data.reportError
+          ? { since: data.reportSince, url, status: 'error', error: String(data.reportError), openedTab: false }
+          : { since: data.reportSince, url, status: 'building', openedTab: Boolean(w) });
+      } else if (typeof data.reportFocus === 'string' && data.reportFocus) {
+        // Older server without server-side kickoff — start it from here.
         kickoffReport({ messages: withAnswer.slice(-8), focus: data.reportFocus });
       }
     } catch (e) {
