@@ -180,3 +180,27 @@ export async function shopifyOrdersFilter(): Promise<string> {
   if (has) ordersFilterCache = pred;
   return has ? pred : '';
 }
+
+// ── Google Ads account scoping ────────────────────────────────────────────
+// Windsor's workspace holds every client's Google accounts; a BigQuery task
+// created with more than one account selected lands them all in one table.
+// When the table has an account column and the profile's Google customer id
+// matches rows in it, every Google query is scoped to that id. Guarded: if
+// the id matches nothing (different formatting, single-account table) the
+// filter is skipped rather than zeroing spend. Cached per deployment.
+let googleAccountPredicate: string | null | undefined;
+export async function googleAccountSql(): Promise<string> {
+  if (googleAccountPredicate !== undefined) return googleAccountPredicate || '';
+  try {
+    const { getClient } = await import('@/src/lib/client');
+    const raw = (process.env.WINDSOR_ACCOUNT_GOOGLE_ADS || getClient().windsor.accounts.google_ads || '').trim();
+    const id = raw.replace(/[^0-9]/g, '');
+    if (!id || !(await columnExists('google_ads', 'account_id'))) { googleAccountPredicate = null; return ''; }
+    const pred = ` AND REPLACE(CAST(account_id AS STRING), '-', '') = '${id}'`;
+    const rows = await runQuery<{ n: number }>(`SELECT COUNT(*) AS n FROM \`${getDataset()}.google_ads\` WHERE 1=1${pred}`);
+    googleAccountPredicate = Number(rows[0]?.n || 0) > 0 ? pred : null;
+  } catch {
+    googleAccountPredicate = null;
+  }
+  return googleAccountPredicate || '';
+}

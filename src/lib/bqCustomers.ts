@@ -1,4 +1,4 @@
-import { runQuery, getDataset, dedupedOrdersCte, shopifyOrdersFilter } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte, shopifyOrdersFilter, googleAccountSql } from '@/src/lib/bigquery';
 import { CohortData } from '@/src/lib/mockData';
 import { metaAccountSql } from '@/src/lib/client';
 
@@ -222,7 +222,7 @@ export async function getPaybackLtv(): Promise<PaybackCohort[]> {
   const [cohortRows, meta, google, tiktok, snap, pinterest] = await Promise.all([
     runQuery<{ cohort_month: string; month_offset: number; revenue: number; size: number }>(cohortSql),
     runQuery<{ m: string; spend: number }>(spendFor('facebook_ads', metaAccountSql())).catch(() => []),
-    runQuery<{ m: string; spend: number }>(spendFor('google_ads')).catch(() => []),
+    runQuery<{ m: string; spend: number }>(spendFor('google_ads', await googleAccountSql())).catch(() => []),
     runQuery<{ m: string; spend: number }>(spendFor('tiktok_ads')).catch(() => []),
     runQuery<{ m: string; spend: number }>(spendFor('snapchat_ads')).catch(() => []),
     runQuery<{ m: string; spend: number }>(spendFor('pinterest_ads')).catch(() => []),
