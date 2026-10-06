@@ -69,7 +69,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_ad_performance',
-    description: 'Per-platform ad performance (every paid platform the store runs) for a date range: spend, attributed revenue, ROAS, clicks, conversions.',
+    description: 'Per-platform ad performance (every paid platform the store runs) for a date range: spend, attributed revenue, ROAS, clicks, conversions — plus new-customer CAC by platform (platform spend ÷ Shopify first-time buyers whose order came from that platform) and the blended new-customer CAC. Use it for any CAC / nCAC / cost-per-new-customer question.',
     input_schema: {
       type: 'object',
       properties: {
@@ -346,7 +346,12 @@ New customers ${m.newCustomers ?? 'N/A'} (${m.pctNew ?? '?'}%) · Returning ${m.
     const d = await get(`/api/windsor/ads?${params}`);
     const plats = (d?.platforms as { platform: string; spend: number; revenue: number; roas: number; clicks: number; conversions: number }[]) ?? [];
     if (!plats.length) return `No ad platform data for ${from} → ${to} (platforms may not have been running or synced in this window).`;
-    return `Ad performance ${from} → ${to}:\n${plats.map(p => `${p.platform}: $${p.spend.toLocaleString()} spend · $${p.revenue.toLocaleString()} attributed revenue · ${p.roas}x ROAS · ${p.clicks} clicks · ${p.conversions} conversions`).join('\n')}`;
+    let ncac = '';
+    try {
+      const n = await get(`/api/windsor/ncac?${params}`);
+      if (n && !n.error) { const { ncacText } = await import('@/src/lib/ncac'); ncac = `\n\n${ncacText(n as unknown as import('@/src/lib/ncac').NcacSummary)}`; }
+    } catch { /* optional */ }
+    return `Ad performance ${from} → ${to}:\n${plats.map(p => `${p.platform}: $${p.spend.toLocaleString()} spend · $${p.revenue.toLocaleString()} attributed revenue · ${p.roas}x ROAS · ${p.clicks} clicks · ${p.conversions} conversions`).join('\n')}${ncac}`;
   }
 
   if (name === 'get_returns') {

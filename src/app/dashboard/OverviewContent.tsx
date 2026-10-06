@@ -18,6 +18,7 @@ import CACChart from '@/src/components/charts/CACChart';
 import SpendDonut from '@/src/components/charts/SpendDonut';
 import { useClient } from '@/src/components/ClientProvider';
 import { PLATFORMS } from '@/src/lib/client';
+import NcacBreakdown from '@/src/components/NcacBreakdown';
 
 // MER runs on NET sales (post-discount/returns, excl. taxes+shipping); the
 // goal is the client profile's targetMer on that basis (Rocknot: 3.5x —
@@ -1033,6 +1034,9 @@ export default function OverviewContent() {
             accentColor="#a7f3d0"
           />
         </div>
+      )}
+      {metrics.newCustomers !== undefined && metrics.newCustomers > 0 && tfRaw !== 'today' && !isPartner && (
+        <NcacBreakdown tf={tfRaw} dateFrom={dateFrom} dateTo={dateTo} compare={compareOn} targetCac={TARGET_CAC} />
       )}
 
       {/* ── By product line (women's vs kids …) ── */}
