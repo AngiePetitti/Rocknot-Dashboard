@@ -3,6 +3,9 @@ import { friendlyAiError } from '@/src/lib/aiError';
 import Anthropic from '@anthropic-ai/sdk';
 import { ANALYST_TOOLS, execTool, makeFetcher } from '@/src/lib/analystTools';
 import { getClient, marketplaces } from '@/src/lib/client';
+import { getServerSession } from 'next-auth';
+import { authOptions, authConfigured } from '@/src/lib/auth';
+import { getChat, saveChat, isChatStoreConfigured, type StoredChatMsg } from '@/src/lib/chatStore';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -64,6 +67,13 @@ export async function POST(req: NextRequest) {
     .slice(-80);
   if (!history.length || history[history.length - 1].role !== 'user') {
     return NextResponse.json({ error: 'Send at least one user message' }, { status: 400 });
+  }
+
+  // Who is asking — so the finished answer can be saved to their chat on the
+  // server even if the browser that asked is gone by then (refresh, sleep).
+  let email: string | null = null;
+  if (authConfigured()) {
+    try { email = (await getServerSession(authOptions))?.user?.email?.toLowerCase() || null; } catch { /* save step just won't run */ }
   }
 
   const get = makeFetcher(req.nextUrl.origin, req.headers.get('cookie') || '');
@@ -184,6 +194,7 @@ If the operator asks for a report / PDF / shareable document, call create_report
     // browser (popup blockers, a closed tab, a sleeping laptop). The report
     // route answers 202 at once and finishes on its own.
     let reportSince: number | null = null;
+    let reportError: string | null = null;
     if (reportFocus) {
       reportSince = Date.now();
       const payload = {
@@ -202,10 +213,28 @@ If the operator asks for a report / PDF / shareable document, call create_report
       } catch (e) {
         // The job status route will report nothing for this since; the chat
         // banner falls back to showing the kickoff failed.
-        return NextResponse.json({ ok: true, answer, reportFocus, reportSince, reportError: `Couldn't start the report: ${e instanceof Error ? e.message : String(e)}` });
+        reportError = `Couldn't start the report: ${e instanceof Error ? e.message : String(e)}`;
       }
     }
-    return NextResponse.json({ ok: true, answer, ...(reportFocus ? { reportFocus, reportSince } : {}) });
+    // Persist the exchange server-side. The browser used to be the only writer,
+    // so a refresh mid-answer lost both the question and the answer. The
+    // stored copy is this request's history (the browser's view, images
+    // stripped) plus the answer; if the browser moved on meanwhile and the
+    // server already holds a longer conversation, append instead of replacing.
+    let saved = false;
+    if (email && isChatStoreConfigured()) {
+      try {
+        const asked: StoredChatMsg[] = history.map(mm => ({ role: mm.role, content: mm.content }));
+        const current = await getChat(email).catch(() => []);
+        const lastQ = asked[asked.length - 1];
+        const alreadyHasQ = current.length && current[current.length - 1].role === 'user' && current[current.length - 1].content === lastQ.content;
+        const base: StoredChatMsg[] = current.length > asked.length && !alreadyHasQ ? [...current, lastQ] : alreadyHasQ ? current : asked;
+        const toSave: StoredChatMsg[] = [...base, { role: 'assistant', content: answer }];
+        await saveChat(email, toSave.slice(-24));
+        saved = true;
+      } catch { /* the browser's own backup still runs */ }
+    }
+    return NextResponse.json({ ok: true, answer, saved, ...(reportFocus ? { reportFocus, reportSince } : {}), ...(reportError ? { reportError } : {}) });
   } catch (err) {
     return NextResponse.json({ error: friendlyAiError(err) }, { status: 500 });
   }
