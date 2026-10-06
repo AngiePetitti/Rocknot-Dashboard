@@ -110,8 +110,8 @@ export async function GET(request: NextRequest) {
       // these months against Ads Manager (Sep 2025 $12,315.41 · Aug 2025 $12,133.49 · Aug 2026 $8,279.48).
       const msrc = await metaSource();
       const metaAsRead = await runQuery(
-        `SELECT FORMAT_DATE('%Y-%m', DATE(date)) AS month, COUNT(*) AS rows_after_dedupe, ROUND(SUM(spend), 2) AS spend,
-                ROUND(SUM(IFNULL(action_values_omni_purchase, 0)), 2) AS revenue, ROUND(SUM(IFNULL(actions_omni_purchase, 0)), 0) AS purchases
+        `SELECT FORMAT_DATE('%Y-%m', DATE(date)) AS month, COUNT(*) AS rows_after_dedupe, ROUND(SUM(CAST(spend AS FLOAT64)), 2) AS spend,
+                ROUND(SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)), 2) AS revenue, ROUND(SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)), 0) AS purchases
          FROM ${msrc} WHERE DATE(date) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL ${months} MONTH)${acct}
          GROUP BY month ORDER BY month DESC`);
       out.metaGrain = { columns, probeMonth, probeDay, byMonth, exactDuplicatesByMonth: exactByMonth, duplicatesInProbeMonth: dupes, probeDayTotal: dayTotal[0] || null, probeDayRows: dayRows.map(r => { try { return JSON.parse(r.row); } catch { return r.row; } }) };

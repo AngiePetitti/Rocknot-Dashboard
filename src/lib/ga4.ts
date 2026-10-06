@@ -13,7 +13,8 @@ const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n
 const str = (v: unknown) => (v == null ? '' : String(v));
 
 // Windsor connector slugs to try, most likely first.
-const CONNECTORS = ['google_analytics_4', 'googleanalytics4', 'ga4', 'google_analytics'];
+// Windsor's GA4 connector slug (onboard.windsor.ai/app/googleanalytics4).
+const CONNECTORS = ['googleanalytics4', 'google_analytics_4'];
 
 export interface GaTotals {
   sessions: number; users: number; newUsers: number; engagedSessions: number; pageViews: number;
@@ -83,27 +84,40 @@ async function windsorRows(
 ): Promise<{ rows: Array<Record<string, unknown>> | null; fieldSet: string | null; error?: string }> {
   const scoped = windsorParams('google_analytics', { date_from: from, date_to: to });
   if (!scoped) return { rows: null, fieldSet: null, error: 'not connected' };
-  let lastError = '';
+  const errors: string[] = [];
   for (const fs of Q[query]) {
-    const qs = new URLSearchParams({ api_key: WINDSOR_KEY, fields: fs.fields.join(','), _renderer: 'json', ...scoped });
-    try {
-      const res = await fetch(`https://connectors.windsor.ai/${connector}?${qs}`, { next: { revalidate: 900 }, signal: AbortSignal.timeout(25000) });
-      const json = await res.json().catch(() => ({ error: `HTTP ${res.status} (not JSON)` }));
-      if (json.error || !Array.isArray(json.data)) {
-        lastError = String(json.error || json.message || `HTTP ${res.status}`);
-        attempts.push({ query, connector, fieldSet: fs.name, fields: fs.fields, error: lastError });
-        // An unknown connector slug fails every field set the same way — move on fast.
-        if (/not found|unknown (connector|source)|does not exist/i.test(lastError) && res.status === 404) break;
-        continue;
+    // Self-correcting: when Windsor's error names one of the requested
+    // fields, drop that field and retry (up to 6 times) before moving on to
+    // the next field set — so one unknown metric never blanks a block.
+    let fields = [...fs.fields];
+    for (let round = 0; round < 7 && fields.length >= 2; round++) {
+      const qs = new URLSearchParams({ api_key: WINDSOR_KEY, fields: fields.join(','), _renderer: 'json', ...scoped });
+      let err = '';
+      try {
+        const res = await fetch(`https://connectors.windsor.ai/${connector}?${qs}`, { next: { revalidate: 900 }, signal: AbortSignal.timeout(25000) });
+        const json = await res.json().catch(() => ({ error: `HTTP ${res.status} (not JSON)` }));
+        if (!json.error && Array.isArray(json.data)) {
+          attempts.push({ query, connector, fieldSet: round ? `${fs.name} (pruned ${fs.fields.length - fields.length})` : fs.name, fields, rows: json.data.length, sample: json.data.slice(0, 2) });
+          return { rows: json.data as Array<Record<string, unknown>>, fieldSet: fs.name };
+        }
+        err = String(json.error || json.message || `HTTP ${res.status}`);
+        if (res.status === 404 || /don't have this connector|do not have this connector/i.test(err)) {
+          attempts.push({ query, connector, fieldSet: fs.name, fields, error: err });
+          return { rows: null, fieldSet: null, error: err };
+        }
+      } catch (e) {
+        err = e instanceof Error ? e.message : String(e);
       }
-      attempts.push({ query, connector, fieldSet: fs.name, fields: fs.fields, rows: json.data.length, sample: json.data.slice(0, 2) });
-      return { rows: json.data as Array<Record<string, unknown>>, fieldSet: fs.name };
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
-      attempts.push({ query, connector, fieldSet: fs.name, fields: fs.fields, error: lastError });
+      attempts.push({ query, connector, fieldSet: fs.name, fields, error: err });
+      errors.push(err);
+      // Which requested field does the error mention? Never drop `date`.
+      const lower = err.toLowerCase();
+      const bad = fields.find(f => f !== 'date' && new RegExp(`(^|[^a-z0-9_])${f}([^a-z0-9_]|$)`).test(lower));
+      if (!bad) break;
+      fields = fields.filter(f => f !== bad);
     }
   }
-  return { rows: null, fieldSet: null, error: lastError };
+  return { rows: null, fieldSet: null, error: Array.from(new Set(errors)).slice(0, 3).join(' | ') };
 }
 
 function emptyTotals(): GaTotals { return { sessions: 0, users: 0, newUsers: 0, engagedSessions: 0, pageViews: 0, purchases: 0, revenue: 0, addToCarts: 0, conversions: 0 }; }
@@ -134,12 +148,14 @@ export async function fetchGa4(from: string, to: string, includeAttempts = false
   // Find the connector slug with the cheapest query, then run the rest in parallel on it.
   let connector = '';
   let daily: Awaited<ReturnType<typeof windsorRows>> = { rows: null, fieldSet: null };
+  const connectorErrors: string[] = [];
   for (const c of CONNECTORS) {
     daily = await windsorRows('daily', c, from, to, attempts);
     if (daily.rows) { connector = c; break; }
+    connectorErrors.push(`${c}: ${daily.error || 'unknown error'}`);
   }
   if (!connector) {
-    return { ...base, status: 'error', error: `Windsor Google Analytics 4 returned no data: ${daily.error || 'unknown error'}`, ...(includeAttempts ? { attempts } : {}) };
+    return { ...base, status: 'error', error: `Windsor Google Analytics 4 returned no data — ${connectorErrors.join(' · ')}`, ...(includeAttempts ? { attempts } : {}) };
   }
   const [sources, landing, pages] = await Promise.all([
     windsorRows('sources', connector, from, to, attempts),
