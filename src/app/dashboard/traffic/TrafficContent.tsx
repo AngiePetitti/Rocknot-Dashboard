@@ -10,6 +10,8 @@ import Card from '@/src/components/ui/Card';
 import MetricCard from '@/src/components/ui/MetricCard';
 import { useClient } from '@/src/components/ClientProvider';
 import type { TrafficData, CampaignRow, Channel } from '@/src/lib/traffic';
+import type { GaData } from '@/src/lib/ga4';
+import GaTraffic from './GaTraffic';
 
 interface TrafficResponse extends Partial<TrafficData> { source?: string; error?: string }
 
@@ -61,6 +63,10 @@ export default function TrafficContent() {
   const compareOn = searchParams.get('compare') === 'true';
   const rangeLabel = tfRaw === 'custom' && dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : (TIMEFRAME_LABELS[tfRaw] || 'Last 30 Days');
   const [data, setData] = useState<TrafficResponse | null>(null);
+  // Google Analytics view (when the profile has a GA4 property). Fetched
+  // alongside Shopify so the toggle knows whether to show; cached 15 min.
+  const [ga, setGa] = useState<GaData | null>(null);
+  const [view, setView] = useState<'shopify' | 'ga'>(searchParams.get('view') === 'ga' ? 'ga' : 'shopify');
   const [showAllAds, setShowAllAds] = useState(false);
   const [showAllRefs, setShowAllRefs] = useState(false);
 
@@ -71,7 +77,14 @@ export default function TrafficContent() {
     if (dateTo) p.set('date_to', dateTo);
     if (compareOn) p.set('compare', 'true');
     fetch(`/api/traffic?${p}`, { cache: 'no-store' }).then(r => r.json()).then(setData).catch(() => setData({ source: 'error', error: 'Failed to load' }));
+    setGa(null);
+    const g = new URLSearchParams({ tf: tfRaw });
+    if (dateFrom) g.set('date_from', dateFrom);
+    if (dateTo) g.set('date_to', dateTo);
+    fetch(`/api/traffic/ga4?${g}`, { cache: 'no-store' }).then(r => r.json()).then(setGa).catch(() => setGa({ status: 'error', error: 'Failed to load' } as GaData));
   }, [tfRaw, dateFrom, dateTo, compareOn]);
+  const gaAvailable = ga ? ga.status !== 'not_connected' : null;
+  const showGa = view === 'ga' && gaAvailable !== false;
 
   const totals = data?.totals;
   const prior = data?.prior?.totals || undefined;
@@ -93,14 +106,24 @@ export default function TrafficContent() {
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
-      <Header title="Traffic" subtitle="Where site visits come from · Shopify sessions by channel, ad, post, referring site and landing page" />
+      <Header title="Traffic" subtitle={showGa ? 'Where site visits come from and which pages convert · Google Analytics 4 by channel, source, landing page and page' : 'Where site visits come from · Shopify sessions by channel, ad, post, referring site and landing page'} />
       <TimeframeSelector />
-      {!data && <p className="text-xs text-gray-400 mb-4">Loading Shopify sessions for {rangeLabel}…</p>}
-      {data?.error && (
+      {gaAvailable !== false && (
+        <div className="flex items-center gap-2 mt-3 mb-1">
+          <div className="inline-flex rounded-xl bg-gray-100 p-1 text-xs font-semibold">
+            <button onClick={() => setView('shopify')} className={`px-3 py-1.5 rounded-lg ${!showGa ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Shopify sessions</button>
+            <button onClick={() => setView('ga')} className={`px-3 py-1.5 rounded-lg ${showGa ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Google Analytics</button>
+          </div>
+          <p className="text-[11px] text-gray-400 hidden md:block">{showGa ? 'Page-level behaviour and source detail from GA4.' : 'Shopify is the order truth; switch to GA4 for landing-page conversion and page views.'}</p>
+        </div>
+      )}
+      {showGa && <GaTraffic data={ga} rangeLabel={rangeLabel} />}
+      {!showGa && !data && <p className="text-xs text-gray-400 mb-4">Loading Shopify sessions for {rangeLabel}…</p>}
+      {!showGa && data?.error && (
         <Card className="mb-6 border-red-100"><p className="text-sm text-red-600">{data.error}</p></Card>
       )}
 
-      {data && !data.error && totals && (
+      {!showGa && data && !data.error && totals && (
         <>
           {/* ── Funnel cards (human basis: suspected-bot sessions removed) ── */}
           {(() => {

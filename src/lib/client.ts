@@ -41,7 +41,7 @@ export const PLATFORMS: Record<PlatformKey, PlatformDef> = {
 };
 
 /** Windsor REST connector names the dashboard queries directly. */
-export type WindsorSource = 'facebook' | 'google_ads' | 'tiktok' | 'snapchat' | 'pinterest' | 'shopify' | 'quickbooks' | 'pinterest_organic' | 'instagram';
+export type WindsorSource = 'facebook' | 'google_ads' | 'tiktok' | 'snapchat' | 'pinterest' | 'shopify' | 'quickbooks' | 'pinterest_organic' | 'instagram' | 'google_analytics';
 
 /**
  * A wholesale / marketplace channel that lands in Shopify as its own sales
@@ -259,6 +259,9 @@ const ROCKNOT: ClientProfile = {
       // Insights" data sources). null = not connected: the tab says so.
       pinterest_organic: null,
       instagram: null,
+      // Google Analytics 4 (Traffic tab → Google Analytics view). null = the
+      // view is hidden and Cleo's get_site_analytics says not connected.
+      google_analytics: null,
     },
   },
   goals: { defaultAnnualTarget: 4_000_000, targetMer: 3.5, targetRoas: 3.5, targetCac: 100 },
@@ -326,6 +329,8 @@ const KAILEEP: ClientProfile = {
       // done from Kailee's own Pinterest login (/api/debug/organic lists ids).
       pinterest_organic: null,
       instagram: '17841402329636544',
+      // GA4 property "Kailee P" (Windsor Google Analytics 4 connector).
+      google_analytics: '347015181',
     },
   },
   // No annual target has been shared yet — the Goals tab asks for one. The
