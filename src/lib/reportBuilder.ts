@@ -201,23 +201,52 @@ async function runPlan(since: number, payload: ReportPayload, brandBrief: string
   const prettyDate = new Date().toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', month: 'long', day: 'numeric', year: 'numeric' });
   const system = `${baseContext(payload, brandBrief)}
 
-You are PLANNING a shareable report that another process will build one section at a time (each section is researched and written separately, with the data tools). Output ONLY JSON — no commentary, no markdown fence:
-{"title": "...", "subtitle": "...", "sections": [{"title": "...", "focus": "..."}]}
+You are PLANNING a shareable report that another process will build one section at a time (each section is researched and written separately, with the data tools). Submit the plan with the plan_report tool: {title, subtitle, sections: [{title, focus}]}.
 
 Rules:
 - title: the report's name (what it's about; include the period and year). subtitle: "${brand.name} · Prepared ${prettyDate}".
 - 1 to 8 sections, in reading order. For a simple question, 1–2 sections. For an end-of-month / team report, one section per area the operator listed. For content deliverables (campaign copy, briefs), group the items into sections of at most 4 items each so every item gets full copy.
-- Each focus is a COMPLETE brief for that section's builder, which does NOT see this conversation: what to cover, the exact date range(s) with years, which tools to call (get_metrics, get_ad_performance, get_ad_creatives, get_organic_content, get_marketplace_channel, get_top_products, get_customer_intel, get_retention, get_attribution, get_returns, get_product_catalog…), what to compare, which visuals (stat tiles / table / chart / image cards), and EVERY standing instruction or correction from the operator that applies to it.
+- Each focus is a COMPLETE brief (at most 2500 characters) for that section's builder, which does NOT see this conversation: what to cover, the exact date range(s) with years, which tools to call (get_metrics, get_ad_performance, get_ad_creatives, get_organic_content, get_marketplace_channel, get_top_products, get_customer_intel, get_retention, get_attribution, get_returns, get_product_catalog…), what to compare, which visuals (stat tiles / table / chart / image cards), and EVERY standing instruction or correction from the operator that applies to it.
 - End with a "Recommendations" section for data reports (focus: concrete next steps, drawn from the other sections' topics). Not for pure content deliverables.`;
-  const res = await client.messages.create({
-    model: 'claude-opus-4-8', max_tokens: 3000,
-    thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
-    system,
-    messages: [{ role: 'user', content: `REPORT FOCUS (what the operator asked for): ${payload.focus || '(none — build from the conversation)'}\n\nCONVERSATION:\n${conversationText(payload)}\n\nPlan the report now.` }],
-  });
-  const text = res.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
-  const cleaned = stripFence(text);
-  const plan = JSON.parse(cleaned.slice(Math.max(0, cleaned.indexOf('{')), cleaned.lastIndexOf('}') + 1)) as { title?: string; subtitle?: string; sections?: Array<{ title: string; focus: string }> };
+  // The plan comes back through a tool call, so the API guarantees well-formed
+  // JSON (a free-text plan once came back cut off mid-array and failed to
+  // parse). Generous max_tokens: eight sections with full briefs run long.
+  type Plan = { title?: string; subtitle?: string; sections?: Array<{ title: string; focus: string }> };
+  const planTool: Anthropic.Tool = {
+    name: 'plan_report',
+    description: 'Submit the report plan.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        subtitle: { type: 'string' },
+        sections: {
+          type: 'array',
+          items: { type: 'object', properties: { title: { type: 'string' }, focus: { type: 'string', description: 'Complete brief for this section, at most 2500 characters.' } }, required: ['title', 'focus'] },
+        },
+      },
+      required: ['title', 'subtitle', 'sections'],
+    },
+  };
+  let plan: Plan | null = null;
+  let lastErr = '';
+  for (let attempt = 0; attempt < 2 && !plan; attempt++) {
+    const res = await client.messages.create({
+      model: 'claude-opus-4-8', max_tokens: 16000,
+      thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+      system,
+      tools: [planTool], tool_choice: { type: 'tool', name: 'plan_report' },
+      messages: [{ role: 'user', content: `REPORT FOCUS (what the operator asked for): ${payload.focus || '(none — build from the conversation)'}\n\nCONVERSATION:\n${conversationText(payload)}\n\nPlan the report now${attempt ? ' — keep every focus under 1500 characters' : ''}.` }],
+    });
+    if (res.stop_reason === 'max_tokens') { lastErr = 'the plan ran too long'; continue; }
+    const tu = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
+    if (tu && tu.input && typeof tu.input === 'object') { plan = tu.input as Plan; break; }
+    // Fallback: the model answered in text — salvage JSON if it is complete.
+    const text = res.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+    const cleaned = stripFence(text);
+    try { plan = JSON.parse(cleaned.slice(Math.max(0, cleaned.indexOf('{')), cleaned.lastIndexOf('}') + 1)) as Plan; } catch (e) { lastErr = e instanceof Error ? e.message : String(e); }
+  }
+  if (!plan) throw new Error(`Couldn't plan the report (${lastErr || 'no plan returned'}) — try again.`);
   const sections = (plan.sections || []).filter(s => s && s.title && s.focus).slice(0, 8);
   if (!sections.length) throw new Error('The planner returned no sections — try a more specific request.');
   await patchJob(since, {
