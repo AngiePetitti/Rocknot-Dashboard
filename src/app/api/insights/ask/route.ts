@@ -168,7 +168,44 @@ If the operator asks for a report / PDF / shareable document, call create_report
     }
 
     if (!answer) answer = 'I ran out of analysis steps before finishing — try asking a more specific question.';
-    return NextResponse.json({ ok: true, answer, ...(reportFocus ? { reportFocus } : {}) });
+
+    // Safety net: Cleo sometimes *says* the report is being built without
+    // calling create_report. If the operator asked for a report and the
+    // answer claims one is on its way, build it anyway from their ask.
+    if (!reportFocus) {
+      const lastUser = [...history].reverse().find(m => m.role === 'user');
+      const userText = typeof lastUser?.content === 'string' ? lastUser.content : Array.isArray(lastUser?.content) ? (lastUser!.content as Array<{ type: string; text?: string }>).filter(b => b.type === 'text').map(b => b.text || '').join(' ') : '';
+      const askedForReport = /\breport\b|\bpdf\b|shareable document/i.test(userText) && /\b(create|make|build|generate|rebuild|redo|turn|put|give)\b/i.test(userText);
+      const claimsBuilding = /\b(building|generating|creating|putting together|working on)\b[^.]{0,60}\breport\b|\breport\b[^.]{0,60}\b(is being built|is on its way|will open|new tab|saved reports)/i.test(answer);
+      if (askedForReport && claimsBuilding) reportFocus = userText.slice(0, 6000);
+    }
+
+    // Start the report build HERE, on the server, so it never depends on the
+    // browser (popup blockers, a closed tab, a sleeping laptop). The report
+    // route answers 202 at once and finishes on its own.
+    let reportSince: number | null = null;
+    if (reportFocus) {
+      reportSince = Date.now();
+      const payload = {
+        messages: history.slice(-8).map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? (m.content as Array<{ type: string; text?: string }>).filter(b => b.type === 'text').map(b => b.text || '').join('\n') : '') })),
+        focus: reportFocus,
+        since: reportSince,
+      };
+      try {
+        await fetch(`${req.nextUrl.origin}/api/insights/report`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') || '' },
+          body: JSON.stringify(payload),
+          cache: 'no-store',
+          signal: AbortSignal.timeout(20000),
+        });
+      } catch (e) {
+        // The job status route will report nothing for this since; the chat
+        // banner falls back to showing the kickoff failed.
+        return NextResponse.json({ ok: true, answer, reportFocus, reportSince, reportError: `Couldn't start the report: ${e instanceof Error ? e.message : String(e)}` });
+      }
+    }
+    return NextResponse.json({ ok: true, answer, ...(reportFocus ? { reportFocus, reportSince } : {}) });
   } catch (err) {
     return NextResponse.json({ error: friendlyAiError(err) }, { status: 500 });
   }

@@ -93,11 +93,18 @@ export default function InsightsContent() {
   // ── Saved reports (per login) ──
   const [savedReports, setSavedReports] = useState<{ id: string; title: string; createdAt: string }[]>([]);
 
+  // Reports build in the background and land here when done — refresh the
+  // list every 30s while the tab is open and whenever it regains focus.
   useEffect(() => {
-    fetch('/api/insights/reports', { cache: 'no-store' })
+    const load = () => fetch('/api/insights/reports', { cache: 'no-store' })
       .then(r => r.json())
       .then(d => { if (Array.isArray(d?.reports)) setSavedReports(d.reports); })
       .catch(() => {});
+    load();
+    const t = setInterval(load, 30000);
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => { clearInterval(t); window.removeEventListener('focus', onFocus); };
   }, []);
 
   async function removeReport(id: string) {
