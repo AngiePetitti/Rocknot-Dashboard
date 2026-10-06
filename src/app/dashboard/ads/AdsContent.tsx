@@ -13,6 +13,7 @@ import PlatformBadge from '@/src/components/ui/PlatformBadge';
 import ROASChart from '@/src/components/charts/ROASChart';
 import { useClient } from '@/src/components/ClientProvider';
 import { PLATFORMS } from '@/src/lib/client';
+import NcacBreakdown from '@/src/components/NcacBreakdown';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
   LineChart, Line, Legend,
@@ -299,6 +300,7 @@ export default function AdsContent() {
               />
             </div>
           )}
+          {tfRaw !== 'today' && <NcacBreakdown tf={tfRaw} dateFrom={dateFrom} dateTo={dateTo} compare={false} targetCac={TARGET_CAC} />}
 
           {/* Platform cards */}
           {/* One card per row on phones: a six-metric grid needs the full width. */}
