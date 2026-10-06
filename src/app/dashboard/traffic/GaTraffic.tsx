@@ -144,7 +144,7 @@ export default function GaTraffic({ data, rangeLabel }: { data: GaData | null; r
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mt-4 mb-6">
-        <MetricCard title="GA4 Sessions" value={n(t.sessions)} subtitle={`${n(t.users)} users · ${n(t.newUsers)} new`} accentColor="#818cf8" />
+        <MetricCard title="GA4 Sessions" value={n(t.sessions)} subtitle={t.users > 0 ? `${n(t.users)} users${t.newUsers > 0 ? ` · ${n(t.newUsers)} new` : ''}` : `${data.daily.length} days`} accentColor="#818cf8" />
         <MetricCard title="Engagement" value={pct(t.engagedSessions, t.sessions)} subtitle={`${n(t.engagedSessions)} engaged sessions`} accentColor="#f9a8d4" />
         <MetricCard title="Add to Cart" value={pct(t.addToCarts, t.sessions)} subtitle={`${n(t.addToCarts)} add-to-cart events`} accentColor="#fbbf24" />
         <MetricCard title="Purchases" value={n(t.purchases)} subtitle={`${pct(t.purchases, t.sessions)} of sessions · ${$(t.revenue)} GA4 revenue`} accentColor="#34d399" />

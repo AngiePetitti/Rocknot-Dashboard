@@ -62,10 +62,12 @@ function graded(core: string[], optional: string[]): FieldSet[] {
   ];
 }
 const Q = {
-  daily: graded(['date', 'sessions', 'total_users', 'new_users', 'engaged_sessions', 'screen_page_views'], ['ecommerce_purchases', 'purchase_revenue', 'add_to_carts', 'conversions']),
-  sources: graded(['date', 'session_default_channel_group', 'session_source', 'session_medium', 'sessions', 'engaged_sessions', 'total_users'], ['ecommerce_purchases', 'purchase_revenue', 'add_to_carts']),
-  landing: graded(['date', 'landing_page', 'sessions', 'engaged_sessions', 'total_users'], ['ecommerce_purchases', 'purchase_revenue', 'add_to_carts']),
-  pages: graded(['date', 'page_path', 'page_title', 'screen_page_views', 'sessions', 'engaged_sessions', 'total_users'], []),
+  // Users: Windsor rejected total_users / new_users on the first live run, so the
+  // set carries the alternates too; the pruning loop drops whichever it rejects.
+  daily: graded(['date', 'sessions', 'engaged_sessions', 'screen_page_views'], ['total_users', 'active_users', 'users', 'new_users', 'ecommerce_purchases', 'purchase_revenue', 'add_to_carts', 'conversions']),
+  sources: graded(['date', 'session_default_channel_group', 'session_source', 'session_medium', 'sessions', 'engaged_sessions'], ['total_users', 'active_users', 'ecommerce_purchases', 'purchase_revenue', 'add_to_carts']),
+  landing: graded(['date', 'landing_page', 'sessions', 'engaged_sessions'], ['total_users', 'active_users', 'ecommerce_purchases', 'purchase_revenue', 'add_to_carts']),
+  pages: graded(['date', 'page_path', 'page_title', 'screen_page_views', 'sessions', 'engaged_sessions'], ['total_users', 'active_users']),
 };
 
 // Read a metric whatever spelling the accepted field set used.
@@ -77,6 +79,7 @@ function pick(r: Record<string, unknown>, snake: string): unknown {
   return lower ? r[lower] : undefined;
 }
 const m = (r: Record<string, unknown>, k: string) => num(pick(r, k));
+const users = (r: Record<string, unknown>) => m(r, 'total_users') || m(r, 'active_users') || m(r, 'users');
 const d = (r: Record<string, unknown>, k: string) => str(pick(r, k));
 
 async function windsorRows(
@@ -128,7 +131,7 @@ function rollDims(rows: Array<Record<string, unknown>>, keyOf: (r: Record<string
     const k = keyOf(r);
     if (!k.key) continue;
     const cur = map.get(k.key) || { ...k, sessions: 0, engagedSessions: 0, users: 0, purchases: 0, revenue: 0, addToCarts: 0 };
-    cur.sessions += m(r, 'sessions'); cur.engagedSessions += m(r, 'engaged_sessions'); cur.users += m(r, 'total_users');
+    cur.sessions += m(r, 'sessions'); cur.engagedSessions += m(r, 'engaged_sessions'); cur.users += users(r);
     cur.purchases += m(r, 'ecommerce_purchases'); cur.revenue += m(r, 'purchase_revenue'); cur.addToCarts += m(r, 'add_to_carts');
     map.set(k.key, cur);
   }
@@ -170,9 +173,9 @@ export async function fetchGa4(from: string, to: string, includeAttempts = false
     const date = d(r, 'date').slice(0, 10);
     if (!date) continue;
     const cur = byDay.get(date) || { date, sessions: 0, users: 0, purchases: 0, revenue: 0 };
-    cur.sessions += m(r, 'sessions'); cur.users += m(r, 'total_users'); cur.purchases += m(r, 'ecommerce_purchases'); cur.revenue += m(r, 'purchase_revenue');
+    cur.sessions += m(r, 'sessions'); cur.users += users(r); cur.purchases += m(r, 'ecommerce_purchases'); cur.revenue += m(r, 'purchase_revenue');
     byDay.set(date, cur);
-    out.totals.sessions += m(r, 'sessions'); out.totals.users += m(r, 'total_users'); out.totals.newUsers += m(r, 'new_users');
+    out.totals.sessions += m(r, 'sessions'); out.totals.users += users(r); out.totals.newUsers += m(r, 'new_users');
     out.totals.engagedSessions += m(r, 'engaged_sessions'); out.totals.pageViews += m(r, 'screen_page_views');
     out.totals.purchases += m(r, 'ecommerce_purchases'); out.totals.revenue += m(r, 'purchase_revenue');
     out.totals.addToCarts += m(r, 'add_to_carts'); out.totals.conversions += m(r, 'conversions');
@@ -201,7 +204,7 @@ export async function fetchGa4(from: string, to: string, includeAttempts = false
       if (!path) continue;
       const cur = map.get(path) || { path, title: d(r, 'page_title'), pageViews: 0, sessions: 0, engagedSessions: 0, users: 0 };
       if (!cur.title && d(r, 'page_title')) cur.title = d(r, 'page_title');
-      cur.pageViews += m(r, 'screen_page_views'); cur.sessions += m(r, 'sessions'); cur.engagedSessions += m(r, 'engaged_sessions'); cur.users += m(r, 'total_users');
+      cur.pageViews += m(r, 'screen_page_views'); cur.sessions += m(r, 'sessions'); cur.engagedSessions += m(r, 'engaged_sessions'); cur.users += users(r);
       map.set(path, cur);
     }
     out.pages = Array.from(map.values()).sort((a, b) => b.pageViews - a.pageViews);
