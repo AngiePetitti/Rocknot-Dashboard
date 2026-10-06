@@ -56,7 +56,8 @@ export async function GET(req: NextRequest) {
         <p>The dashboard now reads Pinterest spend, checkouts and checkout value straight from the Pinterest Ads API on
         <b>${a.clickWindowDays}-day click · ${a.engagementWindowDays}-day engagement · ${a.viewWindowDays}-day view</b>,
         reported ${a.conversionReportTime === 'TIME_OF_CONVERSION' ? 'by conversion date' : 'by ad date'} — the same conversion settings as Ads Manager.</p>
-        <p>Check the match on <a href="/api/debug/pinterest-api?days=7">/api/debug/pinterest-api?days=7</a>, then open the <a href="/dashboard/ads">Ad Performance tab</a>.</p>`);
+        <p>Check the match on <a href="/api/debug/pinterest-api?days=7">/api/debug/pinterest-api?days=7</a>, then open the <a href="/dashboard/ads">Ad Performance tab</a>.</p>
+        <p>This connection also reads ${client.name}'s <b>organic pins</b> through Business Access (acting via the ad account) for the Organic Content tab — check <a href="/api/debug/organic?tf=30d">/api/debug/organic?tf=30d</a> → pinterestDirect.</p>`);
     } catch (e) {
       return page('Pinterest — connection failed', `<p class="warn">${String(e)}</p><p><a class="btn" href="${REDIRECT_PATH}">Try again</a></p>`);
     }

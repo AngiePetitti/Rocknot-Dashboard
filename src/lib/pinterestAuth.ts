@@ -9,7 +9,9 @@ const APP_ID = (process.env.PINTEREST_APP_ID || '').trim();
 const APP_SECRET = (process.env.PINTEREST_APP_SECRET || '').trim();
 const ENV_TOKEN = (process.env.PINTEREST_ACCESS_TOKEN || '').trim();
 
-export const PINTEREST_SCOPES = 'ads:read';
+// ads:read for the Ads tab; pins / boards / user_accounts for Organic Content
+// (read through Business Access by naming the client's ad account).
+export const PINTEREST_SCOPES = 'ads:read,pins:read,boards:read,user_accounts:read';
 
 export function pinterestAppConfigured(): boolean {
   return Boolean(APP_ID && APP_SECRET);
