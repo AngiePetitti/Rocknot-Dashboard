@@ -1,4 +1,4 @@
-import { runQuery, getDataset, dedupedOrdersCte, tableExists, dailyShopifySalesSql, shopifyOrdersFilter } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte, tableExists, dailyShopifySalesSql, shopifyOrdersFilter, googleAccountSql } from '@/src/lib/bigquery';
 import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
 import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees, storeOnlyWhere } from '@/src/lib/client';
 import { fetchHumanConversion } from '@/src/lib/traffic';
@@ -289,6 +289,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     hasPlatform('google') ? tableExists('google_ads') : Promise.resolve(false),
     hasPlatform('tiktok') ? tableExists('tiktok_ads') : Promise.resolve(false),
   ]);
+  const gAcct = hasGoogle ? await googleAccountSql() : '';
 
   const adsSql = `
     WITH meta AS (${hasMeta ? `
@@ -308,7 +309,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
              SUM(CAST(spend AS FLOAT64)) AS spend,
              SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.google_ads\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d` : EMPTY_CTE}
+      WHERE DATE(date) BETWEEN @date_from AND @date_to${gAcct} GROUP BY d` : EMPTY_CTE}
     ),
     tiktok AS (${hasTiktok ? `
       SELECT DATE(date) AS d,

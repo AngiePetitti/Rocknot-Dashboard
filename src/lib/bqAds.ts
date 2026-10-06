@@ -1,4 +1,4 @@
-import { runQuery, getDataset } from '@/src/lib/bigquery';
+import { runQuery, getDataset, googleAccountSql } from '@/src/lib/bigquery';
 import { metaAccountSql, hasPlatform, PLATFORMS } from '@/src/lib/client';
 import { pinterestWindsorNote } from '@/src/lib/tiktokLive';
 
@@ -81,6 +81,7 @@ function buildPlatform(
 export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<{ platforms: PlatformData[]; dailySpend: DaySpend[] }> {
   const ds = getDataset();
   const params = { date_from: dateFrom, date_to: dateTo };
+  const gAcct = await googleAccountSql();
 
   const metaSql = `
     -- Windsor stores one row per adset (only the campaign name is exposed), so
@@ -104,7 +105,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
       0 AS impressions
     FROM \`${ds}.google_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    WHERE DATE(date) BETWEEN @date_from AND @date_to${gAcct}
   `;
 
   const tiktokSql = `
@@ -144,7 +145,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   const googleDailySql = `
     SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
     FROM \`${ds}.google_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+    WHERE DATE(date) BETWEEN @date_from AND @date_to${gAcct} GROUP BY d
   `;
 
   const tiktokDailySql = `
@@ -224,7 +225,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
            SUM(IFNULL(CAST(conversion_value AS FLOAT64), 0)) AS revenue,
            0 AS conversions, 0 AS clicks, 0 AS impressions
     FROM \`${ds}.google_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    WHERE DATE(date) BETWEEN @date_from AND @date_to${gAcct}
   `;
 
   // Kick the platform-API patch fetches off NOW so they run concurrently with
