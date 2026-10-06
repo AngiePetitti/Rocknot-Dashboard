@@ -225,3 +225,27 @@ export async function googleSource(): Promise<string> {
   googleSourceSql = `(SELECT ${key.join(', ')}, ANY_VALUE(CAST(spend AS FLOAT64)) AS spend, ${col('conversions_value')} AS conversions_value, ${col('conversion_value')} AS conversion_value, ${col('conversions')} AS conversions, ${col('clicks')} AS clicks, ${col('impressions')} AS impressions FROM \`${ds}.google_ads\` WHERE 1=1${acct} GROUP BY ${key.join(', ')})`;
   return googleSourceSql;
 }
+
+/**
+ * De-duplicated Meta source. Windsor's two-year backfill laid a second copy
+ * of every day older than its hourly window under the facebook_ads rows
+ * (Sep 2025 read exactly 2× Ads Manager; Aug 2026 matched). The table has no
+ * ad set / ad ids — a row is an ad set identified by campaign + budgets — and
+ * the copies can differ in the attribution metrics (purchases keep updating
+ * for days), so the key is every identity column PLUS spend: two rows with
+ * the same date, campaign, budgets and spend-to-the-cent are the same ad set
+ * written twice. Conversion metrics take MAX (the later, more complete copy).
+ * Used in place of `${ds}.facebook_ads` everywhere the dashboard reads Meta.
+ */
+let metaSourceSql: string | undefined;
+export async function metaSource(): Promise<string> {
+  if (metaSourceSql !== undefined) return metaSourceSql;
+  const ds = getDataset();
+  const identity = ['account_name', 'account_id', 'campaign', 'campaign_id', 'adset_id', 'adset_name', 'ad_id', 'ad_name', 'campaign_daily_budget', 'adset_daily_budget'];
+  const metrics = ['clicks', 'impressions', 'actions_omni_purchase', 'action_values_omni_purchase', 'actions_add_to_cart', 'purchase_roas_omni_purchase', 'cost_per_action_type_omni_purchase'];
+  const present = Object.fromEntries(await Promise.all([...identity, ...metrics].map(async n => [n, await columnExists('facebook_ads', n)] as const)));
+  const key = ['date', ...identity.filter(n => present[n])];
+  const sel = metrics.filter(n => present[n]).map(n => `MAX(CAST(${n} AS FLOAT64)) AS ${n}`);
+  metaSourceSql = `(SELECT ${key.join(', ')}, CAST(spend AS FLOAT64) AS spend${sel.length ? ', ' + sel.join(', ') : ''} FROM \`${ds}.facebook_ads\` GROUP BY ${key.join(', ')}, CAST(spend AS FLOAT64))`;
+  return metaSourceSql;
+}

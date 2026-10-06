@@ -1,4 +1,4 @@
-import { runQuery, getDataset, dedupedOrdersCte, tableExists, dailyShopifySalesSql, shopifyOrdersFilter, googleSource } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte, tableExists, dailyShopifySalesSql, shopifyOrdersFilter, googleSource, metaSource } from '@/src/lib/bigquery';
 import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
 import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees, storeOnlyWhere } from '@/src/lib/client';
 import { fetchHumanConversion } from '@/src/lib/traffic';
@@ -290,17 +290,19 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     hasPlatform('tiktok') ? tableExists('tiktok_ads') : Promise.resolve(false),
   ]);
   const gsrc = hasGoogle ? await googleSource() : '';
+  const msrc = hasMeta ? await metaSource() : '';
 
   const adsSql = `
     WITH meta AS (${hasMeta ? `
       -- Windsor stores one row per ADSET (only the campaign name is exposed, so
       -- a campaign's adsets share a campaign value and appear as multiple rows
       -- with independent spend/clicks/purchases). They must be SUMMED to get the
-      -- true campaign total — do not dedup.
+      -- true campaign total. metaSource() has already collapsed the backfill's
+      -- duplicate copy of each ad-set day.
       SELECT DATE(date) AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
              SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
-      FROM \`${ds}.facebook_ads\`
+      FROM ${msrc}
       WHERE DATE(date) BETWEEN @date_from AND @date_to${metaAccountSql()}
       GROUP BY d` : EMPTY_CTE}
     ),

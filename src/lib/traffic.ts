@@ -6,7 +6,7 @@
 // performance) is not in here yet: it needs the Windsor organic tables.
 import { shopifyDomain, hasPlatform, metaAccountSql, getClient, storeOnlyWhere } from '@/src/lib/client';
 import { shopifyql as sharedShopifyql } from '@/src/lib/shopifyql';
-import { runQuery, getDataset } from '@/src/lib/bigquery';
+import { runQuery, getDataset, metaSource } from '@/src/lib/bigquery';
 
 const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 const SHOPIFY_DOMAIN = shopifyDomain();
@@ -132,9 +132,10 @@ async function fetchAdLookup(from: string, to: string): Promise<AdLookup> {
   if (hasPlatform('pinterest')) tables.push({ table: 'pinterest_ads', platform: 'Pinterest', where: '', nameCol: 'ad_group_name' });
   await Promise.all(tables.map(async t => {
     try {
+      const src = t.table === 'facebook_ads' ? await metaSource() : `\`${ds}.${t.table}\``;
       const rows = await runQuery<{ ad_id: string; ad_name: string; campaign: string; spend: number }>(
         `SELECT CAST(ad_id AS STRING) AS ad_id, ANY_VALUE(${t.nameCol}) AS ad_name, ANY_VALUE(campaign) AS campaign, SUM(CAST(spend AS FLOAT64)) AS spend
-         FROM \`${ds}.${t.table}\` WHERE DATE(date) BETWEEN @date_from AND @date_to${t.where}
+         FROM ${src} WHERE DATE(date) BETWEEN @date_from AND @date_to${t.where}
          GROUP BY ad_id`,
         { date_from: from, date_to: to },
       );

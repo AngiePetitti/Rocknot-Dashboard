@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isBigQueryConfigured, runQuery, getDataset, tableExists, columnExists, googleSource } from '@/src/lib/bigquery';
+import { isBigQueryConfigured, runQuery, getDataset, tableExists, columnExists, googleSource, metaSource } from '@/src/lib/bigquery';
 import { getClient, metaAccountSql } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
@@ -97,10 +97,25 @@ export async function GET(request: NextRequest) {
       ]);
       // Every row for one day, as JSON, so the differing column is visible.
       const dayRows = await runQuery<{ row: string }>(
-        `SELECT TO_JSON_STRING(t) AS row FROM \`${ds}.facebook_ads\` t WHERE DATE(date) = '${probeDay.replace(/[^0-9-]/g, '')}'${acct} ORDER BY CAST(ad_id AS STRING), CAST(spend AS FLOAT64) LIMIT 40`);
+        `SELECT TO_JSON_STRING(t) AS row FROM \`${ds}.facebook_ads\` t WHERE DATE(date) = '${probeDay.replace(/[^0-9-]/g, '')}'${acct} ORDER BY ${has('campaign') ? 'CAST(campaign AS STRING), ' : ''}CAST(spend AS FLOAT64) LIMIT 40`);
       const dayTotal = await runQuery(
         `SELECT COUNT(*) AS row_count, ROUND(SUM(CAST(spend AS FLOAT64)), 2) AS spend FROM \`${ds}.facebook_ads\` WHERE DATE(date) = '${probeDay.replace(/[^0-9-]/g, '')}'${acct}`);
-      out.metaGrain = { columns, probeMonth, probeDay, byMonth, duplicatesInProbeMonth: dupes, probeDayTotal: dayTotal[0] || null, probeDayRows: dayRows.map(r => { try { return JSON.parse(r.row); } catch { return r.row; } }) };
+      // Byte-identical rows per month (the Google pattern), with the spend they add.
+      const exactByMonth = await runQuery(
+        `SELECT month, COUNT(*) AS duplicate_groups, SUM(n - 1) AS extra_rows, ROUND(SUM(sp * (n - 1) / n), 2) AS extra_spend FROM (
+           SELECT FORMAT_DATE('%Y-%m', DATE(date)) AS month, TO_JSON_STRING(t) AS j, COUNT(*) AS n, SUM(CAST(spend AS FLOAT64)) AS sp
+           FROM \`${ds}.facebook_ads\` t WHERE DATE(date) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL ${months} MONTH)${acct}
+           GROUP BY month, j HAVING n > 1) GROUP BY month ORDER BY month DESC`);
+      // What the dashboard now reads for Meta after metaSource() — compare
+      // these months against Ads Manager (Sep 2025 $12,315.41 · Aug 2025 $12,133.49 · Aug 2026 $8,279.48).
+      const msrc = await metaSource();
+      const metaAsRead = await runQuery(
+        `SELECT FORMAT_DATE('%Y-%m', DATE(date)) AS month, COUNT(*) AS rows_after_dedupe, ROUND(SUM(spend), 2) AS spend,
+                ROUND(SUM(IFNULL(action_values_omni_purchase, 0)), 2) AS revenue, ROUND(SUM(IFNULL(actions_omni_purchase, 0)), 0) AS purchases
+         FROM ${msrc} WHERE DATE(date) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL ${months} MONTH)${acct}
+         GROUP BY month ORDER BY month DESC`);
+      out.metaGrain = { columns, probeMonth, probeDay, byMonth, exactDuplicatesByMonth: exactByMonth, duplicatesInProbeMonth: dupes, probeDayTotal: dayTotal[0] || null, probeDayRows: dayRows.map(r => { try { return JSON.parse(r.row); } catch { return r.row; } }) };
+      out.metaAsRead = metaAsRead;
     } catch (e) { out.metaGrain = { error: e instanceof Error ? e.message : String(e) }; }
   }
   return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store' } });

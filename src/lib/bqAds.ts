@@ -1,4 +1,4 @@
-import { runQuery, getDataset, googleSource } from '@/src/lib/bigquery';
+import { runQuery, getDataset, googleSource, metaSource } from '@/src/lib/bigquery';
 import { metaAccountSql, hasPlatform, PLATFORMS } from '@/src/lib/client';
 import { pinterestWindsorNote } from '@/src/lib/tiktokLive';
 
@@ -82,18 +82,19 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   const ds = getDataset();
   const params = { date_from: dateFrom, date_to: dateTo };
   const gsrc = await googleSource();
+  const msrc = await metaSource();
 
   const metaSql = `
     -- Windsor stores one row per adset (only the campaign name is exposed), so
     -- a campaign's adsets appear as multiple rows with independent spend — SUM
-    -- them to get the true total. Do NOT dedup.
+    -- them. metaSource() has already collapsed the backfill's second copy.
     SELECT
       SUM(CAST(spend AS FLOAT64)) AS spend,
       SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
       SUM(IFNULL(CAST(actions_omni_purchase AS FLOAT64), 0)) AS conversions,
       SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
       0 AS impressions
-    FROM \`${ds}.facebook_ads\`
+    FROM ${msrc}
     WHERE DATE(date) BETWEEN @date_from AND @date_to${metaAccountSql()}
   `;
 
@@ -137,7 +138,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
 
   const metaDailySql = `
     SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
-    FROM \`${ds}.facebook_ads\`
+    FROM ${msrc}
     WHERE DATE(date) BETWEEN @date_from AND @date_to${metaAccountSql()}
     GROUP BY d
   `;
@@ -217,7 +218,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     SELECT SUM(CAST(spend AS FLOAT64)) AS spend,
            SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
            0 AS conversions, 0 AS clicks, 0 AS impressions
-    FROM \`${ds}.facebook_ads\`
+    FROM ${msrc}
     WHERE DATE(date) BETWEEN @date_from AND @date_to${metaAccountSql()}
   `;
   const googleSqlMin = `
