@@ -274,6 +274,52 @@ export default function CleoChat() {
     } catch { /* ignore */ }
     if (local.length) setChat(local);
 
+    // A question was sent and the page was refreshed (or the phone slept)
+    // before the answer came back. The server finishes the answer and saves
+    // it to the chat on its own, so keep the question on screen with the
+    // thinking indicator and watch the server copy until the answer lands.
+    const pendingKey = `${chatKey}:pending`;
+    let pendingAsk: { sentAt: number; question: string } | null = null;
+    try { const raw = localStorage.getItem(pendingKey); if (raw) pendingAsk = JSON.parse(raw); } catch { /* ignore */ }
+    if (pendingAsk && Date.now() - pendingAsk.sentAt > 10 * 60 * 1000) {
+      try { localStorage.removeItem(pendingKey); } catch { /* ignore */ }
+      pendingAsk = null;
+    }
+    if (pendingAsk) {
+      const want = pendingAsk;
+      setAsking(true);
+      let stopped = false;
+      const finish = (list: ChatMsg[] | null, error?: string) => {
+        if (stopped) return;
+        stopped = true;
+        clearInterval(timer);
+        try { localStorage.removeItem(pendingKey); } catch { /* ignore */ }
+        if (list) {
+          const str = JSON.stringify(list);
+          setChat(list);
+          try { localStorage.setItem(chatKey, str); localStorage.setItem(`${chatKey}:synced`, str); } catch { /* ignore */ }
+        }
+        if (error) setAskError(error);
+        setAsking(false);
+      };
+      const check = async () => {
+        try {
+          const r = await fetch('/api/insights/chat', { cache: 'no-store' });
+          const d = (await r.json()) as { configured?: boolean; messages?: ChatMsg[] };
+          if (!d?.configured) { finish(null, "Cleo's chat storage isn't available, so that answer couldn't be recovered. Please ask again."); return; }
+          const server = Array.isArray(d.messages) ? d.messages : [];
+          // Answered when the server copy holds the question followed by an answer.
+          for (let i = server.length - 2; i >= 0; i--) {
+            if (server[i].role === 'user' && server[i].content === want.question && server[i + 1]?.role === 'assistant') { finish(server); return; }
+          }
+        } catch { /* keep watching */ }
+        if (Date.now() - want.sentAt > 8 * 60 * 1000) finish(null, "Cleo didn't finish answering that one. Please ask it again.");
+      };
+      const timer = setInterval(check, 5000);
+      check();
+      return () => { stopped = true; clearInterval(timer); };
+    }
+
     // Server copy (keyed to the login) is the source of truth across devices.
     // The old rule was "longer copy wins", which let a STALE-but-longer local
     // history overwrite the server and destroy a newer conversation from
@@ -329,6 +375,14 @@ export default function CleoChat() {
     setPending([]);
     setAsking(true);
     setAskError(null);
+    // Save the question NOW (not after the answer): a refresh or a sleeping
+    // phone mid-answer used to lose it. The server saves the answer itself,
+    // and the load effect above resumes watching for it.
+    const pendingKey = `${chatKey}:pending`;
+    try {
+      localStorage.setItem(chatKey, JSON.stringify(stripImages(next).slice(-24)));
+      localStorage.setItem(pendingKey, JSON.stringify({ sentAt: Date.now(), question: text }));
+    } catch { /* ignore */ }
     try {
       const res = await fetch('/api/insights/ask', {
         method: 'POST',
@@ -340,18 +394,21 @@ export default function CleoChat() {
       if (!res.ok || data.error) throw new Error(data.error || 'Something went wrong');
       const withAnswer: ChatMsg[] = [...stripImages(next), { role: 'assistant', content: data.answer }];
       setChat(withAnswer);
-      // Voice conversation: a dictated question gets a spoken answer.
       try {
         const snap = JSON.stringify(withAnswer.slice(-24));
         localStorage.setItem(chatKey, snap);
         localStorage.setItem(`${chatKey}:synced`, snap);
+        localStorage.removeItem(pendingKey);
       } catch { /* ignore */ }
-      // Back up to the server (keyed to the login) — best-effort.
-      fetch('/api/insights/chat', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: withAnswer.slice(-24) }),
-      }).catch(() => {});
+      // The server saved the exchange itself (data.saved); older servers
+      // leave it to the browser — best-effort backup.
+      if (!data.saved) {
+        fetch('/api/insights/chat', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: withAnswer.slice(-24) }),
+        }).catch(() => {});
+      }
       // Cleo decided to build a report. The server already started the build
       // (reportSince is its job id) — show the pinned banner and try to open
       // the viewer; if a browser blocks the tab, the banner's button works.
@@ -373,6 +430,7 @@ export default function CleoChat() {
     } catch (e) {
       setAskError(e instanceof Error ? e.message : 'Something went wrong');
       setChat(chat); // roll back the optimistic user message on failure
+      try { localStorage.setItem(chatKey, JSON.stringify(chat.slice(-24))); localStorage.removeItem(pendingKey); } catch { /* ignore */ }
       setQuestion(text);
       setPending(images);
     } finally {
@@ -384,7 +442,7 @@ export default function CleoChat() {
     if (!confirm('Clear this conversation everywhere? It syncs across your devices, so this deletes it on all of them.')) return;
     setChat([]);
     setAskError(null);
-    try { localStorage.removeItem(chatKey); } catch { /* ignore */ }
+    try { localStorage.removeItem(chatKey); localStorage.removeItem(`${chatKey}:pending`); } catch { /* ignore */ }
     fetch('/api/insights/chat', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
