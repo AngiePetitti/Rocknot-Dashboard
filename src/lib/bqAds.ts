@@ -18,6 +18,8 @@ export interface PlatformData {
   color: string;
   /** Which attribution basis the purchases/revenue use, when it needs saying (Pinterest). */
   attribution?: string;
+  /** View-through share of `conversions`, when the platform reports it for the whole range (Pinterest). */
+  viewConversions?: number;
 }
 
 export interface DaySpend {
@@ -424,6 +426,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     const rangeDays = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1;
     if (pinterestPlatform && pinLiveDays >= rangeDays && pinConv > 0) {
       pinterestPlatform.attribution = `${pinterestPlatform.attribution || pinterestWindsorNote()} · ${Math.round(pinViewConv)} of ${Math.round(pinConv)} checkouts are view-through`;
+      pinterestPlatform.viewConversions = Math.round(pinViewConv);
     }
   }
 
