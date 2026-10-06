@@ -1,4 +1,4 @@
-import { runQuery, getDataset, dedupedOrdersCte, shopifyOrdersFilter, googleSource } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte, shopifyOrdersFilter, googleSource, metaSource } from '@/src/lib/bigquery';
 import { CohortData } from '@/src/lib/mockData';
 import { metaAccountSql } from '@/src/lib/client';
 
@@ -214,9 +214,10 @@ export async function getPaybackLtv(): Promise<PaybackCohort[]> {
   // Monthly blended ad spend across every platform table (each guarded — a
   // table only exists once that client's Windsor connector has synced).
   const gsrc = await googleSource();
+  const msrc = await metaSource();
   const spendFor = (table: string, extra = '') => `
     SELECT FORMAT_DATE('%Y-%m-01', DATE(date)) AS m, SUM(CAST(spend AS FLOAT64)) AS spend
-    FROM ${table === 'google_ads' ? gsrc : `\`${ds}.${table}\``}
+    FROM ${table === 'google_ads' ? gsrc : table === 'facebook_ads' ? msrc : `\`${ds}.${table}\``}
     WHERE DATE(date) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 12 MONTH) ${extra}
     GROUP BY m`;
 

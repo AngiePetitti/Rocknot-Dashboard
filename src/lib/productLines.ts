@@ -1,5 +1,5 @@
 import { runShopifyQLRaw } from '@/src/lib/shopifyql';
-import { runQuery, getDataset, isBigQueryConfigured, tableExists } from '@/src/lib/bigquery';
+import { runQuery, getDataset, isBigQueryConfigured, tableExists, metaSource, googleSource } from '@/src/lib/bigquery';
 import { productLines, lineForProduct, shopifyDomain, metaAccountSql, hasPlatform, PLATFORMS, ProductLine, storeOnlyWhere } from '@/src/lib/client';
 
 // Per-product-line split of the Overview (e.g. women's vs kids):
@@ -63,9 +63,10 @@ async function spendByLine(from: string, to: string, lines: ProductLine[]): Prom
     try {
       if (!(await tableExists(p.bqTable))) return;
       const extra = p.bqTable === 'facebook_ads' ? metaAccountSql() : '';
+      const src = p.bqTable === 'facebook_ads' ? await metaSource() : p.bqTable === 'google_ads' ? await googleSource() : `\`${ds}.${p.bqTable}\``;
       const rows = await runQuery<{ line: string; spend: number | null }>(
         `SELECT ${lineCaseSql(lines)} AS line, SUM(CAST(spend AS FLOAT64)) AS spend
-         FROM \`${ds}.${p.bqTable}\`
+         FROM ${src}
          WHERE DATE(date) BETWEEN @from AND @to${extra}
          GROUP BY line`,
         { from, to }
