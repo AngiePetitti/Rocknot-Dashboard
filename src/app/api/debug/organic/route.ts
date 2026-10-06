@@ -46,6 +46,11 @@ export async function GET(request: NextRequest) {
     .catch(e => ({ error: e instanceof Error ? e.message : String(e) }));
   out.windsorAccounts = { pinterest_organic: pinAccounts, instagram: igAccounts };
   out.pinterestOrganic = { notConnected: pin.notConnected, fieldSet: pin.fieldSet, rowCount: pin.rows?.length ?? 0, attempts: pin.attempts };
+  try {
+    const { fetchOrganic } = await import('@/src/lib/organic');
+    const full = await fetchOrganic(from, to);
+    out.audience = full.audience;
+  } catch (e) { out.audience = { error: e instanceof Error ? e.message : String(e) }; }
   // Direct Pinterest API path (Business Access via the client's ad account).
   try {
     const { fetchPinterestOrganicDirect, pinterestOrganicDirectConfigured, pinterestActingAccount } = await import('@/src/lib/pinterestOrganicDirect');

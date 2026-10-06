@@ -190,6 +190,27 @@ export default function OrganicContent() {
               subtitle={`Pinterest ${n(traffic?.Pinterest.sessions)} (${n(traffic?.Pinterest.completed)} orders) · Instagram ${n(traffic?.Instagram.sessions)} (${n(traffic?.Instagram.completed)} orders) · unpaid taps to ${client.siteDomain}`} />
           </div>
 
+          {/* ── Audience: followers across the board ── */}
+          {data.audience && (() => {
+            const aud = data.audience as Record<'Pinterest' | 'Instagram', { status: string; error?: string; followers: number | null; followersStart: number | null; newFollowers: number | null; profileViews?: number; websiteClicks?: number }>;
+            const card = (label: string, a: typeof aud.Instagram, color: string) => {
+              const growth = a.newFollowers != null ? `${a.newFollowers >= 0 ? '+' : '−'}${n(Math.abs(a.newFollowers))} in ${rangeLabel.toLowerCase()}` : '';
+              const extras = [a.profileViews != null ? `${n(a.profileViews)} profile views` : '', a.websiteClicks != null ? `${n(a.websiteClicks)} website taps` : ''].filter(Boolean).join(' · ');
+              return (
+                <MetricCard key={label} title={`${label} Followers`} accentColor={color}
+                  value={a.status === 'ok' && a.followers != null ? n(a.followers) : (a.status === 'ok' && a.newFollowers != null ? `${a.newFollowers >= 0 ? '+' : '−'}${n(Math.abs(a.newFollowers))}` : '—')}
+                  subtitle={a.status === 'not_connected' ? `${label} not connected` : a.status === 'error' ? 'Follower data unavailable from this feed' : [growth, extras].filter(Boolean).join(' · ') || 'No follower fields in this feed yet'}
+                  trend={a.status === 'ok' && a.newFollowers != null && a.followers != null ? { value: `${a.newFollowers >= 0 ? '▲' : '▼'} ${n(Math.abs(a.newFollowers))} followers`, positive: a.newFollowers >= 0 } : undefined} />
+              );
+            };
+            return (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
+                {card('Instagram', aud.Instagram, '#d946ef')}
+                {card('Pinterest', aud.Pinterest, '#e11d48')}
+              </div>
+            );
+          })()}
+
           {/* ── Pinterest pins ── */}
           {pin && pin.status !== 'ok' ? (
             <SetupCard title="Pinterest Pins" platform="Pinterest Organic" isAdmin={isAdmin} block={pin} />
