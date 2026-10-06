@@ -1,4 +1,4 @@
-import { runQuery, getDataset, dedupedOrdersCte, shopifyOrdersFilter, googleAccountSql } from '@/src/lib/bigquery';
+import { runQuery, getDataset, dedupedOrdersCte, shopifyOrdersFilter, googleSource } from '@/src/lib/bigquery';
 import { CohortData } from '@/src/lib/mockData';
 import { metaAccountSql } from '@/src/lib/client';
 
@@ -213,16 +213,17 @@ export async function getPaybackLtv(): Promise<PaybackCohort[]> {
 
   // Monthly blended ad spend across every platform table (each guarded — a
   // table only exists once that client's Windsor connector has synced).
+  const gsrc = await googleSource();
   const spendFor = (table: string, extra = '') => `
     SELECT FORMAT_DATE('%Y-%m-01', DATE(date)) AS m, SUM(CAST(spend AS FLOAT64)) AS spend
-    FROM \`${ds}.${table}\`
+    FROM ${table === 'google_ads' ? gsrc : `\`${ds}.${table}\``}
     WHERE DATE(date) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 12 MONTH) ${extra}
     GROUP BY m`;
 
   const [cohortRows, meta, google, tiktok, snap, pinterest] = await Promise.all([
     runQuery<{ cohort_month: string; month_offset: number; revenue: number; size: number }>(cohortSql),
     runQuery<{ m: string; spend: number }>(spendFor('facebook_ads', metaAccountSql())).catch(() => []),
-    runQuery<{ m: string; spend: number }>(spendFor('google_ads', await googleAccountSql())).catch(() => []),
+    runQuery<{ m: string; spend: number }>(spendFor('google_ads')).catch(() => []),
     runQuery<{ m: string; spend: number }>(spendFor('tiktok_ads')).catch(() => []),
     runQuery<{ m: string; spend: number }>(spendFor('snapchat_ads')).catch(() => []),
     runQuery<{ m: string; spend: number }>(spendFor('pinterest_ads')).catch(() => []),
