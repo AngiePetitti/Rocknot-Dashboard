@@ -1,128 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { friendlyAiError } from '@/src/lib/aiError';
-import { getClient, marketplaces } from '@/src/lib/client';
-import Anthropic from '@anthropic-ai/sdk';
+import { getClient } from '@/src/lib/client';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
-import { ANALYST_TOOLS, execTool, makeFetcher } from '@/src/lib/analystTools';
-import { saveReport, isChatStoreConfigured, setKV, getKV } from '@/src/lib/chatStore';
-import { saveDoc, loadDoc } from '@/src/lib/docStore';
+import { isChatStoreConfigured, getReport } from '@/src/lib/chatStore';
 import { waitUntil } from '@vercel/functions';
+import { type ChatMessage, getJob, patchJob, savePayload, runStep, runUntilDone } from '@/src/lib/reportBuilder';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-interface ChatMessage { role: 'user' | 'assistant'; content: string }
-
-// Floating Share / Save-as-PDF toolbar injected into every report. Hidden when
-// printing so it never shows up in the PDF itself.
-const TOOLBAR = `
-<style>
-  #rk-toolbar { position: fixed; bottom: 16px; right: 16px; display: flex; gap: 8px; z-index: 9999; }
-  #rk-toolbar button { font: 600 13px system-ui, sans-serif; border: none; border-radius: 12px; padding: 10px 16px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
-  #rk-pdf { background: #8b5cf6; color: #fff; }
-  #rk-share { background: #fff; color: #4b5563; border: 1px solid #e5e7eb !important; }
-  #rk-save { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0 !important; }
-  @page { margin: 12mm; }
-  @media print {
-    #rk-toolbar { display: none !important; }
-    /* Keep the report's colors and charts intact in the PDF: browsers strip
-       backgrounds by default and clip scrollable chart containers. */
-    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    div { overflow: visible !important; }
-    svg { max-width: 100% !important; }
-    /* Sensible page breaks: never slice a chart, table, or stat tile in half,
-       and keep headings attached to the content below them. (Containers
-       taller than a page still break — the browser ignores avoid there.) */
-    body { background: #fff !important; }
-    div, section, table, svg, figure, ul, ol { break-inside: avoid; page-break-inside: avoid; }
-    h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
-    tr, li { break-inside: avoid; }
-  }
-</style>
-<div id="rk-toolbar">
-  <button id="rk-save" type="button" style="display:none">💾 Save</button>
-  <button id="rk-share" type="button">📤 Share</button>
-  <button id="rk-pdf" type="button">Save as PDF</button>
-</div>
-<script>
-  (function () {
-    var pdf = document.getElementById('rk-pdf');
-    var share = document.getElementById('rk-share');
-    var save = document.getElementById('rk-save');
-    // Save is only offered on a freshly generated report inside the dashboard
-    // (?k=...) — not on saved copies (?saved=...) or shared/downloaded files.
-    if (location.pathname.indexOf('/dashboard/insights/report') !== -1 && location.search.indexOf('k=') !== -1) {
-      save.style.display = '';
-    }
-    if (window.__rkSaved) { save.textContent = '✓ Saved'; save.disabled = true; }
-    save.addEventListener('click', function () {
-      save.disabled = true;
-      save.textContent = 'Saving…';
-      var html = '<!doctype html>' + document.documentElement.outerHTML;
-      fetch('/api/insights/reports', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: document.title || 'Report', html: html })
-      }).then(function (r) { return r.json(); }).then(function (d) {
-        if (d && d.ok) { save.textContent = '✓ Saved'; }
-        else {
-          save.textContent = 'Save failed — retry';
-          save.title = (d && d.error) || 'Unknown error';
-          save.disabled = false;
-          console.error('Report save failed:', d && d.error);
-        }
-      }).catch(function (e) { save.textContent = 'Save failed — retry'; save.title = String(e); save.disabled = false; });
-    });
-    // Print dialog = "Save as PDF" on iPhone (pinch out on the preview) and desktop.
-    pdf.addEventListener('click', function () { window.print(); });
-    share.addEventListener('click', function () {
-      var html = '<!doctype html>' + document.documentElement.outerHTML;
-      var file = new File([html], (document.title || 'report') + '.html', { type: 'text/html' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        navigator.share({ files: [file], title: document.title }).catch(function () {});
-      } else {
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
-        a.download = file.name;
-        a.click();
-      }
-    });
-  })();
-</script>`;
-
-function injectToolbar(html: string, alreadySaved: boolean): string {
-  const prefix = alreadySaved ? '<script>window.__rkSaved = true;</script>' : '';
-  const i = html.toLowerCase().lastIndexOf('</body>');
-  return i === -1 ? html + prefix + TOOLBAR : html.slice(0, i) + prefix + TOOLBAR + html.slice(i);
-}
-
-function titleOf(html: string): string {
-  const m = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-  return (m?.[1] || `${getClient().name} report`).trim().slice(0, 200);
-}
-
-// Pull the HTML document out of the model's final text (it may wrap it in a code fence).
-function extractHtml(text: string): string | null {
-  const fenced = text.match(/```(?:html)?\s*([\s\S]*?)```/);
-  const candidate = (fenced ? fenced[1] : text).trim();
-  const start = candidate.search(/<!doctype html|<html/i);
-  if (start === -1) return null;
-  return candidate.slice(start);
-}
-
-// Job status the viewer tab polls (/api/insights/report/status?since=…).
-// Written server-side at every stage, so a sleeping laptop or a closed tab
-// never hides a failure — and never stops the build.
-interface ReportJob { status: 'running' | 'done' | 'error'; stage?: string; error?: string; reportId?: string; updatedAt: string }
-const jobKey = (since: number) => `report_job_${since}`;
-async function setJob(since: number, job: Omit<ReportJob, 'updatedAt'>): Promise<void> {
-  if (!since || !isChatStoreConfigured()) return;
-  try { await setKV(jobKey(since), JSON.stringify({ ...job, updatedAt: new Date().toISOString() })); } catch { /* status is best-effort */ }
-}
-
+// Report builds are a staged pipeline (see src/lib/reportBuilder.ts):
+//   plan → section:0 … section:n → assemble (summary + save)
+// Each step is a separate short run that persists its output, so a report
+// of any size survives the platform's per-run limit. Three ways in:
+//   • kickoff  {messages, focus, since}       — save the brief, start, answer 202
+//   • resume   {since, resume: true}          — run the job's CURRENT step once
+//                                               (idempotent; the chat banner and
+//                                               the viewer tab call this whenever
+//                                               the job looks idle)
+//   • legacy   {messages, focus} (no since)   — build inline and return the HTML
 export async function POST(req: NextRequest) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 500 });
@@ -134,33 +30,25 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
-  const since = Number(body.since || 0) || 0;
+  const origin = req.nextUrl.origin;
+  const cookie = req.headers.get('cookie') || '';
 
-  // resume: a second runner (the chat tab, or the viewer) asking to build a
-  // job that was queued but never started — the platform freezes background
-  // work after a response unless Fluid Compute is on. The payload was saved
-  // at kickoff, so nothing needs re-sending. The claim below keeps two
-  // runners from building the same report twice.
-  if (body.resume && since) {
-    try {
-      const raw = isChatStoreConfigured() ? await getKV(jobKey(since)) : null;
-      const job = raw ? (JSON.parse(raw) as ReportJob) : null;
-      if (!job) return NextResponse.json({ error: 'Unknown report job' }, { status: 404 });
-      if (job.status !== 'running' || (job.stage && job.stage !== 'Starting')) {
-        return NextResponse.json({ ok: true, alreadyHandled: true, status: job.status, stage: job.stage });
-      }
-      const saved = await loadDoc(`report_payload_${since}`);
-      if (!saved) return NextResponse.json({ error: 'Report payload not found' }, { status: 404 });
-      const payload = JSON.parse(saved) as { messages?: ChatMessage[]; focus?: string; email?: string | null };
-      body = { ...payload, since, wait: true };
-    } catch (e) {
-      return NextResponse.json({ error: `Couldn't resume: ${e instanceof Error ? e.message : String(e)}` }, { status: 500 });
+  // ── Resume: advance a persisted job by one step ───────────────────────────
+  if (body.resume) {
+    const since = Number(body.since || 0) || 0;
+    if (!since) return NextResponse.json({ error: 'since required' }, { status: 400 });
+    if (authConfigured()) {
+      const session = await getServerSession(authOptions);
+      if (!session?.user?.email) return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
     }
+    const before = await getJob(since);
+    if (!before) return NextResponse.json({ error: 'Unknown report job' }, { status: 404 });
+    const r = await runStep(since, origin, cookie);
+    return NextResponse.json({ ok: true, ran: r.ran, reason: r.reason, status: r.job?.status, step: r.job?.step, stage: r.job?.stage, reportId: r.job?.reportId }, { headers: { 'Cache-Control': 'no-store' } });
   }
 
-  // The focus is the builder's full brief — truncating it to a sentence
-  // silently dropped the operator's per-item requirements (e.g. "every
-  // campaign needs full copy"), so keep it generous. Same for history.
+  // ── Kickoff / legacy: validate the brief ─────────────────────────────────
+  // The focus is the builder's full brief — never truncate it to a sentence.
   const focus = (body.focus || '').trim().slice(0, 6000);
   const history = (body.messages ?? [])
     .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
@@ -169,206 +57,53 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Ask ${getClient().analyst.name} at least one question first — the report is built from the conversation.` }, { status: 400 });
   }
 
-  // Resolve the signed-in user NOW (the request is still open); the save
-  // step later runs in the background without a request to read from.
+  // Resolve the signed-in user NOW (the request is still open); later steps
+  // run without a request to read from and save the report for this user.
   let email: string | null = null;
   if (authConfigured()) {
     const session = await getServerSession(authOptions);
     email = session?.user?.email?.toLowerCase() || null;
     if (!email) return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
   }
-  // Keep the payload so a resume can run without the browser re-sending it.
-  if (since && !body.resume && isChatStoreConfigured()) {
-    try { await saveDoc(`report_payload_${since}`, JSON.stringify({ messages: history, focus, email })); } catch { /* resume just won't be possible */ }
+  if (!isChatStoreConfigured()) {
+    return NextResponse.json({ error: 'Report storage not configured (PRIVATE_SHEET_ID / GCP_SERVICE_ACCOUNT_KEY)' }, { status: 500 });
   }
 
-  const brand = getClient();
-  const get = makeFetcher(req.nextUrl.origin, req.headers.get('cookie') || '');
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  const prettyDate = new Date().toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', month: 'long', day: 'numeric', year: 'numeric' });
-
-  const conversation = history
-    .map(m => `${m.role === 'user' ? 'QUESTION' : 'ANALYST ANSWER'}:\n${m.content}`)
-    .join('\n\n---\n\n');
-
-  const { getBrandBrief } = await import('@/src/lib/brandBrief');
-  const brandBrief = await getBrandBrief().catch(() => brand.brand.description);
-  const system = `You are ${brand.analyst.name}, the in-house AI data analyst for ${brand.name}. ${brand.brand.description} Today's date is ${today}. You are turning an analyst chat conversation into a polished, SHAREABLE one-page report.
-
-BRAND BRIEF — any copy or campaign content in the report must follow it, especially the hard rules:
-${brandBrief}
-
-You have the same data tools as the chat. Re-fetch the key series behind the conversation's findings so every number and chart in the report is exact (the chat answers may be rounded). Fetch only what the report needs.
-
-MARKETPLACE CHANNELS — ${marketplaces().length ? `this dashboard tracks ${marketplaces().map(m => `${m.label} (Shopify sales channel "${m.shopifyChannel}")`).join(', ')}. Those sales are EXCLUDED from every store figure (get_metrics, products, customers, attribution) and are available ONLY through get_marketplace_channel — call it whenever the question involves ${marketplaces().map(m => m.label).join(' / ')}, wholesale or dropship, and never say that data is unavailable without calling it.` : 'none on this dashboard.'}
-
-DATES — the year is ${today.slice(0, 4)}. "September" with no year means September ${today.slice(0, 4)} (the most recent one that has happened); last year's September is only the comparison side. Every tool result starts with a date check — if it says the range is a year before today, that is the PRIOR year: fetch the current-year range too and headline that. Label every period and every chart axis with its year. A report whose headline figures come from a past year is wrong; do not ship it.
-
-Then output a COMPLETE standalone HTML document — and nothing else. No commentary before or after, no markdown fence. Requirements:
-
-STRUCTURE
-- <title> and an <h1> report title derived from what the conversation is about, subtitle "${brand.name} · Prepared ${prettyDate}".
-- An executive summary of 2–4 sentences up top: the answer/takeaway, in plain language.
-- 2–4 sections following the conversation's storyline: key metrics as stat tiles, comparisons as tables, trends as charts, then a short "Recommendations" section with concrete next steps drawn from the analysis.
-- A small footer: "Generated by ${brand.analyst.name}, ${brand.name}'s AI analyst · Data through [latest data date]".
-
-AD & POST VISUALS — when the report covers ads, Instagram/Pinterest posts or blog articles, SHOW them: get_ad_creatives and get_organic_content return each item's \`image\` URL (its real thumbnail/cover). Render a card per item: <img src="{image}" alt="{name}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:12px;background:#f3f4f6"> (use aspect-ratio 16/9 for blog covers, 2/3 for pins) above the name and its numbers, in a responsive grid (grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))), each card linking to the item's \`link\`. Use the image URLs verbatim (they are same-origin proxies that stay valid). When image is "none", draw a placeholder box labelled "No preview" (catalog ads pull their image from the product feed). Never describe a visual in words when you have the image, and never replace the images with a bar chart of names. The operator asked for this specifically — a text-only ad or post list is a failed report.
-
-VISUALS (inline SVG for charts — no external libraries, no <script>; <img> is allowed ONLY for the ad / post / blog images above)
-- At least one chart when the data has a series or comparison: hand-write clean SVG bar or line charts with axis labels, gridlines (subtle #f1f5f9), value labels on bars, and a small legend when two series are compared.
-- Charts must be accurate to the fetched data — compute pixel positions from the real numbers.
-- Wrap charts in a container with overflow-x:auto so they never break the page on a phone. Give SVGs width:100%, height:auto with a viewBox.
-
-BRAND STYLE — ${brand.name} dashboard pastels (use these exact colors)
-- Page: background #f9fafb, cards white with border #f3f4f6, border-radius 16px, subtle shadow (0 1px 2px rgba(0,0,0,.05)), padding 20-24px, max-width 780px centered.
-- Text: #1f2937 headings (bold), #6b7280 secondary, system-ui font stack.
-- Accent palette: violet #8b5cf6 (primary — h1 accent, first chart series), indigo #818cf8, pink #f9a8d4, amber #fde68a, green #86efac. Pastel section header chips using the -50 tints: #eef2ff indigo, #fdf2f8 pink, #fffbeb amber, #f0fdf4 green.
-- Stat tiles: label in 11px uppercase #9ca3af, value 24px bold #1f2937, optional delta in green #16a34a / red #dc2626.
-- Positive deltas green, negative red; keep everything else pastel and calm — no harsh saturated colors, no purple walls.
-- Print-friendly — the report will be saved as a PDF via the print dialog, so design for clean page breaks:
-  · Structure the report as a series of self-contained cards/sections, each comfortably shorter than one printed page (~900px max). Never one giant container.
-  · Add @media print { body { background: white } .card { break-inside: avoid } } (using whatever class you give cards) and break-after: avoid on headings.
-  · Keep each chart + its title + caption inside one card so they print together.
-  · Prefer several smaller charts/tables over one tall one.
-
-PRODUCT TRUTH — before writing any copy or campaign content that mentions a product, call get_product_catalog and use ONLY product names, variants, colors, and features that appear there (or that the focus explicitly states). Never invent product features, finishes, accessories, or capabilities, and NEVER feature or mention anything the catalog marks SOLD OUT or OUT OF STOCK.
-
-CONTENT DELIVERABLES — overrides the one-pager rule:
-- When the focus asks for content the team will USE (email/SMS campaign copy, briefs, calendars with copy), COMPLETENESS beats brevity: every single item listed in the focus gets its own full section with everything the focus requires (e.g. subject line, preview text, full body copy, CTA) written out ready-to-send — never "similar to above", never a summary row in place of the copy. Follow every naming rule and standing instruction in the focus exactly, for every item. Charts are optional in these reports.
-
-SPEED — the operator is waiting on this report:
-- Fetch only 1–3 tool calls' worth of data (batch calls in parallel where possible), then write.
-- Keep the HTML lean: one shared <style> block with short class names — no inline style repetition, no CSS resets, no comments. For data reports: 2–4 sections, each chart's SVG as simple as accuracy allows — a tight one-pager over an exhaustive dossier.
-
-HONESTY
-- Only report numbers you fetched. If a period had no data, either omit it or mark it "no data" — never fabricate.`;
-
-  // The whole build runs here. Returned early via waitUntil (the browser can
-  // sleep, close the tab, lose Wi-Fi — the server keeps going until the
-  // report is saved), or awaited directly when the caller asks to wait.
-  const run = async (): Promise<{ status: number; body: Record<string, unknown> }> => {
-  // Claim: if another runner already moved this job past 'Starting', stop.
-  if (since && isChatStoreConfigured()) {
-    try {
-      const raw = await getKV(jobKey(since));
-      const job = raw ? (JSON.parse(raw) as ReportJob) : null;
-      if (job && (job.status !== 'running' || (job.stage && job.stage !== 'Starting'))) {
-        return { status: 200, body: { ok: true, alreadyHandled: true } };
-      }
-    } catch { /* claim is best-effort */ }
+  const since = Number(body.since || 0) || Date.now();
+  const existing = await getJob(since);
+  if (existing) {
+    // Same job id posted twice (chat retry) — never start a second build.
+    return NextResponse.json({ queued: true, since, alreadyHandled: true, status: existing.status }, { status: 202 });
   }
-  await setJob(since, { status: 'running', stage: 'Fetching the data behind the conversation' });
   try {
-    let messages: Anthropic.MessageParam[] = [
-      {
-        role: 'user',
-        content: focus
-          ? `REPORT FOCUS (what the operator asked for): ${focus}\n\nBuild the report about that focus specifically — fetch whatever data it needs. The conversation below is context only; ignore parts unrelated to the focus.\n\n${conversation || '(no prior conversation)'}\n\nBuild the report now.`
-          : `Here is the analyst conversation to turn into a shareable report:\n\n${conversation}\n\nBuild the report now.`,
-      },
-    ];
-    let finalText = '';
-
-    for (let iter = 0; iter < 8; iter++) {
-      // Streamed because a full HTML report can exceed the SDK's 10-minute
-      // non-streaming limit at this max_tokens.
-      const response = await client.messages.stream({
-        model: 'claude-opus-4-8',
-        // Content-deliverable reports (full copy for every campaign) run much
-        // longer than data one-pagers — a low cap silently truncated the
-        // later campaigns' copy.
-        max_tokens: 48000,
-        thinking: { type: 'adaptive' },
-        // Report writing is mostly formatting; medium effort cuts thinking
-        // time substantially without hurting the numbers (they come from tools).
-        output_config: { effort: 'medium' },
-        system,
-        tools: ANALYST_TOOLS,
-        messages,
-      }).finalMessage();
-
-      if (response.stop_reason === 'refusal') {
-        const error = 'The model declined to build this report. Try again.';
-        await setJob(since, { status: 'error', error });
-        return { status: 502, body: { error } };
-      }
-
-      if (response.stop_reason === 'tool_use') {
-        const toolUses = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
-        messages = [...messages, { role: 'assistant', content: response.content }];
-        const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
-          toolUses.map(async tu => ({
-            type: 'tool_result' as const,
-            tool_use_id: tu.id,
-            content: await execTool(get, tu.name, (tu.input ?? {}) as Record<string, unknown>),
-          }))
-        );
-        messages.push({ role: 'user', content: results });
-        await setJob(since, { status: 'running', stage: iter === 0 ? 'Re-checking the numbers' : 'Drawing the charts and writing the report' });
-        continue;
-      }
-
-      // A max_tokens stop means the tail of the report (the last campaigns'
-      // copy) was cut off mid-document — fail loudly instead of returning a
-      // silently incomplete report.
-      if (response.stop_reason === 'max_tokens') {
-        const error = 'The report ran too long and was cut off — split it into two smaller reports (e.g. by week or by campaign group).';
-        await setJob(since, { status: 'error', error });
-        return { status: 502, body: { error } };
-      }
-      finalText = response.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
-      break;
-    }
-
-    const html = finalText ? extractHtml(finalText) : null;
-    if (!html) {
-      const error = 'Report generation didn\'t complete — try again, or ask a more specific question first.';
-      await setJob(since, { status: 'error', error });
-      return { status: 502, body: { error } };
-    }
-    // Auto-save the finished report to the user's saved list — the viewer tab
-    // opens it from there. Save failures are recorded on the job.
-    let saved = false;
-    let saveError: string | null = null;
-    let reportId: string | undefined;
-    if (isChatStoreConfigured() && authConfigured()) {
-      try {
-        if (email) {
-          await setJob(since, { status: 'running', stage: 'Saving the report' });
-          const meta = await saveReport(email, titleOf(html), injectToolbar(html, true));
-          reportId = meta.id;
-          saved = true;
-        } else {
-          saveError = 'No signed-in session on the save step';
-        }
-      } catch (err) {
-        saveError = String(err instanceof Error ? err.message : err);
-      }
-    } else {
-      saveError = 'Report storage not configured (PRIVATE_SHEET_ID / GCP_SERVICE_ACCOUNT_KEY)';
-    }
-    if (saveError) await setJob(since, { status: 'error', error: `Report built but saving failed: ${saveError}` });
-    else await setJob(since, { status: 'done', reportId });
-    return { status: 200, body: { ok: true, html: injectToolbar(html, saved), ...(saveError ? { saveError } : {}), ...(reportId ? { reportId } : {}) } };
-  } catch (err) {
-    const error = friendlyAiError(err);
-    await setJob(since, { status: 'error', error });
-    return { status: 500, body: { error } };
+    await savePayload(since, { messages: history, focus, email });
+  } catch (e) {
+    return NextResponse.json({ error: `Couldn't save the report brief: ${e instanceof Error ? e.message : String(e)}` }, { status: 500 });
   }
-  };
+  await patchJob(since, { status: 'running', step: 'plan', stage: 'Planning the report', claimedStep: undefined, claimedAt: undefined, claimToken: undefined });
 
-  // Default: hand the build to the platform and answer at once. The browser's
-  // connection is no longer part of the job.
-  if (!body.wait) {
-    await setJob(since, { status: 'running', stage: 'Starting' });
+  // Kickoff: hand the first steps to the platform and answer at once. The
+  // browser's connection is no longer part of the job — and if the platform
+  // freezes this background work, the chat banner / viewer resume it.
+  if (body.since && !body.wait) {
     try {
-      waitUntil(run());
+      waitUntil(runUntilDone(since, origin, cookie, 100000));
       return NextResponse.json({ queued: true, since }, { status: 202 });
     } catch {
       // No request context to attach to (local dev without the Vercel
       // runtime) — fall through and build inline.
     }
   }
-  const result = await run();
-  return NextResponse.json(result.body, { status: result.status });
+
+  // Legacy / wait: build inline within this run's budget and return the HTML.
+  const job = await runUntilDone(since, origin, cookie, 150000);
+  if (job?.status === 'error') return NextResponse.json({ error: job.error || 'Report generation failed', since }, { status: 502 });
+  if (job?.status === 'done' && job.reportId && email) {
+    // Saved copies already carry the Share / PDF toolbar.
+    const html = await getReport(email, job.reportId).catch(() => null);
+    if (html) return NextResponse.json({ ok: true, html, reportId: job.reportId, since });
+    return NextResponse.json({ ok: true, reportId: job.reportId, since });
+  }
+  // Still running (a big report) — the caller can follow it by job id.
+  return NextResponse.json({ queued: true, since, status: job?.status, stage: job?.stage }, { status: 202 });
 }
