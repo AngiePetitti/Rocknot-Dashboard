@@ -46,6 +46,14 @@ export async function GET(request: NextRequest) {
     .catch(e => ({ error: e instanceof Error ? e.message : String(e) }));
   out.windsorAccounts = { pinterest_organic: pinAccounts, instagram: igAccounts };
   out.pinterestOrganic = { notConnected: pin.notConnected, fieldSet: pin.fieldSet, rowCount: pin.rows?.length ?? 0, attempts: pin.attempts };
+  // Direct Pinterest API path (Business Access via the client's ad account).
+  try {
+    const { fetchPinterestOrganicDirect, pinterestOrganicDirectConfigured, pinterestActingAccount } = await import('@/src/lib/pinterestOrganicDirect');
+    const { pinterestConnectionStatus } = await import('@/src/lib/pinterestAuth');
+    const conn = await pinterestConnectionStatus();
+    const direct = pinterestOrganicDirectConfigured() ? await fetchPinterestOrganicDirect(from, to) : null;
+    out.pinterestDirect = { configured: pinterestOrganicDirectConfigured(), connection: conn, actingAdAccount: pinterestActingAccount(), attempts: direct?.attempts, note: direct?.note, error: direct?.error, itemCount: direct?.items.length ?? 0, sample: direct?.items.slice(0, 3) };
+  } catch (e) { out.pinterestDirect = { error: e instanceof Error ? e.message : String(e) }; }
   out.instagram = { notConnected: ig.notConnected, fieldSet: ig.fieldSet, rowCount: ig.rows?.length ?? 0, attempts: ig.attempts };
   out.shopifyArticles = articles;
   out.ogImageProbe = await fetchOgImages(['/blogs/news/the-most-comfortable-wedding-shoes-that-brides-actually-wear-all-day']).then(m => Array.from(m.entries())).catch(e => ({ error: String(e) }));

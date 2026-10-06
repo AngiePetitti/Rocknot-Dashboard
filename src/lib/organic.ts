@@ -41,6 +41,8 @@ export interface SourceBlock<T> {
   totals: Record<string, number>;
   /** Which Windsor field set succeeded (debugging aid). */
   fieldSet?: string;
+  /** Caveat shown under the block (e.g. Pinterest's 90-day analytics limit). */
+  note?: string;
 }
 
 export interface SocialTraffic { sessions: number; cartAdds: number; completed: number }
@@ -147,7 +149,15 @@ export const INSTAGRAM_METRICS = ['reach', 'impressions', 'likes', 'comments', '
 
 export async function fetchPinterestOrganic(from: string, to: string): Promise<SourceBlock<OrganicPost>> {
   const r = await windsorOrganicRows('pinterest_organic', PINTEREST_ORGANIC_FIELDSETS, from, to);
-  if (r.notConnected) return { status: 'not_connected', items: [], totals: {} };
+  if (r.notConnected) {
+    // Windsor can't see a profile reached through Business Access; Pinterest's
+    // own API can, acting through the client's ad account.
+    const { fetchPinterestOrganicDirect, pinterestOrganicDirectConfigured } = await import('@/src/lib/pinterestOrganicDirect');
+    if (!pinterestOrganicDirectConfigured()) return { status: 'not_connected', items: [], totals: {} };
+    const d = await fetchPinterestOrganicDirect(from, to);
+    if (d.error) return { status: 'error', error: d.error, items: [], totals: {} };
+    return { status: 'ok', items: d.items, totals: sumTotals(d.items, PINTEREST_METRICS), fieldSet: 'pinterest_api', ...(d.note ? { note: d.note } : {}) };
+  }
   if (!r.rows) return { status: 'error', error: r.attempts.map(a => `${a.fieldSet}: ${a.error}`).join(' | '), items: [], totals: {} };
   const rolled = rollUp(r.rows, 'pin_id', ['pin_impression', 'save', 'pin_click', 'pin_outbound_click']);
   const items: OrganicPost[] = Array.from(rolled.entries()).map(([id, v]) => {
