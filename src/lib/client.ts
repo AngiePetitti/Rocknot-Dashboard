@@ -325,9 +325,9 @@ const KAILEEP: ClientProfile = {
       snapchat: null,
       quickbooks: null,
       // Organic Content tab. Instagram Insights: "Kailee P. Wedding Shoes"
-      // (@kaileepweddings). Pinterest Organic stays null until the grant is
-      // done from Kailee's own Pinterest login (/api/debug/organic lists ids).
-      pinterest_organic: null,
+      // (@kaileepweddings). Pinterest Organic: Kailee P | Wedding Shoes &
+      // Finishing Touches business (same id as Pinterest's actingBusinessId).
+      pinterest_organic: '58054420105005129',
       instagram: '17841402329636544',
       // GA4 property "Kailee P" (Windsor Google Analytics 4 connector).
       google_analytics: '347015181',
