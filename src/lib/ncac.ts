@@ -49,62 +49,78 @@ export function classifySource(utmSource: string, utmMedium: string, refSource: 
 
 interface SourceRow { utmSource: string; utmMedium: string; refSource: string; refName: string; orders: number; customers: number; returning: number }
 
-async function fetchSourceRows(from: string, to: string): Promise<{ rows: SourceRow[]; basis: NcacSummary['basis'] }> {
+const toRow = (x: Record<string, unknown>): SourceRow => ({
+  utmSource: low(x.utm_campaign_source), utmMedium: low(x.utm_campaign_medium),
+  refSource: low(x.order_referrer_source), refName: low(x.order_referrer_name),
+  orders: num(x.orders), customers: num(x.customers), returning: num(x.returning_customers),
+});
+
+/**
+ * Two Shopify views of the same orders. Referrer rows always come back; UTM
+ * rows come back only for stores whose orders carry campaign tags (Shopify
+ * returns an EMPTY result, not an error, when they don't — so empty means
+ * "no signal", never "no orders"). The two overlap (a tagged order also has a
+ * referrer), so per platform the larger of the two counts is used: the best
+ * available last-click evidence of that platform's first-time buyers.
+ */
+async function fetchSourceRows(from: string, to: string): Promise<{ referrer: SourceRow[]; utm: SourceRow[]; totals: { customers: number; returning: number; orders: number } }> {
   const where = storeOnlyWhere();
   const range = `SINCE ${from} UNTIL ${to}`;
-  // Try UTM + referrer together; Shopify may not expose UTM dimensions on the
-  // sales dataset for every store, so fall back to referrer only.
-  try {
-    const r = await shopifyql(`FROM sales SHOW orders, customers, returning_customers GROUP BY utm_campaign_source, utm_campaign_medium, order_referrer_source, order_referrer_name ${where} ${range} ORDER BY orders DESC LIMIT 400`, { timeoutMs: 20000 });
-    return {
-      basis: 'utm+referrer',
-      rows: r.map(x => ({ utmSource: low(x.utm_campaign_source), utmMedium: low(x.utm_campaign_medium), refSource: low(x.order_referrer_source), refName: low(x.order_referrer_name), orders: num(x.orders), customers: num(x.customers), returning: num(x.returning_customers) })),
-    };
-  } catch { /* fall through */ }
-  const r = await shopifyql(`FROM sales SHOW orders, customers, returning_customers GROUP BY order_referrer_source, order_referrer_name ${where} ${range} ORDER BY orders DESC LIMIT 400`, { timeoutMs: 20000 });
-  return {
-    basis: 'referrer',
-    rows: r.map(x => ({ utmSource: '', utmMedium: '', refSource: low(x.order_referrer_source), refName: low(x.order_referrer_name), orders: num(x.orders), customers: num(x.customers), returning: num(x.returning_customers) })),
-  };
+  const [referrer, utm, totals] = await Promise.all([
+    shopifyql(`FROM sales SHOW orders, customers, returning_customers GROUP BY order_referrer_source, order_referrer_name ${where} ${range} ORDER BY orders DESC LIMIT 400`, { timeoutMs: 20000 }).then(r => r.map(toRow)),
+    shopifyql(`FROM sales SHOW orders, customers, returning_customers GROUP BY utm_campaign_source, utm_campaign_medium ${where} ${range} ORDER BY orders DESC LIMIT 400`, { timeoutMs: 20000 }).then(r => r.map(toRow)).catch(() => [] as SourceRow[]),
+    shopifyql(`FROM sales SHOW orders, customers, returning_customers ${where} ${range}`, { timeoutMs: 15000 }).then(r => ({ customers: num(r[0]?.customers), returning: num(r[0]?.returning_customers), orders: num(r[0]?.orders) })).catch(() => ({ customers: 0, returning: 0, orders: 0 })),
+  ]);
+  return { referrer, utm, totals };
 }
 
 export async function fetchNcac(from: string, to: string): Promise<NcacSummary> {
-  const [{ rows, basis }, ads] = await Promise.all([
+  const [{ referrer, utm, totals }, ads] = await Promise.all([
     fetchSourceRows(from, to),
     getAdsOverview(from, to).catch(() => ({ platforms: [] as Array<{ platform: string; spend: number }>, dailySpend: [] })),
   ]);
   const spendByLabel = new Map(ads.platforms.map(p => [p.platform.toLowerCase(), p.spend]));
-  const acc = new Map<PlatformKey, { newCustomers: number; orders: number }>();
-  const other = new Map<string, { newCustomers: number; orders: number }>();
-  let unNew = 0, unOrders = 0, allNew = 0;
-  for (const r of rows) {
-    const fresh = Math.max(0, r.customers - r.returning);
-    allNew += fresh;
-    const k = classifySource(r.utmSource, r.utmMedium, r.refSource, r.refName);
-    if (k) {
-      const cur = acc.get(k) || { newCustomers: 0, orders: 0 };
-      cur.newCustomers += fresh; cur.orders += r.orders; acc.set(k, cur);
-    } else {
-      unNew += fresh; unOrders += r.orders;
-      const label = [r.utmSource && `utm:${r.utmSource}`, r.refName || r.refSource].filter(Boolean).join(' · ') || 'direct / untracked';
-      const cur = other.get(label) || { newCustomers: 0, orders: 0 };
-      cur.newCustomers += fresh; cur.orders += r.orders; other.set(label, cur);
+  type Acc = { newCustomers: number; orders: number };
+  const tally = (rows: SourceRow[]) => {
+    const acc = new Map<PlatformKey, Acc>();
+    const other = new Map<string, Acc>();
+    for (const r of rows) {
+      const fresh = Math.max(0, r.customers - r.returning);
+      const k = classifySource(r.utmSource, r.utmMedium, r.refSource, r.refName);
+      if (k) {
+        const cur = acc.get(k) || { newCustomers: 0, orders: 0 };
+        cur.newCustomers += fresh; cur.orders += r.orders; acc.set(k, cur);
+      } else {
+        const label = [r.utmSource && `utm:${r.utmSource}`, r.refName || r.refSource].filter(Boolean).join(' · ') || 'direct / untracked';
+        const cur = other.get(label) || { newCustomers: 0, orders: 0 };
+        cur.newCustomers += fresh; cur.orders += r.orders; other.set(label, cur);
+      }
     }
-  }
+    return { acc, other };
+  };
+  const byRef = tally(referrer);
+  const byUtm = tally(utm);
   const platforms: NcacPlatform[] = clientPlatforms().map(p => {
-    const a = acc.get(p.key) || { newCustomers: 0, orders: 0 };
+    const a = byRef.acc.get(p.key) || { newCustomers: 0, orders: 0 };
+    const b = byUtm.acc.get(p.key) || { newCustomers: 0, orders: 0 };
+    const best = b.newCustomers > a.newCustomers ? b : a;
     const spend = spendByLabel.get(p.label.toLowerCase()) || 0;
-    return { key: p.key, label: p.label, color: p.color, spend, newCustomers: a.newCustomers, orders: a.orders, ncac: a.newCustomers > 0 ? spend / a.newCustomers : null };
+    return { key: p.key, label: p.label, color: p.color, spend, newCustomers: best.newCustomers, orders: best.orders, ncac: best.newCustomers > 0 ? spend / best.newCustomers : null };
   });
   const totalSpend = platforms.reduce((s, p) => s + p.spend, 0);
+  // Store-wide first-time buyers from Shopify's own total (exact; matches the
+  // Overview's New Customers card), not a sum of the source rows.
+  const allNew = Math.max(0, totals.customers - totals.returning) || referrer.reduce((s, r) => s + Math.max(0, r.customers - r.returning), 0);
+  const attributed = platforms.reduce((s, p) => s + p.newCustomers, 0);
+  const otherSources = Array.from(byRef.other.entries()).map(([source, v]) => ({ source, ...v })).sort((a, b) => b.newCustomers - a.newCustomers).slice(0, 8);
   return {
     range: { from, to },
     platforms,
     blended: { spend: totalSpend, newCustomers: allNew, ncac: allNew > 0 ? totalSpend / allNew : null },
-    attributedNewCustomers: platforms.reduce((s, p) => s + p.newCustomers, 0),
-    unattributed: { newCustomers: unNew, orders: unOrders },
-    otherSources: Array.from(other.entries()).map(([source, v]) => ({ source, ...v })).sort((a, b) => b.newCustomers - a.newCustomers).slice(0, 8),
-    basis,
+    attributedNewCustomers: attributed,
+    unattributed: { newCustomers: Math.max(0, allNew - attributed), orders: Math.max(0, totals.orders - platforms.reduce((s, p) => s + p.orders, 0)) },
+    otherSources,
+    basis: utm.length ? 'utm+referrer' : 'referrer',
   };
 }
 
