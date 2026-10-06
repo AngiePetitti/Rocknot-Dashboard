@@ -196,6 +196,28 @@ export default function CleoChat() {
   }
   const [reportMenu, setReportMenu] = useState(false);
   const [reportLink, setReportLink] = useState<string | null>(null);
+  // Pinned banner for a report Cleo kicked off: always visible (not buried in
+  // the scrollback), polls the server-side job so it shows building → ready
+  // even when the popup was blocked (tabs opened after an async answer are).
+  const [reportJob, setReportJob] = useState<{ since: number; url: string; status: 'building' | 'ready' | 'error'; stage?: string; error?: string; openedTab: boolean } | null>(null);
+  useEffect(() => {
+    if (!reportJob || reportJob.status !== 'building') return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/insights/report/status?since=${reportJob.since}`, { cache: 'no-store' });
+        const d = await r.json().catch(() => null);
+        const job = d?.job as { status: string; stage?: string; error?: string; reportId?: string } | null;
+        if (cancelled || !job) return;
+        if (job.status === 'done') setReportJob(j => j && { ...j, status: 'ready', url: job.reportId ? `/dashboard/insights/report?saved=${encodeURIComponent(job.reportId)}` : j.url });
+        else if (job.status === 'error') setReportJob(j => j && { ...j, status: 'error', error: job.error });
+        else if (job.stage) setReportJob(j => j && { ...j, stage: job.stage });
+      } catch { /* keep polling */ }
+    };
+    tick();
+    const t = setInterval(tick, 5000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [reportJob?.since, reportJob?.status]); // eslint-disable-line react-hooks/exhaustive-deps
   const endRef = useRef<HTMLDivElement>(null);
   const { data: session, status: sessionStatus } = useSession();
   // Scope saved chat to the signed-in user so it never leaks across logins on a shared device.
@@ -376,8 +398,12 @@ export default function CleoChat() {
         .catch(e => { try { localStorage.setItem(`rk_report_err_${since}`, `Report request died: ${String(e)}`); } catch { /* ignore */ } });
     } catch { /* ignore */ }
     const url = `/dashboard/insights/report?since=${since}`;
+    // Opens only when this runs inside a user gesture (the Report button);
+    // after an async Cleo answer the browser blocks it — the banner below is
+    // the reliable path either way.
     const w = window.open(url, '_blank');
-    setReportLink(w ? null : url);
+    setReportLink(null);
+    setReportJob({ since, url, status: 'building', openedTab: Boolean(w) });
   }
 
   function createReport(scope: 'last' | 'all') {
@@ -459,6 +485,25 @@ export default function CleoChat() {
           </div>
 
           {/* Messages */}
+          {reportJob && (
+            <div className={`mx-3 mt-2 rounded-2xl border px-3.5 py-2.5 text-sm flex items-center gap-3 ${reportJob.status === 'error' ? 'bg-red-50 border-red-100 text-red-700' : reportJob.status === 'ready' ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : 'bg-violet-50 border-violet-100 text-violet-800'}`}>
+              <span className="text-lg shrink-0">{reportJob.status === 'ready' ? '✅' : reportJob.status === 'error' ? '⚠️' : '📊'}</span>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold leading-tight">
+                  {reportJob.status === 'ready' ? 'Your report is ready' : reportJob.status === 'error' ? 'The report failed' : 'Cleo is building your report…'}
+                </p>
+                <p className="text-[11px] opacity-80 leading-snug">
+                  {reportJob.status === 'error' ? (reportJob.error || 'Try again.') : reportJob.status === 'ready' ? 'Also saved under Saved reports on the AI Insights tab.' : (reportJob.stage || 'Fetching the data…') + (reportJob.openedTab ? '' : ' · it keeps building even if you close this.')}
+                </p>
+              </div>
+              {reportJob.status !== 'error' && (
+                <a href={reportJob.url} target="_blank" rel="noreferrer" className={`shrink-0 text-xs font-bold px-3 py-1.5 rounded-xl ${reportJob.status === 'ready' ? 'bg-emerald-600 text-white' : 'bg-white text-violet-700 border border-violet-200'}`}>
+                  {reportJob.status === 'ready' ? 'Open report' : 'Watch'}
+                </a>
+              )}
+              <button onClick={() => setReportJob(null)} className="shrink-0 text-xs opacity-60 hover:opacity-100" aria-label="Dismiss">✕</button>
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-3 space-y-3">
             {chat.length === 0 && !asking && (
               <div className="pt-6">
