@@ -21,6 +21,9 @@ export async function GET(request: NextRequest) {
     utmAndReferrer: `FROM sales SHOW orders, customers, returning_customers GROUP BY utm_campaign_source, utm_campaign_medium, order_referrer_source, order_referrer_name ${where} ${range} ORDER BY orders DESC LIMIT 25`,
     referrerOnly: `FROM sales SHOW orders, customers, returning_customers GROUP BY order_referrer_source, order_referrer_name ${where} ${range} ORDER BY orders DESC LIMIT 25`,
     referrerOrdersOnly: `FROM sales SHOW orders, net_sales GROUP BY order_referrer_source, order_referrer_name ${where} ${range} ORDER BY orders DESC LIMIT 10`,
+    utmOnly: `FROM sales SHOW orders, customers, returning_customers GROUP BY utm_campaign_source, utm_campaign_medium ${where} ${range} ORDER BY orders DESC LIMIT 25`,
+    marketingChannel: `FROM sales SHOW orders, customers, returning_customers GROUP BY marketing_channel ${where} ${range} ORDER BY orders DESC LIMIT 25`,
+    sessionsByUtm: `FROM sessions SHOW sessions, sessions_that_completed_checkout GROUP BY utm_source, utm_medium ${range} ORDER BY sessions DESC LIMIT 25`,
     totals: `FROM sales SHOW orders, customers, returning_customers ${where} ${range}`,
   };
   const out: Record<string, unknown> = { generatedAt: new Date().toISOString(), range: { from, to }, where };
