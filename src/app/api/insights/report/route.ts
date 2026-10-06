@@ -5,7 +5,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
 import { ANALYST_TOOLS, execTool, makeFetcher } from '@/src/lib/analystTools';
-import { saveReport, isChatStoreConfigured, setKV } from '@/src/lib/chatStore';
+import { saveReport, isChatStoreConfigured, setKV, getKV } from '@/src/lib/chatStore';
+import { saveDoc, loadDoc } from '@/src/lib/docStore';
 import { waitUntil } from '@vercel/functions';
 
 export const dynamic = 'force-dynamic';
@@ -127,13 +128,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 500 });
   }
 
-  let body: { messages?: ChatMessage[]; focus?: string; since?: number; wait?: boolean };
+  let body: { messages?: ChatMessage[]; focus?: string; since?: number; wait?: boolean; resume?: boolean };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
   const since = Number(body.since || 0) || 0;
+
+  // resume: a second runner (the chat tab, or the viewer) asking to build a
+  // job that was queued but never started — the platform freezes background
+  // work after a response unless Fluid Compute is on. The payload was saved
+  // at kickoff, so nothing needs re-sending. The claim below keeps two
+  // runners from building the same report twice.
+  if (body.resume && since) {
+    try {
+      const raw = isChatStoreConfigured() ? await getKV(jobKey(since)) : null;
+      const job = raw ? (JSON.parse(raw) as ReportJob) : null;
+      if (!job) return NextResponse.json({ error: 'Unknown report job' }, { status: 404 });
+      if (job.status !== 'running' || (job.stage && job.stage !== 'Starting')) {
+        return NextResponse.json({ ok: true, alreadyHandled: true, status: job.status, stage: job.stage });
+      }
+      const saved = await loadDoc(`report_payload_${since}`);
+      if (!saved) return NextResponse.json({ error: 'Report payload not found' }, { status: 404 });
+      const payload = JSON.parse(saved) as { messages?: ChatMessage[]; focus?: string; email?: string | null };
+      body = { ...payload, since, wait: true };
+    } catch (e) {
+      return NextResponse.json({ error: `Couldn't resume: ${e instanceof Error ? e.message : String(e)}` }, { status: 500 });
+    }
+  }
+
   // The focus is the builder's full brief — truncating it to a sentence
   // silently dropped the operator's per-item requirements (e.g. "every
   // campaign needs full copy"), so keep it generous. Same for history.
@@ -152,6 +176,10 @@ export async function POST(req: NextRequest) {
     const session = await getServerSession(authOptions);
     email = session?.user?.email?.toLowerCase() || null;
     if (!email) return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
+  }
+  // Keep the payload so a resume can run without the browser re-sending it.
+  if (since && !body.resume && isChatStoreConfigured()) {
+    try { await saveDoc(`report_payload_${since}`, JSON.stringify({ messages: history, focus, email })); } catch { /* resume just won't be possible */ }
   }
 
   const brand = getClient();
@@ -219,6 +247,16 @@ HONESTY
   // sleep, close the tab, lose Wi-Fi — the server keeps going until the
   // report is saved), or awaited directly when the caller asks to wait.
   const run = async (): Promise<{ status: number; body: Record<string, unknown> }> => {
+  // Claim: if another runner already moved this job past 'Starting', stop.
+  if (since && isChatStoreConfigured()) {
+    try {
+      const raw = await getKV(jobKey(since));
+      const job = raw ? (JSON.parse(raw) as ReportJob) : null;
+      if (job && (job.status !== 'running' || (job.stage && job.stage !== 'Starting'))) {
+        return { status: 200, body: { ok: true, alreadyHandled: true } };
+      }
+    } catch { /* claim is best-effort */ }
+  }
   await setJob(since, { status: 'running', stage: 'Fetching the data behind the conversation' });
   try {
     let messages: Anthropic.MessageParam[] = [

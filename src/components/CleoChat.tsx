@@ -350,6 +350,10 @@ export default function CleoChat() {
         setReportJob(data.reportError
           ? { since: data.reportSince, url, status: 'error', error: String(data.reportError), openedTab: false }
           : { since: data.reportSince, url, status: 'building', openedTab: Boolean(w) });
+        // Belt and braces: also drive the build from here. If the server's
+        // background runner already claimed it, this returns at once; if the
+        // platform froze that runner, this one does the work.
+        if (!data.reportError) nudgeReport(data.reportSince);
       } else if (typeof data.reportFocus === 'string' && data.reportFocus) {
         // Older server without server-side kickoff — start it from here.
         kickoffReport({ messages: withAnswer.slice(-8), focus: data.reportFocus });
@@ -382,6 +386,18 @@ export default function CleoChat() {
   // Kick off report generation IMMEDIATELY in the background (the server
   // auto-saves the result), then open a viewer tab that just waits for it.
   // The viewer can be closed or backgrounded freely — generation continues.
+  // Ask the server to run a queued report inline (idempotent — a job that
+  // has already started is left alone). Fired automatically, never by a click.
+  function nudgeReport(since: number): void {
+    setTimeout(() => {
+      fetch('/api/insights/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ since, resume: true, wait: true }),
+      }).catch(() => { /* status polling will show the outcome */ });
+    }, 4000);
+  }
+
   function kickoffReport(payload: { messages: ChatMsg[]; focus?: string }): void {
     const since = Date.now();
     // `since` doubles as the job id: the server records progress/errors under
@@ -413,6 +429,7 @@ export default function CleoChat() {
     const w = window.open(url, '_blank');
     setReportLink(null);
     setReportJob({ since, url, status: 'building', openedTab: Boolean(w) });
+    nudgeReport(since);
   }
 
   function createReport(scope: 'last' | 'all') {

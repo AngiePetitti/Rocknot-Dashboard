@@ -70,7 +70,14 @@ function ReportBuilder() {
           if (repData?.html) { render(repData.html); return true; }
           return false;
         };
+        let nudged = false;
         for (let i = 0; i < 225; i++) {
+          // Queued but not started after ~12s (background runner frozen) —
+          // ask the server to run it from this tab, once. Idempotent.
+          if (!nudged && i >= 3) {
+            nudged = true;
+            fetch('/api/insights/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ since, resume: true, wait: true }) }).catch(() => {});
+          }
           // The chat records generation/save failures here — surface them.
           try {
             const err = localStorage.getItem(`rk_report_err_${since}`);
