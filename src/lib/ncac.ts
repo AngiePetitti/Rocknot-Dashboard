@@ -1,28 +1,39 @@
 // New-customer CAC by ad platform.
 //
-// Platform spend comes from the ads tables (de-duplicated, live-patched —
-// the same figures as the Ads tab). New customers come from Shopify: for each
-// order source Shopify reports distinct customers and how many of them had
-// bought before, so first-time buyers = customers − returning. Each source is
-// mapped to a platform from the order's UTM tags first (an ad click), then
-// from the referring site. This is Shopify last-click, not a pixel model like
-// TripleWhale's: orders with no tag and no referrer land in "unattributed",
-// and the blended figure (all spend ÷ all new customers) is the one that does
-// not depend on attribution at all.
+// Headline: BLENDED — all spend ÷ all first-time buyers (Shopify's exact
+// customers − returning customers). The only figure that needs no attribution.
+// Platform rows: the platform's own reported purchases (what Ads Manager /
+// Google Ads show; click-only where the platform separates view-through),
+// scaled to the store's first-time share of buyers. An estimate, held steady
+// month to month so the TREND within a platform is meaningful. Shopify's own
+// record on the order (UTM tag, else referrer) is kept per platform as a
+// floor: Shopify logs most in-app Instagram / Pinterest ad clicks as direct,
+// so it under-credits social. Spend is the de-duplicated, live-patched figure
+// the Ads tab shows.
 import { shopifyql } from '@/src/lib/shopifyql';
 import { storeOnlyWhere, clientPlatforms, type PlatformKey } from '@/src/lib/client';
 import { getAdsOverview } from '@/src/lib/bqAds';
 
 export interface NcacPlatform {
   key: PlatformKey; label: string; color: string;
-  spend: number; newCustomers: number; orders: number;
-  /** spend ÷ new customers; null when no new customers were attributed. */
+  spend: number;
+  /** Platform-reported purchases in the range (click-only where the platform separates view-through). */
+  purchases: number;
+  /** True when `purchases` excludes view-through purchases. */
+  clickOnly: boolean;
+  /** Estimated first-time buyers: purchases × the store's first-time share of buyers. */
+  newCustomers: number;
+  /** spend ÷ estimated new customers; null when nothing was reported. */
   ncac: number | null;
+  /** Shopify's own record (last-click on the order): a floor, not the headline. */
+  shopify: { newCustomers: number; orders: number; ncac: number | null };
 }
 export interface NcacSummary {
   range: { from: string; to: string };
   platforms: NcacPlatform[];
   blended: { spend: number; newCustomers: number; ncac: number | null };
+  /** First-time share of buyers in the range (Shopify: (customers − returning) ÷ customers). */
+  newShare: number;
   attributedNewCustomers: number;
   unattributed: { newCustomers: number; orders: number };
   /** Top order sources that mapped to no ad platform (for tuning the mapping). */
@@ -100,25 +111,41 @@ export async function fetchNcac(from: string, to: string): Promise<NcacSummary> 
   };
   const byRef = tally(referrer);
   const byUtm = tally(utm);
-  const platforms: NcacPlatform[] = clientPlatforms().map(p => {
-    const a = byRef.acc.get(p.key) || { newCustomers: 0, orders: 0 };
-    const b = byUtm.acc.get(p.key) || { newCustomers: 0, orders: 0 };
-    const best = b.newCustomers > a.newCustomers ? b : a;
-    const spend = spendByLabel.get(p.label.toLowerCase()) || 0;
-    return { key: p.key, label: p.label, color: p.color, spend, newCustomers: best.newCustomers, orders: best.orders, ncac: best.newCustomers > 0 ? spend / best.newCustomers : null };
-  });
-  const totalSpend = platforms.reduce((s, p) => s + p.spend, 0);
   // Store-wide first-time buyers from Shopify's own total (exact; matches the
   // Overview's New Customers card), not a sum of the source rows.
   const allNew = Math.max(0, totals.customers - totals.returning) || referrer.reduce((s, r) => s + Math.max(0, r.customers - r.returning), 0);
+  const newShare = totals.customers > 0 ? allNew / totals.customers : 0;
+  const adByLabel = new Map(ads.platforms.map(p => [p.platform.toLowerCase(), p as { spend: number; conversions?: number; viewConversions?: number }]));
+  const platforms: NcacPlatform[] = clientPlatforms().map(p => {
+    const ad = adByLabel.get(p.label.toLowerCase());
+    const spend = ad?.spend || 0;
+    // Primary model: the platform's own purchase count (what Ads Manager /
+    // Google Ads show), click-only where the platform separates view-through,
+    // scaled to the store's first-time share of buyers.
+    const reported = Math.max(0, ad?.conversions || 0);
+    const view = Math.max(0, ad?.viewConversions || 0);
+    const purchases = Math.max(0, Math.round(reported - view));
+    const est = Math.round(purchases * newShare);
+    // Floor: what Shopify itself recorded on the order (UTM, else referrer).
+    const a = byRef.acc.get(p.key) || { newCustomers: 0, orders: 0 };
+    const b = byUtm.acc.get(p.key) || { newCustomers: 0, orders: 0 };
+    const floor = b.newCustomers > a.newCustomers ? b : a;
+    return {
+      key: p.key, label: p.label, color: p.color, spend,
+      purchases, clickOnly: view > 0, newCustomers: est, ncac: est > 0 ? spend / est : null,
+      shopify: { newCustomers: floor.newCustomers, orders: floor.orders, ncac: floor.newCustomers > 0 ? spend / floor.newCustomers : null },
+    };
+  });
+  const totalSpend = platforms.reduce((s, p) => s + p.spend, 0);
   const attributed = platforms.reduce((s, p) => s + p.newCustomers, 0);
   const otherSources = Array.from(byRef.other.entries()).map(([source, v]) => ({ source, ...v })).sort((a, b) => b.newCustomers - a.newCustomers).slice(0, 8);
   return {
     range: { from, to },
     platforms,
     blended: { spend: totalSpend, newCustomers: allNew, ncac: allNew > 0 ? totalSpend / allNew : null },
+    newShare,
     attributedNewCustomers: attributed,
-    unattributed: { newCustomers: Math.max(0, allNew - attributed), orders: Math.max(0, totals.orders - platforms.reduce((s, p) => s + p.orders, 0)) },
+    unattributed: { newCustomers: Math.max(0, allNew - attributed), orders: Math.max(0, totals.orders - platforms.reduce((s, p) => s + p.purchases, 0)) },
     otherSources,
     basis: utm.length ? 'utm+referrer' : 'referrer',
   };
@@ -126,6 +153,8 @@ export async function fetchNcac(from: string, to: string): Promise<NcacSummary> 
 
 export function ncacText(d: NcacSummary): string {
   const $ = (v: number | null) => (v == null ? '—' : `$${v.toFixed(2)}`);
-  const lines = d.platforms.filter(p => p.spend > 0 || p.newCustomers > 0).map(p => `  - ${p.label}: ${p.newCustomers} new customers on $${Math.round(p.spend).toLocaleString()} spend → nCAC ${$(p.ncac)}`);
-  return `New-customer CAC ${d.range.from} → ${d.range.to} (Shopify first-time buyers by order source — UTM then referrer, last-click; NOT a pixel model):\n${lines.join('\n')}\n  - Blended (all spend ÷ all new customers): ${d.blended.newCustomers} new customers, $${Math.round(d.blended.spend).toLocaleString()} spend → ${$(d.blended.ncac)}\n  - Unattributed new customers (no tag / no referrer): ${d.unattributed.newCustomers}`;
+  const pct = Math.round(d.newShare * 100);
+  const lines = d.platforms.filter(p => p.spend > 0 || p.purchases > 0).map(p =>
+    `  - ${p.label}: $${Math.round(p.spend).toLocaleString()} spend · ${p.purchases} platform-reported purchases${p.clickOnly ? ' (click-only)' : ''} → ~${p.newCustomers} first-time buyers → nCAC ${$(p.ncac)} (Shopify recorded ${p.shopify.newCustomers} first-time buyers from this platform on the order itself → ${$(p.shopify.ncac)})`);
+  return `New-customer CAC ${d.range.from} → ${d.range.to}. MODEL: each platform's own reported purchases × the store's first-time share of buyers (${pct}% this period). This is an estimate; platforms over-claim relative to each other, so judge trend within a platform, not platform vs platform. Blended is the exact figure.\n${lines.join('\n')}\n  - BLENDED (all spend ÷ all first-time buyers, exact): ${d.blended.newCustomers} new customers, $${Math.round(d.blended.spend).toLocaleString()} spend → ${$(d.blended.ncac)}`;
 }

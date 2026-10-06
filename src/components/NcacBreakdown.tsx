@@ -24,7 +24,7 @@ export default function NcacBreakdown({ tf, dateFrom, dateTo, compare, targetCac
 
   if (failed) return <Card className="mb-6"><p className="text-xs text-gray-400">New-customer CAC by platform unavailable: {failed}</p></Card>;
   if (!data) return <Card className="mb-6"><p className="text-xs text-gray-400">Loading new-customer CAC by platform…</p></Card>;
-  const rows = data.platforms.filter(p => p.spend > 0 || p.newCustomers > 0);
+  const rows = data.platforms.filter(p => p.spend > 0 || p.purchases > 0);
   if (!rows.length) return null;
   const priorOf = (key: string): NcacPlatform | undefined => data.prior?.platforms.find(p => p.key === key);
   const $ = (v: number | null) => (v == null ? '—' : formatCurrency(v));
@@ -35,22 +35,23 @@ export default function NcacBreakdown({ tf, dateFrom, dateTo, compare, targetCac
     // Lower CAC is better: a drop reads green.
     return <span className={`text-[11px] font-semibold ml-1 ${d <= 0 ? 'text-green-500' : 'text-red-500'}`}>{d <= 0 ? '▼' : '▲'} {Math.abs(d).toFixed(0)}%</span>;
   };
-  const coverage = data.blended.newCustomers > 0 ? Math.round((data.attributedNewCustomers / data.blended.newCustomers) * 100) : 0;
+  const pctNew = Math.round(data.newShare * 100);
   return (
     <Card className="mb-6">
       <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
         <h3 className="text-sm font-bold text-gray-800">New-Customer CAC by Platform</h3>
-        <p className="text-[11px] text-gray-400">Platform spend ÷ first-time buyers whose order came from that platform · target ${targetCac}</p>
+        <p className="text-[11px] text-gray-400">Platform-reported purchases × {pctNew}% first-time share · target ${targetCac}</p>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[520px]">
+        <table className="w-full text-sm min-w-[640px]">
           <thead><tr className="border-b border-gray-100">
             <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-2">Platform</th>
             <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Spend</th>
-            <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">New customers</th>
-            <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Orders</th>
+            <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Purchases</th>
+            <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Est. new customers</th>
             <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">New-cust. CAC</th>
             {data.prior && <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Prior</th>}
+            <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Shopify recorded</th>
           </tr></thead>
           <tbody>
             {rows.map(p => {
@@ -59,28 +60,28 @@ export default function NcacBreakdown({ tf, dateFrom, dateTo, compare, targetCac
                 <tr key={p.key} className="border-b border-gray-50">
                   <td className="py-2 pr-2"><span className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle" style={{ background: p.color }} /><span className="font-medium text-gray-800">{p.label}</span></td>
                   <td className="py-2 pl-2 text-right tabular-nums">{formatCurrency(p.spend)}</td>
-                  <td className="py-2 pl-2 text-right tabular-nums">{p.newCustomers.toLocaleString()}</td>
-                  <td className="py-2 pl-2 text-right tabular-nums text-gray-500">{p.orders.toLocaleString()}</td>
+                  <td className="py-2 pl-2 text-right tabular-nums">{p.purchases.toLocaleString()}{p.clickOnly && <span className="text-[10px] text-gray-400 ml-1" title="View-through purchases excluded">click</span>}</td>
+                  <td className="py-2 pl-2 text-right tabular-nums">~{p.newCustomers.toLocaleString()}</td>
                   <td className={`py-2 pl-2 text-right tabular-nums font-bold ${tone(p.ncac)}`}>{$(p.ncac)}<Delta cur={p.ncac} prev={prev?.ncac} /></td>
-                  {data.prior && <td className="py-2 pl-2 text-right tabular-nums text-gray-500">{prev ? `${$(prev.ncac)} · ${prev.newCustomers}` : '—'}</td>}
+                  {data.prior && <td className="py-2 pl-2 text-right tabular-nums text-gray-500">{prev ? `${$(prev.ncac)} · ~${prev.newCustomers}` : '—'}</td>}
+                  <td className="py-2 pl-2 text-right tabular-nums text-gray-400 text-xs" title="First-time buyers whose order itself carried this platform's tag or referrer">{p.shopify.newCustomers} · {$(p.shopify.ncac)}</td>
                 </tr>
               );
             })}
             <tr className="bg-gray-50/60">
-              <td className="py-2 pr-2 font-semibold text-gray-800">Blended (all platforms)</td>
+              <td className="py-2 pr-2 font-semibold text-gray-800">Blended (exact)</td>
               <td className="py-2 pl-2 text-right tabular-nums font-semibold">{formatCurrency(data.blended.spend)}</td>
-              <td className="py-2 pl-2 text-right tabular-nums font-semibold">{data.blended.newCustomers.toLocaleString()}</td>
               <td className="py-2 pl-2 text-right tabular-nums text-gray-500">—</td>
+              <td className="py-2 pl-2 text-right tabular-nums font-semibold">{data.blended.newCustomers.toLocaleString()}</td>
               <td className={`py-2 pl-2 text-right tabular-nums font-bold ${tone(data.blended.ncac)}`}>{$(data.blended.ncac)}<Delta cur={data.blended.ncac} prev={data.prior?.blended.ncac} /></td>
-              {data.prior && <td className="py-2 pl-2 text-right tabular-nums text-gray-500">{data.prior ? `${$(data.prior.blended.ncac)} · ${data.prior.blended.newCustomers}` : '—'}</td>}
+              {data.prior && <td className="py-2 pl-2 text-right tabular-nums text-gray-500">{`${$(data.prior.blended.ncac)} · ${data.prior.blended.newCustomers}`}</td>}
+              <td className="py-2 pl-2 text-right tabular-nums text-gray-400 text-xs">all first-time buyers</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p className="text-[11px] text-gray-400 mt-3 leading-snug">
-        Shopify last-click: a first-time buyer is credited to the platform on the order&apos;s UTM tag, or failing that the site that referred them. {coverage}% of new customers were traceable to a platform; {data.unattributed.newCustomers.toLocaleString()} came in direct or untracked and are only in the blended row.
-        {data.otherSources.length > 0 && <> Largest untracked sources: {data.otherSources.slice(0, 4).map(s => `${s.source} (${s.newCustomers})`).join(', ')}.</>}
-        {' '}This differs from a pixel model like TripleWhale, which credits view-through and multi-touch, so platform rows will read higher CAC than TripleWhale and the blended row is the like-for-like comparison.
+        Platform rows are an estimate: each platform&apos;s own purchase count (the figure Ads Manager / Google Ads show; Pinterest click-only) × the store&apos;s {pctNew}% first-time share of buyers this period. Platforms over-claim relative to one another, so read a platform&apos;s CAC against its own prior months, not against the other rows. The blended row is exact: all spend ÷ all first-time buyers in Shopify. &quot;Shopify recorded&quot; is the floor: first-time buyers whose order itself carried the platform&apos;s tag or referrer, which under-credits Instagram and Pinterest because in-app clicks often arrive as direct.
       </p>
     </Card>
   );
