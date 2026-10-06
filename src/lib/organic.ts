@@ -54,6 +54,24 @@ export interface OrganicData {
   blog: SourceBlock<BlogPost>;
   /** Unpaid site sessions whose referrer was the platform (Shopify sessions report). */
   socialTraffic: Record<OrganicPlatform, SocialTraffic>;
+  /** Followers and profile activity per platform. */
+  audience: Record<OrganicPlatform, Audience>;
+}
+
+/** Account-level audience for a platform over the range. */
+export interface Audience {
+  status: 'ok' | 'not_connected' | 'error';
+  error?: string;
+  /** Followers on the last day of the range (null when the source has no follower field). */
+  followers: number | null;
+  /** Followers on the first day of the range. */
+  followersStart: number | null;
+  /** Net new followers over the range (daily new-follower sum when the source reports it, else last − first). */
+  newFollowers: number | null;
+  profileViews?: number;
+  websiteClicks?: number;
+  fieldSet?: string;
+  attempts?: WindsorAttempt[];
 }
 
 const WINDSOR_KEY = (process.env.WINDSOR_API_KEY || '').trim();
@@ -409,14 +427,65 @@ export async function fetchSocialTraffic(from: string, to: string): Promise<Reco
   return out;
 }
 
+// Account-level (not per-post) fields. Graded like the post sets: the first
+// set Windsor accepts wins; /api/debug/organic shows the attempts.
+export const INSTAGRAM_ACCOUNT_FIELDSETS = [
+  { name: 'full', fields: ['date', 'followers_count', 'follower_count', 'profile_views', 'website_clicks'] },
+  { name: 'followers', fields: ['date', 'followers_count', 'follower_count'] },
+  { name: 'count_only', fields: ['date', 'followers_count'] },
+  { name: 'daily_only', fields: ['date', 'follower_count'] },
+];
+export const PINTEREST_ACCOUNT_FIELDSETS = [
+  { name: 'full', fields: ['date', 'followers', 'following', 'pin_count', 'board_count', 'monthly_views'] },
+  { name: 'followers', fields: ['date', 'followers'] },
+  { name: 'alt', fields: ['date', 'follower_count'] },
+  { name: 'alt2', fields: ['date', 'user_followers'] },
+];
+
+async function fetchAudience(source: 'pinterest_organic' | 'instagram', fieldSets: Array<{ name: string; fields: string[] }>, from: string, to: string): Promise<Audience> {
+  const r = await windsorOrganicRows(source, fieldSets, from, to);
+  if (r.notConnected) return { status: 'not_connected', followers: null, followersStart: null, newFollowers: null };
+  if (!r.rows) return { status: 'error', error: r.attempts.map(a => `${a.fieldSet}: ${a.error}`).join(' | '), followers: null, followersStart: null, newFollowers: null, attempts: r.attempts };
+  // One row per day (collapse any per-post duplication by taking each day's max).
+  const byDay = new Map<string, Record<string, number>>();
+  const keys = ['followers_count', 'followers', 'follower_count', 'user_followers', 'profile_views', 'website_clicks', 'following', 'pin_count', 'board_count', 'monthly_views'];
+  for (const row of r.rows) {
+    const d = str(row.date).slice(0, 10);
+    if (!d) continue;
+    const cur = byDay.get(d) || {};
+    for (const k of keys) if (row[k] != null && row[k] !== '') cur[k] = Math.max(cur[k] ?? 0, num(row[k]));
+    byDay.set(d, cur);
+  }
+  const days = Array.from(byDay.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([, v]) => v);
+  if (!days.length) return { status: 'ok', followers: null, followersStart: null, newFollowers: null, fieldSet: r.fieldSet || undefined, attempts: r.attempts };
+  const totalKey = ['followers_count', 'followers', 'user_followers'].find(k => days.some(d => d[k] != null));
+  const hasDaily = days.some(d => d.follower_count != null);
+  // Instagram's follower_count is NEW followers per day; on Pinterest a
+  // follower_count field would be a running total, so only sum it for Instagram.
+  const dailyKey = hasDaily && (source === 'instagram' || !totalKey) ? 'follower_count' : null;
+  const withTotal = totalKey ? days.filter(d => d[totalKey] != null) : [];
+  const last = withTotal.length ? withTotal[withTotal.length - 1][totalKey!] : (!totalKey && hasDaily && source !== 'instagram' ? days[days.length - 1].follower_count ?? null : null);
+  const first = withTotal.length ? withTotal[0][totalKey!] : null;
+  const dailySum = dailyKey && source === 'instagram' ? days.reduce((s, d) => s + (d[dailyKey] || 0), 0) : null;
+  const newFollowers = dailySum != null ? dailySum : (last != null && first != null ? last - first : null);
+  const sum = (k: string) => (days.some(d => d[k] != null) ? days.reduce((s, d) => s + (d[k] || 0), 0) : undefined);
+  return {
+    status: 'ok', followers: last, followersStart: first, newFollowers,
+    profileViews: sum('profile_views'), websiteClicks: sum('website_clicks'),
+    fieldSet: r.fieldSet || undefined, attempts: r.attempts,
+  };
+}
+
 export async function fetchOrganic(from: string, to: string): Promise<OrganicData> {
-  const [pinterest, instagram, blog, socialTraffic] = await Promise.all([
+  const [pinterest, instagram, blog, socialTraffic, pinAudience, igAudience] = await Promise.all([
     fetchPinterestOrganic(from, to),
     fetchInstagramOrganic(from, to),
     fetchBlogPerformance(from, to),
     fetchSocialTraffic(from, to),
+    fetchAudience('pinterest_organic', PINTEREST_ACCOUNT_FIELDSETS, from, to),
+    fetchAudience('instagram', INSTAGRAM_ACCOUNT_FIELDSETS, from, to),
   ]);
-  return { range: { from, to }, pinterest, instagram, blog, socialTraffic };
+  return { range: { from, to }, pinterest, instagram, blog, socialTraffic, audience: { Pinterest: pinAudience, Instagram: igAudience } };
 }
 
 /** Whether a source is wired for this client (for the tab's setup hints). */

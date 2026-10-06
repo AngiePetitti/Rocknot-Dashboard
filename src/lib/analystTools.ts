@@ -547,7 +547,19 @@ ${series}`;
     const postLines = (platform: string, b: Block, keys: string[]) => b.status !== 'ok'
       ? (b.status === 'not_connected' ? 'not connected in Windsor yet' : `error: ${b.error}`)
       : (b.items.slice(0, 12).map(p => `- ${p.title}${p.group ? ` [${p.group}]` : ''}${p.publishedAt ? ` (${p.publishedAt})` : ''}: ${m(p.metrics, keys)}\n   image: ${postImg(platform, p)}\n   link: ${p.url || 'n/a'}`).join('\n') || 'no activity') + `\nTotals: ${m(b.totals, keys)}`;
+    const aud = (d.audience || {}) as Record<string, { status: string; followers: number | null; followersStart: number | null; newFollowers: number | null; profileViews?: number; websiteClicks?: number }>;
+    const audLine = (label: string) => {
+      const a = aud[label];
+      if (!a) return `${label}: n/a`;
+      if (a.status !== 'ok') return `${label}: ${a.status === 'not_connected' ? 'not connected' : 'unavailable'}`;
+      const parts = [a.followers != null ? `${Math.round(a.followers).toLocaleString()} followers` : '', a.newFollowers != null ? `${a.newFollowers >= 0 ? '+' : ''}${Math.round(a.newFollowers).toLocaleString()} net new in range${a.followersStart != null ? ` (from ${Math.round(a.followersStart).toLocaleString()})` : ''}` : '', a.profileViews != null ? `${Math.round(a.profileViews).toLocaleString()} profile views` : '', a.websiteClicks != null ? `${Math.round(a.websiteClicks).toLocaleString()} website taps` : ''].filter(Boolean);
+      return `${label}: ${parts.join(' · ') || 'no follower fields in the feed'}`;
+    };
     return `Organic content ${from} → ${to}. Each post has an \`image\` URL (its real thumbnail — embed with <img> when a visual is wanted) and a \`link\`.
+
+AUDIENCE (followers, account level):
+${audLine('Instagram')}
+${audLine('Pinterest')}
 
 PINTEREST ORGANIC PINS (Pinterest's own counts):
 ${postLines('Pinterest', pin, ['impressions', 'saves', 'pinClicks', 'outboundClicks'])}
