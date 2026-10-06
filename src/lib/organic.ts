@@ -96,19 +96,33 @@ export async function windsorOrganicRows(
   if (!WINDSOR_KEY) return { attempts, rows: null, fieldSet: null, notConnected: true };
   const scoped = windsorParams(source, { date_from: from, date_to: to });
   if (!scoped) return { attempts, rows: null, fieldSet: null, notConnected: true };
+  // Pinterest Organic is pulled live from Pinterest by Windsor and can take
+  // a while on first request; give it room before calling it a timeout.
+  const timeoutMs = source === 'pinterest_organic' ? 45000 : 20000;
   for (const fs of fieldSets) {
-    const qs = new URLSearchParams({ api_key: WINDSOR_KEY, fields: fs.fields.join(','), _renderer: 'json', ...scoped });
-    try {
-      const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { next: { revalidate: 600 }, signal: AbortSignal.timeout(20000) });
-      const json = await res.json();
-      if (json.error || !Array.isArray(json.data)) {
-        attempts.push({ fieldSet: fs.name, fields: fs.fields, error: String(json.error || json.message || `HTTP ${res.status}`) });
-        continue;
+    // Self-correcting: when Windsor's error names one of the requested
+    // fields ("'save' [Error pulling data…]"), drop it and retry before
+    // moving to the next set. Never drops `date` or the id field.
+    let fields = [...fs.fields];
+    for (let round = 0; round < 5 && fields.length >= 2; round++) {
+      const qs = new URLSearchParams({ api_key: WINDSOR_KEY, fields: fields.join(','), _renderer: 'json', ...scoped });
+      let err = '';
+      try {
+        const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { next: { revalidate: 600 }, signal: AbortSignal.timeout(timeoutMs) });
+        const json = await res.json();
+        if (!json.error && Array.isArray(json.data)) {
+          attempts.push({ fieldSet: round ? `${fs.name} (pruned ${fs.fields.length - fields.length})` : fs.name, fields, rows: json.data.slice(0, 3) });
+          return { attempts, rows: json.data as Array<Record<string, unknown>>, fieldSet: fs.name, notConnected: false };
+        }
+        err = String(json.error || json.message || `HTTP ${res.status}`);
+      } catch (e) {
+        err = e instanceof Error ? e.message : String(e);
       }
-      attempts.push({ fieldSet: fs.name, fields: fs.fields, rows: json.data.slice(0, 3) });
-      return { attempts, rows: json.data as Array<Record<string, unknown>>, fieldSet: fs.name, notConnected: false };
-    } catch (e) {
-      attempts.push({ fieldSet: fs.name, fields: fs.fields, error: e instanceof Error ? e.message : String(e) });
+      attempts.push({ fieldSet: fs.name, fields, error: err });
+      const lower = err.toLowerCase();
+      const bad = fields.find(f => f !== 'date' && !/_id$/.test(f) && new RegExp(`(^|[^a-z0-9_])${f}([^a-z0-9_]|$)`).test(lower));
+      if (!bad) break;
+      fields = fields.filter(f => f !== bad);
     }
   }
   return { attempts, rows: null, fieldSet: null, notConnected: false };
@@ -118,8 +132,9 @@ export async function windsorOrganicRows(
 // references. Media/identity fields first; metrics-only fallbacks after.
 export const PINTEREST_ORGANIC_FIELDSETS = [
   { name: 'full', fields: ['date', 'pin_id', 'pin_title', 'pin_description', 'pin_permalink', 'pin_media_image_url', 'pin_board_name', 'pin_created_at', 'pin_impression', 'save', 'pin_click', 'pin_outbound_click'] },
+  { name: 'alt_names', fields: ['date', 'pin_id', 'pin_title', 'pin_description', 'pin_link', 'pin_media_image_url', 'pin_board_name', 'pin_created_at', 'impression', 'pin_save', 'pin_click', 'outbound_click'] },
   { name: 'no_media', fields: ['date', 'pin_id', 'pin_title', 'pin_permalink', 'pin_created_at', 'pin_impression', 'save', 'pin_click', 'pin_outbound_click'] },
-  { name: 'minimal', fields: ['date', 'pin_id', 'pin_title', 'pin_impression', 'save', 'pin_click', 'pin_outbound_click'] },
+  { name: 'minimal', fields: ['date', 'pin_id', 'pin_title', 'pin_impression', 'pin_click'] },
 ];
 export const INSTAGRAM_FIELDSETS = [
   { name: 'full', fields: ['date', 'media_id', 'media_caption', 'media_type', 'media_url', 'media_thumbnail_url', 'media_permalink', 'timestamp', 'media_reach', 'media_impressions', 'media_like_count', 'media_comments_count', 'media_saved', 'media_shares', 'media_views'] },
@@ -177,17 +192,17 @@ export async function fetchPinterestOrganic(from: string, to: string): Promise<S
     return { status: 'ok', items: d.items, totals: sumTotals(d.items, PINTEREST_METRICS), fieldSet: 'pinterest_api', ...(d.note ? { note: d.note } : {}) };
   }
   if (!r.rows) return { status: 'error', error: r.attempts.map(a => `${a.fieldSet}: ${a.error}`).join(' | '), items: [], totals: {} };
-  const rolled = rollUp(r.rows, 'pin_id', ['pin_impression', 'save', 'pin_click', 'pin_outbound_click']);
+  const rolled = rollUp(r.rows, 'pin_id', ['pin_impression', 'impression', 'save', 'pin_save', 'pin_click', 'pin_outbound_click', 'outbound_click']);
   const items: OrganicPost[] = Array.from(rolled.entries()).map(([id, v]) => {
     const last = v.rows[v.rows.length - 1];
     return {
       id, platform: 'Pinterest' as const,
       title: str(last.pin_title) || str(last.pin_description).slice(0, 80) || `Pin ${id}`,
       imageUrl: str(last.pin_media_image_url),
-      url: str(last.pin_permalink) || `https://www.pinterest.com/pin/${id}/`,
+      url: str(last.pin_permalink) || str(last.pin_link) || `https://www.pinterest.com/pin/${id}/`,
       publishedAt: str(last.pin_created_at).slice(0, 10),
       group: str(last.pin_board_name),
-      metrics: { impressions: v.metrics.pin_impression, saves: v.metrics.save, pinClicks: v.metrics.pin_click, outboundClicks: v.metrics.pin_outbound_click },
+      metrics: { impressions: v.metrics.pin_impression || v.metrics.impression || 0, saves: v.metrics.save || v.metrics.pin_save || 0, pinClicks: v.metrics.pin_click || 0, outboundClicks: v.metrics.pin_outbound_click || v.metrics.outbound_click || 0 },
     };
   }).filter(p => Object.values(p.metrics).some(x => x > 0))
     .sort((a, b) => b.metrics.impressions - a.metrics.impressions);

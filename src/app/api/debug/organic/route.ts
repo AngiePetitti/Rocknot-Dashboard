@@ -5,7 +5,7 @@ import { windsorAccount } from '@/src/lib/client';
 import { todayPst, addDays } from '@/src/lib/timeframes';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 // Admin-only Organic Content audit (/api/debug/organic?days=7): every field
 // set tried against Windsor's Pinterest Organic and Instagram feeds with the

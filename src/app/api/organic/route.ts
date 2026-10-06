@@ -5,7 +5,7 @@ import { timeframeRange } from '@/src/lib/timeframes';
 import { Timeframe } from '@/src/lib/mockData';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 // Organic Content tab: Pinterest pins, Instagram posts and blog articles for
 // a dashboard timeframe.  /api/organic?tf=30d  ·  ?tf=custom&date_from&date_to
