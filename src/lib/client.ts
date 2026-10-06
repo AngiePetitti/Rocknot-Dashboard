@@ -325,9 +325,10 @@ const KAILEEP: ClientProfile = {
       snapchat: null,
       quickbooks: null,
       // Organic Content tab. Instagram Insights: "Kailee P. Wedding Shoes"
-      // (@kaileepweddings). Pinterest Organic: Kailee P | Wedding Shoes &
-      // Finishing Touches business (same id as Pinterest's actingBusinessId).
-      pinterest_organic: '58054420105005129',
+      // (@kaileepweddings). Pinterest Organic: Windsor keys this connector by
+      // Pinterest USERNAME (its error names the configured accounts), not the
+      // numeric business id the accounts list shows.
+      pinterest_organic: 'shopkaileep',
       instagram: '17841402329636544',
       // GA4 property "Kailee P" (Windsor Google Analytics 4 connector).
       google_analytics: '347015181',
