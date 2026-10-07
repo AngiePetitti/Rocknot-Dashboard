@@ -34,6 +34,8 @@ export interface BriefFacts {
   weekday: string;
   baseline: { kind: 'same weekday, prior 4 weeks'; days: string[] };
   week: { from: string; to: string }; priorWeek: { from: string; to: string };
+  /** Windows used for ad-platform comparisons (two days behind, so attribution has settled). */
+  adWeek: { from: string; to: string }; adPriorWeek: { from: string; to: string };
   revenue: Delta; orders: Delta; aov: Delta; sessions: Delta; cvr: Delta; // cvr in %
   /** How much of the revenue change came from traffic, conversion and order value (percentage points, sum ≈ revenue.pct). */
   decomposition: { fromSessions: number; fromCvr: number; fromAov: number } | null;
@@ -122,7 +124,15 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
   const rangeFrom = addDays(y, -28);
   const week = { from: addDays(y, -6), to: y };
   const priorWeek = { from: addDays(y, -13), to: addDays(y, -7) };
-  const notes: string[] = [];
+  // Ad platforms keep crediting purchases for days after the click (Meta: up to
+  // 7 days), so a week read the next morning is still filling in while the
+  // week before has settled — compared raw, the latest week always looks
+  // worse. Ad-result comparisons therefore end two days earlier, so both
+  // weeks are read at a similar age, and the brief says which dates it used.
+  const settleDays = 2;
+  const adWeek = { from: addDays(y, -6 - settleDays), to: addDays(y, -settleDays) };
+  const adPriorWeek = { from: addDays(y, -13 - settleDays), to: addDays(y, -7 - settleDays) };
+  const notes: string[] = [`Ad-platform week comparisons (spend, purchases, ROAS, nCAC, Google brand split) use ${adWeek.from} → ${adWeek.to} vs ${adPriorWeek.from} → ${adPriorWeek.to}, two days behind the store figures, so attribution has settled on both sides. Yesterday's and the last two days' platform purchases are an early read and will rise.`];
 
   const [sales, sessions, devY, devBase, chY, chBase, prodY, prodBase, adsRange, adsWeek, adsPrior, ncacWeek, ncacPrior, gbWeek, gbPrior] = await Promise.all([
     dailySales(rangeFrom, y), dailySessions(rangeFrom, y),
@@ -130,11 +140,11 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
     byChannel(y, y), byChannel(rangeFrom, addDays(y, -1)),
     byProduct(y, y, 12), byProduct(rangeFrom, addDays(y, -1), 60),
     getAdsOverview(rangeFrom, y).catch(() => null),
-    getAdsOverview(week.from, week.to).catch(() => null),
-    getAdsOverview(priorWeek.from, priorWeek.to).catch(() => null),
-    fetchNcac(week.from, week.to).catch(() => null),
-    fetchNcac(priorWeek.from, priorWeek.to).catch(() => null),
-    googleBrandSplit(week.from, week.to), googleBrandSplit(priorWeek.from, priorWeek.to),
+    getAdsOverview(adWeek.from, adWeek.to).catch(() => null),
+    getAdsOverview(adPriorWeek.from, adPriorWeek.to).catch(() => null),
+    fetchNcac(adWeek.from, adWeek.to).catch(() => null),
+    fetchNcac(adPriorWeek.from, adPriorWeek.to).catch(() => null),
+    googleBrandSplit(adWeek.from, adWeek.to), googleBrandSplit(adPriorWeek.from, adPriorWeek.to),
   ]);
 
   const avg = (vals: number[]) => (vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0);
@@ -205,7 +215,9 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
   // Week revenue (store net) and MER; month-to-date against the Goals tab.
   const sumRange = (from: string, to: string) => Array.from(sales.entries()).filter(([d]) => d >= from && d <= to).reduce((s, [, v]) => s + v.net, 0);
   const weekRevenue = delta(sumRange(week.from, week.to), sumRange(priorWeek.from, priorWeek.to));
-  const weekMer = delta(weekAds.spend.current > 0 ? weekRevenue.current / weekAds.spend.current : 0, weekAds.spend.baseline > 0 ? weekRevenue.baseline / weekAds.spend.baseline : 0);
+  // MER pairs store revenue and spend over the SAME (settled) ad windows.
+  const adWeekRevenue = delta(sumRange(adWeek.from, adWeek.to), sumRange(adPriorWeek.from, adPriorWeek.to));
+  const weekMer = delta(weekAds.spend.current > 0 ? adWeekRevenue.current / weekAds.spend.current : 0, weekAds.spend.baseline > 0 ? adWeekRevenue.baseline / weekAds.spend.baseline : 0);
   let mtd: BriefFacts['mtd'] = null;
   try {
     const monthStart = `${y.slice(0, 7)}-01`;
@@ -219,7 +231,7 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
 
   const partial: Omit<BriefFacts, 'decisions'> = {
     date: y, weekday: new Date(`${y}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long' }),
-    baseline: { kind: 'same weekday, prior 4 weeks', days: baselineDays }, week, priorWeek,
+    baseline: { kind: 'same weekday, prior 4 weeks', days: baselineDays }, week, priorWeek, adWeek, adPriorWeek,
     revenue, orders, aov, sessions: sess, cvr, decomposition, devices, channels, spendYesterday, weekAds, weekRevenue, weekMer, mtd, cac, googleBrand, products, notes,
   };
   const decisions = evaluateDecisions({ facts: { ...partial, decisions: [] }, weekRevenue, weekMer, mtd });
@@ -252,6 +264,7 @@ export async function writeBrief(facts: BriefFacts): Promise<Omit<Brief, 'facts'
 - Lead with the biggest movement. Movements under 8% in revenue, 10% in conversion or 15% in CAC are "steady" — say so briefly rather than inventing a story.
 - Explain revenue changes through the decomposition (traffic, conversion, order value) and name where it concentrated (device, channel, platform) only when FACTS show it.
 - CAC: the platform rows are estimates (platform-reported purchases × first-time share) — compare each to its own prior week, never platform against platform; blended is exact.
+- Ad-platform week comparisons use FACTS.adWeek vs FACTS.adPriorWeek (two days behind the store week so attribution has settled) — say "the week to <adWeek.to>" when quoting them. Yesterday's platform purchases/ROAS are an early read: never call them a decline.
 - Product momentum: a product whose shareYesterday is well above its share28d is worth a sentence; include its revenue.
 - FACTS.decisions holds the seven operating questions already answered by rule (verdict + reason). Lead with the verdicts that are not "fine"/"hold" — scale, cut, investigate — quoting their reasons' numbers; the recommendation must agree with the decisions (never recommend scaling what the rules say to hold). When everything is fine or hold, say so in one line and spend the words on what moved.
 - Plain language a founder reads in 30 seconds. No hedging, no "it appears". Submit with the write_brief tool.`;
@@ -295,7 +308,7 @@ Recommendation: ${b.recommendation}${b.watch ? `\nWatch: ${b.watch}` : ''}
 FACTS (yesterday vs same-weekday average of the prior 4 weeks): revenue ${d(f.revenue, '$')} · orders ${d(f.orders)} · AOV ${d(f.aov, '$')} · sessions ${d(f.sessions)} · CVR ${d(f.cvr)}%${f.decomposition ? ` · revenue change from traffic ${f.decomposition.fromSessions}pp, conversion ${f.decomposition.fromCvr}pp, order value ${f.decomposition.fromAov}pp` : ''}
 Devices: ${f.devices.map(x => `${x.device} CVR ${d(x.cvr)}%`).join(' · ') || 'n/a'}
 Spend yesterday: ${d(f.spendYesterday.total, '$')} — ${f.spendYesterday.byPlatform.map(p => `${p.platform} ${d(p.spend, '$')}`).join(' · ')}
-Week vs prior week: revenue ${d(f.weekRevenue, '$')} · MER ${d(f.weekMer)}x · spend ${d(f.weekAds.spend, '$')} · purchases ${d(f.weekAds.purchases)}${f.cac ? ` · blended nCAC ${d(f.cac.blended, '$')} · ${f.cac.byPlatform.map(p => `${p.platform} nCAC ${d(p.ncac, '$')}`).join(' · ')}` : ''}
+Store week (${f.week.from} → ${f.week.to}) vs prior: revenue ${d(f.weekRevenue, '$')}\nAd week (${f.adWeek.from} → ${f.adWeek.to}, settled) vs prior: MER ${d(f.weekMer)}x · spend ${d(f.weekAds.spend, '$')} · purchases ${d(f.weekAds.purchases)}${f.cac ? ` · blended nCAC ${d(f.cac.blended, '$')} · ${f.cac.byPlatform.map(p => `${p.platform} nCAC ${d(p.ncac, '$')}`).join(' · ')}` : ''}
 ${f.googleBrand ? `Google brand: spend ${d(f.googleBrand.brand.spend, '$')} · CPA ${d(f.googleBrand.brand.cpa, '$')} | non-brand: spend ${d(f.googleBrand.nonBrand.spend, '$')} · CPA ${d(f.googleBrand.nonBrand.cpa, '$')}` : ''}
 Products yesterday: ${f.products.slice(0, 5).map(p => `${p.title} $${p.revenue.toLocaleString()} (${p.shareYesterday}% of revenue vs ${p.share28d}% 28-day share)`).join(' · ')}`;
 }
