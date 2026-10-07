@@ -51,7 +51,7 @@ export function evaluateDecisions(inp: DecisionInputs): Decision[] {
       out.push({ key: 'scale', question: 'Do we scale?', verdict: 'scale', subject: best.platform, rule: `Platform nCAC ≤ $${g.targetCac} target, ROAS ≥ ${g.targetRoas}x, 7-day MER ≥ ${g.targetMer}x, conversion not down >10%`,
         reason: `${best.platform} is acquiring at ${fmt$(best.ncac.current)} per new customer (target $${g.targetCac}) with MER at ${weekMer.current.toFixed(2)}x — room to add 10–15% budget while watching CAC daily.` });
     } else {
-      const why = !merOk ? `7-day MER is ${weekMer.current.toFixed(2)}x against a ${g.targetMer}x goal` : !cvrSteady ? `conversion is down ${fmtPct(f.cvr.pct)} vs a typical ${f.weekday}` : `no platform is under the $${g.targetCac} CAC target with ROAS at ${g.targetRoas}x`;
+      const why = !merOk ? `MER for the 7 days to ${f.week.to} is ${weekMer.current.toFixed(2)}x against a ${g.targetMer}x goal` : !cvrSteady ? `conversion is down ${fmtPct(f.cvr.pct)} vs a typical ${f.weekday}` : `no platform is under the $${g.targetCac} CAC target with ROAS at ${g.targetRoas}x`;
       out.push({ key: 'scale', question: 'Do we scale?', verdict: 'hold', rule: `Scale only when a platform's nCAC ≤ $${g.targetCac}, its ROAS ≥ ${g.targetRoas}x, 7-day MER ≥ ${g.targetMer}x and conversion is steady`, reason: `Hold: ${why}.` });
     }
   }
@@ -132,15 +132,16 @@ export function evaluateDecisions(inp: DecisionInputs): Decision[] {
 
   // 7. Are we actually profitable? — contribution after COGS and ad spend, with pace to goal.
   {
-    // Net sales over the settled ad week = MER × spend (the Overview's MER basis).
-    const weekNet = weekMer.current * f.weekAds.spend.current;
+    // The Overview's net sales and (credit-adjusted) spend for the 7 completed days to yesterday.
+    const weekNet = f.weekNetSales.current;
+    const weekSpendNow = f.weekSpend.current;
     if (marginPct != null && weekNet > 0) {
-      const contrib = weekNet * (marginPct / 100) - f.weekAds.spend.current;
+      const contrib = weekNet * (marginPct / 100) - weekSpendNow;
       const cm = (contrib / weekNet) * 100;
       const pace = mtd && mtd.revenueGoal ? ` MTD revenue ${fmt$(mtd.revenue)} vs ${fmt$(mtd.revenueGoal * (mtd.dayOfMonth / mtd.daysInMonth))} expected by day ${mtd.dayOfMonth} of a ${fmt$(mtd.revenueGoal)} goal.` : '';
       const budget = mtd && mtd.adBudget ? ` Ad spend ${fmt$(mtd.spend)} of a ${fmt$(mtd.adBudget)} budget (${((mtd.spend / mtd.adBudget) * 100).toFixed(0)}% used, ${((mtd.dayOfMonth / mtd.daysInMonth) * 100).toFixed(0)}% of the month gone).` : '';
       out.push({ key: 'profit', question: 'Are we actually profitable?', verdict: cm >= 20 ? 'fine' : cm >= 0 ? 'hold' : 'investigate', rule: `Contribution = net revenue × ${marginPct}% gross margin − ad spend (marketing overhead not yet connected)`,
-        reason: `Week to ${f.adWeek.to}: ${fmt$(contrib)} contribution on ${fmt$(weekNet)} net sales (${cm.toFixed(0)}% after COGS and ${fmt$(f.weekAds.spend.current)} ad spend; MER ${weekMer.current.toFixed(2)}x vs ${g.targetMer}x goal).${pace}${budget} Fixed marketing costs are not in this number yet.` });
+        reason: `7 days to ${f.week.to}: ${fmt$(contrib)} contribution on ${fmt$(weekNet)} net sales (${cm.toFixed(0)}% after COGS and ${fmt$(weekSpendNow)} ad spend; MER ${weekMer.current.toFixed(2)}x vs ${g.targetMer}x goal).${pace}${budget} Fixed marketing costs are not in this number yet.` });
     } else {
       out.push({ key: 'profit', question: 'Are we actually profitable?', verdict: 'unknown', rule: 'Contribution after COGS and ad spend', reason: 'Needs a gross margin on the profile and a week of net sales.' });
     }
