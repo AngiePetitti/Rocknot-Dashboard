@@ -132,15 +132,17 @@ export function evaluateDecisions(inp: DecisionInputs): Decision[] {
 
   // 7. Are we actually profitable? — contribution after COGS and ad spend, with pace to goal.
   {
-    if (marginPct != null && weekRevenue.current > 0) {
-      const contrib = weekRevenue.current * (marginPct / 100) - f.weekAds.spend.current;
-      const cm = (contrib / weekRevenue.current) * 100;
+    // Net sales over the settled ad week = MER × spend (the Overview's MER basis).
+    const weekNet = weekMer.current * f.weekAds.spend.current;
+    if (marginPct != null && weekNet > 0) {
+      const contrib = weekNet * (marginPct / 100) - f.weekAds.spend.current;
+      const cm = (contrib / weekNet) * 100;
       const pace = mtd && mtd.revenueGoal ? ` MTD revenue ${fmt$(mtd.revenue)} vs ${fmt$(mtd.revenueGoal * (mtd.dayOfMonth / mtd.daysInMonth))} expected by day ${mtd.dayOfMonth} of a ${fmt$(mtd.revenueGoal)} goal.` : '';
       const budget = mtd && mtd.adBudget ? ` Ad spend ${fmt$(mtd.spend)} of a ${fmt$(mtd.adBudget)} budget (${((mtd.spend / mtd.adBudget) * 100).toFixed(0)}% used, ${((mtd.dayOfMonth / mtd.daysInMonth) * 100).toFixed(0)}% of the month gone).` : '';
       out.push({ key: 'profit', question: 'Are we actually profitable?', verdict: cm >= 20 ? 'fine' : cm >= 0 ? 'hold' : 'investigate', rule: `Contribution = net revenue × ${marginPct}% gross margin − ad spend (marketing overhead not yet connected)`,
-        reason: `Last 7 days: ${fmt$(contrib)} contribution on ${fmt$(weekRevenue.current)} net revenue (${cm.toFixed(0)}% margin after COGS and ${fmt$(f.weekAds.spend.current)} ad spend; MER ${weekMer.current.toFixed(2)}x vs ${g.targetMer}x goal).${pace}${budget} Fixed marketing costs are not in this number yet.` });
+        reason: `Week to ${f.adWeek.to}: ${fmt$(contrib)} contribution on ${fmt$(weekNet)} net sales (${cm.toFixed(0)}% after COGS and ${fmt$(f.weekAds.spend.current)} ad spend; MER ${weekMer.current.toFixed(2)}x vs ${g.targetMer}x goal).${pace}${budget} Fixed marketing costs are not in this number yet.` });
     } else {
-      out.push({ key: 'profit', question: 'Are we actually profitable?', verdict: 'unknown', rule: 'Contribution after COGS and ad spend', reason: 'Needs a gross margin on the profile and a week of revenue.' });
+      out.push({ key: 'profit', question: 'Are we actually profitable?', verdict: 'unknown', rule: 'Contribution after COGS and ad spend', reason: 'Needs a gross margin on the profile and a week of net sales.' });
     }
   }
   return out;
