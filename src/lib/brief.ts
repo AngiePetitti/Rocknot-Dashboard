@@ -19,7 +19,7 @@ import { getAdsOverview } from '@/src/lib/bqAds';
 import { fetchNcac } from '@/src/lib/ncac';
 import { runQuery, isBigQueryConfigured, googleSource, tableExists } from '@/src/lib/bigquery';
 import { getKV, setKV, isChatStoreConfigured, getGoals } from '@/src/lib/chatStore';
-import { fetchShopifyDaily } from '@/src/lib/bqOverview';
+import { fetchShopifyDaily, getOverview } from '@/src/lib/bqOverview';
 import { evaluateDecisions, type Decision } from '@/src/lib/decisions';
 import { runScan, type Anomaly } from '@/src/lib/scan';
 import { investigate, type Finding } from '@/src/lib/investigate';
@@ -52,8 +52,8 @@ export interface BriefFacts {
   channels: Array<{ channel: string; sessions: Delta }>;
   spendYesterday: { total: Delta; byPlatform: Array<{ platform: string; spend: Delta }> };
   weekAds: { spend: Delta; purchases: Delta; revenue: Delta; byPlatform: Array<{ platform: string; spend: Delta; purchases: Delta; roas: Delta; clicks: Delta }> };
-  /** Last 7 days of store net revenue vs the 7 before, and MER on that week. */
-  weekRevenue: Delta; weekMer: Delta;
+  /** The Overview's figures for the 7 completed days to yesterday vs the 7 before: total revenue, net sales, ad spend (net of credits) and MER. */
+  weekRevenue: Delta; weekNetSales: Delta; weekSpend: Delta; weekMer: Delta;
   /** Month to date against the Goals tab. */
   mtd: { spend: number; adBudget: number | null; revenue: number; revenueGoal: number | null; dayOfMonth: number; daysInMonth: number } | null;
   /** The seven operating questions, answered by rule. */
@@ -148,9 +148,13 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
   const settleDays = 2;
   const adWeek = { from: addDays(y, -6 - settleDays), to: addDays(y, -settleDays) };
   const adPriorWeek = { from: addDays(y, -13 - settleDays), to: addDays(y, -7 - settleDays) };
-  const notes: string[] = [`Ad-platform week comparisons (spend, purchases, ROAS, nCAC, Google brand split) use ${adWeek.from} → ${adWeek.to} vs ${adPriorWeek.from} → ${adPriorWeek.to}, two days behind the store figures, so attribution has settled on both sides. Yesterday's and the last two days' platform purchases are an early read and will rise.`];
+  const notes: string[] = [`Store week = ${week.from} → ${week.to} (7 completed days to yesterday) vs ${priorWeek.from} → ${priorWeek.to}; revenue, net sales, spend and MER for these come from the Overview's own calculation, so they match its cards for the same dates (the Overview's "Last 7 Days" preset also includes today, so it will differ slightly until the day closes). Platform purchases / ROAS / nCAC / Google brand split use ${adWeek.from} → ${adWeek.to} vs ${adPriorWeek.from} → ${adPriorWeek.to}, two days behind, so attribution has settled on both sides; the last two days' platform purchases are an early read.`];
 
-  const [sales, sessions, devY, devBase, chY, chBase, prodY, prodBase, adsRange, adsWeek, adsPrior, ncacWeek, ncacPrior, gbWeek, gbPrior] = await Promise.all([
+  // The Overview's own card numbers for yesterday and for the two store weeks —
+  // the brief quotes THESE, so it can never disagree with the cards.
+  const ov = (from: string, to: string) => getOverview(from, to).then(r => r.metrics).catch(() => null);
+  const [ovY, ovWeek, ovPrior, sales, sessions, devY, devBase, chY, chBase, prodY, prodBase, adsRange, adsWeek, adsPrior, ncacWeek, ncacPrior, gbWeek, gbPrior] = await Promise.all([
+    ov(y, y), ov(week.from, week.to), ov(priorWeek.from, priorWeek.to),
     dailySales(rangeFrom, y), dailySessions(rangeFrom, y),
     byDevice(y, y), byDevice(rangeFrom, addDays(y, -1)),
     byChannel(y, y), byChannel(rangeFrom, addDays(y, -1)),
@@ -170,11 +174,12 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
   const vY = sessions.get(y) || { sessions: 0, completed: 0 };
   const vB = baselineDays.map(d => sessions.get(d)).filter(Boolean) as Array<{ sessions: number; completed: number }>;
   if (sB.length < 4) notes.push(`Only ${sB.length} of 4 baseline days had sales data.`);
-  const revenue = delta(sY.total, avg(sB.map(s => s.total)));
-  const netSales = delta(sY.net, avg(sB.map(s => s.net)));
-  const orders = delta(sY.orders, avg(sB.map(s => s.orders)));
   const aovOf = (s: SaleDay) => (s.orders ? (s.aovBasis > 0 ? s.aovBasis : s.net) / s.orders : 0);
-  const aov = delta(aovOf(sY), avg(sB.map(aovOf)));
+  const revenue = delta(ovY ? ovY.totalRevenue : sY.total, avg(sB.map(s => s.total)));
+  const netSales = delta(ovY ? (ovY.netSales ?? sY.net) : sY.net, avg(sB.map(s => s.net)));
+  const orders = delta(ovY ? ovY.totalOrders : sY.orders, avg(sB.map(s => s.orders)));
+  const aov = delta(ovY ? ovY.aov : aovOf(sY), avg(sB.map(aovOf)));
+  if (!ovY) notes.push('Overview metrics for yesterday were unavailable; Shopify daily figures used instead.');
   const sess = delta(vY.sessions, avg(vB.map(v => v.sessions)));
   const cvrY = vY.sessions ? (vY.completed / vY.sessions) * 100 : 0;
   const cvrB = avg(vB.map(v => (v.sessions ? (v.completed / v.sessions) * 100 : 0)).filter(x => x > 0));
@@ -206,7 +211,7 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
     const base = avg(baselineDays.map(d => num(dayRow(d)?.[p.key])));
     return { platform: p.label, spend: delta(cur, base) };
   }).filter(p => p.spend.current > 0 || p.spend.baseline > 0);
-  const spendYesterday = { total: delta(byPlatformSpend.reduce((s, p) => s + p.spend.current, 0), byPlatformSpend.reduce((s, p) => s + p.spend.baseline, 0)), byPlatform: byPlatformSpend };
+  const spendYesterday = { total: delta(ovY ? (ovY.netAdSpend ?? ovY.totalAdSpend) : byPlatformSpend.reduce((s, p) => s + p.spend.current, 0), byPlatformSpend.reduce((s, p) => s + p.spend.baseline, 0)), byPlatform: byPlatformSpend };
 
   const wp = adsWeek?.platforms || [], pp = adsPrior?.platforms || [];
   const sum = (arr: typeof wp, k: 'spend' | 'conversions' | 'revenue') => arr.reduce((s, p) => s + num(p[k]), 0);
@@ -233,11 +238,13 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
 
   // Week revenue (store net) and MER; month-to-date against the Goals tab.
   const sumRange = (from: string, to: string, k: 'net' | 'total') => Array.from(sales.entries()).filter(([d]) => d >= from && d <= to).reduce((s, [, v]) => s + v[k], 0);
-  const weekRevenue = delta(sumRange(week.from, week.to, 'total'), sumRange(priorWeek.from, priorWeek.to, 'total'));
-  // MER exactly as the Overview computes it: NET sales (incl. return fees) ÷
-  // spend, over the SAME (settled) ad windows.
-  const adWeekNet = delta(sumRange(adWeek.from, adWeek.to, 'net'), sumRange(adPriorWeek.from, adPriorWeek.to, 'net'));
-  const weekMer = delta(weekAds.spend.current > 0 ? adWeekNet.current / weekAds.spend.current : 0, weekAds.spend.baseline > 0 ? adWeekNet.baseline / weekAds.spend.baseline : 0);
+  // Week revenue, net sales, spend and MER are the Overview's own figures for
+  // the 7 completed days to yesterday vs the 7 before (MER needs no settling:
+  // Shopify revenue and ad spend are final the same night).
+  const weekRevenue = delta(ovWeek ? ovWeek.totalRevenue : sumRange(week.from, week.to, 'total'), ovPrior ? ovPrior.totalRevenue : sumRange(priorWeek.from, priorWeek.to, 'total'));
+  const weekNetSales = delta(ovWeek ? (ovWeek.netSales ?? 0) : sumRange(week.from, week.to, 'net'), ovPrior ? (ovPrior.netSales ?? 0) : sumRange(priorWeek.from, priorWeek.to, 'net'));
+  const weekSpend = delta(ovWeek ? (ovWeek.netAdSpend ?? ovWeek.totalAdSpend) : weekAds.spend.current, ovPrior ? (ovPrior.netAdSpend ?? ovPrior.totalAdSpend) : weekAds.spend.baseline);
+  const weekMer = delta(ovWeek ? ovWeek.mer : (weekSpend.current > 0 ? weekNetSales.current / weekSpend.current : 0), ovPrior ? ovPrior.mer : (weekSpend.baseline > 0 ? weekNetSales.baseline / weekSpend.baseline : 0));
   let mtd: BriefFacts['mtd'] = null;
   try {
     const monthStart = `${y.slice(0, 7)}-01`;
@@ -252,7 +259,7 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
   const partial: Omit<BriefFacts, 'decisions'> = {
     date: y, weekday: new Date(`${y}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long' }),
     baseline: { kind: 'same weekday, prior 4 weeks', days: baselineDays }, week, priorWeek, adWeek, adPriorWeek,
-    revenue, netSales, orders, aov, sessions: sess, cvr, decomposition, devices, channels, spendYesterday, weekAds, weekRevenue, weekMer, mtd, cac, googleBrand, products, notes,
+    revenue, netSales, orders, aov, sessions: sess, cvr, decomposition, devices, channels, spendYesterday, weekAds, weekRevenue, weekNetSales, weekSpend, weekMer, mtd, cac, googleBrand, products, notes,
   };
   const decisions = evaluateDecisions({ facts: { ...partial, decisions: [] }, weekRevenue, weekMer, mtd });
   return { ...partial, decisions };
@@ -285,7 +292,7 @@ export async function writeBrief(facts: BriefFacts, findings: Finding[] = []): P
 - Lead with the biggest movement. Movements under 8% in revenue, 10% in conversion or 15% in CAC are "steady" — say so briefly rather than inventing a story.
 - Explain revenue changes through the decomposition (traffic, conversion, order value) and name where it concentrated (device, channel, platform) only when FACTS show it.
 - CAC: the platform rows are estimates (platform-reported purchases × first-time share) — compare each to its own prior week, never platform against platform; blended is exact.
-- Ad-platform week comparisons use FACTS.adWeek vs FACTS.adPriorWeek (two days behind the store week so attribution has settled) — say "the week to <adWeek.to>" when quoting them. Yesterday's platform purchases/ROAS are an early read: never call them a decline.
+- Store week figures (weekRevenue, weekNetSales, weekSpend, weekMer) are the 7 completed days to yesterday — say "the 7 days to <week.to>" when quoting MER so the founder can set the same custom range on the Overview and see the identical number. Platform purchases / ROAS / nCAC use FACTS.adWeek vs FACTS.adPriorWeek (two days behind so attribution has settled) — say "the week to <adWeek.to>" for those. Yesterday's platform purchases/ROAS are an early read: never call them a decline.
 - Product momentum: a product whose shareYesterday is well above its share28d is worth a sentence; include its revenue.
 - FACTS.decisions holds the seven operating questions already answered by rule (verdict + reason). Lead with the verdicts that are not "fine"/"hold" — scale, cut, investigate — quoting their reasons' numbers; the recommendation must agree with the decisions (never recommend scaling what the rules say to hold). When everything is fine or hold, say so in one line and spend the words on what moved.
 - FINDINGS (if any) are what the sweep of every series turned up and Cleo's investigation confirmed — problems and opportunities the standing questions did not ask about. Mention the top one or two in the summary or drivers when their impact rivals the headline movement; the card lists all of them separately, so do not repeat every one.
@@ -351,7 +358,7 @@ Recommendation: ${b.recommendation}${b.watch ? `\nWatch: ${b.watch}` : ''}
 FACTS (yesterday vs same-weekday average of the prior 4 weeks): total revenue ${d(f.revenue, '$')} · net sales ${d(f.netSales, '$')} · orders ${d(f.orders)} · AOV ${d(f.aov, '$')} · sessions ${d(f.sessions)} · CVR ${d(f.cvr)}%${f.decomposition ? ` · revenue change from traffic ${f.decomposition.fromSessions}pp, conversion ${f.decomposition.fromCvr}pp, order value ${f.decomposition.fromAov}pp` : ''}
 Devices: ${f.devices.map(x => `${x.device} CVR ${d(x.cvr)}%`).join(' · ') || 'n/a'}
 Spend yesterday: ${d(f.spendYesterday.total, '$')} — ${f.spendYesterday.byPlatform.map(p => `${p.platform} ${d(p.spend, '$')}`).join(' · ')}
-Store week (${f.week.from} → ${f.week.to}) vs prior: revenue ${d(f.weekRevenue, '$')}\nAd week (${f.adWeek.from} → ${f.adWeek.to}, settled) vs prior: MER ${d(f.weekMer)}x · spend ${d(f.weekAds.spend, '$')} · purchases ${d(f.weekAds.purchases)}${f.cac ? ` · blended nCAC ${d(f.cac.blended, '$')} · ${f.cac.byPlatform.map(p => `${p.platform} nCAC ${d(p.ncac, '$')}`).join(' · ')}` : ''}
+Store week (${f.week.from} → ${f.week.to}, Overview figures) vs prior: total revenue ${d(f.weekRevenue, '$')} · net sales ${d(f.weekNetSales, '$')} · ad spend ${d(f.weekSpend, '$')} · MER ${d(f.weekMer)}x\nAd week (${f.adWeek.from} → ${f.adWeek.to}, settled) vs prior: platform spend ${d(f.weekAds.spend, '$')} · purchases ${d(f.weekAds.purchases)}${f.cac ? ` · blended nCAC ${d(f.cac.blended, '$')} · ${f.cac.byPlatform.map(p => `${p.platform} nCAC ${d(p.ncac, '$')}`).join(' · ')}` : ''}
 ${f.googleBrand ? `Google brand: spend ${d(f.googleBrand.brand.spend, '$')} · CPA ${d(f.googleBrand.brand.cpa, '$')} | non-brand: spend ${d(f.googleBrand.nonBrand.spend, '$')} · CPA ${d(f.googleBrand.nonBrand.cpa, '$')}` : ''}
 Products yesterday: ${f.products.slice(0, 5).map(p => `${p.title} $${p.revenue.toLocaleString()} (${p.shareYesterday}% of revenue vs ${p.share28d}% 28-day share)`).join(' · ')}`;
 }
