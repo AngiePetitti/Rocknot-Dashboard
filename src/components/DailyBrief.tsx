@@ -52,7 +52,7 @@ export default function DailyBrief({ isAdmin = false }: { isAdmin?: boolean }) {
             </div>
           </div>
           {state === 'loading' && <p className="text-sm text-gray-400 mt-1">Loading…</p>}
-          {state === 'building' && <p className="text-sm text-gray-500 mt-1">Reading yesterday against the last four weeks… about a minute the first time each day.</p>}
+          {state === 'building' && <p className="text-sm text-gray-500 mt-1">Reading yesterday against the last four weeks, sweeping every series for outliers and investigating the biggest… two to three minutes the first time each day.</p>}
           {state === 'error' && <p className="text-sm text-red-600 mt-1">Couldn&apos;t build today&apos;s brief: {error} <button onClick={() => load(true)} className="underline ml-1">Try again</button></p>}
           {state === 'ok' && brief && (
             <>
@@ -72,6 +72,21 @@ export default function DailyBrief({ isAdmin = false }: { isAdmin?: boolean }) {
               )}
               <p className="text-sm text-gray-700 mt-1.5 leading-relaxed">{brief.summary}</p>
               <p className="text-sm mt-2"><span className="font-semibold text-gray-800">Recommendation: </span><span className="text-gray-700">{brief.recommendation}</span></p>
+              {(brief.findings?.length || 0) > 0 && (
+                <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/40 p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-violet-700 mb-1.5">What else {client.analyst.name} found</p>
+                  <ul className="space-y-1.5">
+                    {brief.findings!.slice(0, more ? 5 : 3).map((f, i) => (
+                      <li key={i} className="text-sm">
+                        <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded mr-1.5 align-middle ${f.kind === 'problem' ? 'bg-red-100 text-red-700' : f.kind === 'opportunity' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{f.kind}</span>
+                        <span className="font-semibold text-gray-800">{f.title}</span>
+                        <span className="text-gray-600"> — {f.action}</span>
+                        {more && <p className="text-xs text-gray-500 mt-0.5 ml-1">{f.evidence} <span className="text-gray-400">· {f.confidence} confidence</span></p>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {more && brief.drivers.length > 0 && (
                 <ul className="mt-2 space-y-0.5">
                   {brief.drivers.map((d, i) => <li key={i} className="text-sm text-gray-600 flex gap-2"><span className="text-violet-400">•</span><span>{d}</span></li>)}
@@ -86,7 +101,7 @@ export default function DailyBrief({ isAdmin = false }: { isAdmin?: boolean }) {
                 <span className={`font-semibold ${pctTone(brief.facts.aov.pct)}`}>AOV {fmtPct(brief.facts.aov.pct)}</span>
                 {brief.facts.cac && <span className={`font-semibold ${pctTone(brief.facts.cac.blended.pct, true)}`}>Blended nCAC (7d) {fmtPct(brief.facts.cac.blended.pct)}</span>}
                 <span className="text-gray-400">vs same weekday, prior 4 weeks</span>
-                {(brief.drivers.length > 0 || brief.watch) && <button onClick={() => setMore(v => !v)} className="text-violet-600 font-semibold hover:underline">{more ? 'Less' : 'More'}</button>}
+                {(brief.drivers.length > 0 || brief.watch || (brief.findings?.length || 0) > 0) && <button onClick={() => setMore(v => !v)} className="text-violet-600 font-semibold hover:underline">{more ? 'Less' : 'More'}</button>}
                 <button onClick={() => setShowFacts(v => !v)} className="text-violet-600 font-semibold hover:underline">{showFacts ? 'Hide the numbers' : 'Show the numbers'}</button>
                 <Link href="/dashboard/insights" className="text-violet-600 font-semibold hover:underline">Ask {client.analyst.name} →</Link>
               </div>

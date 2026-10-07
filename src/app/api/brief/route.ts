@@ -4,7 +4,7 @@ import { authOptions, authConfigured } from '@/src/lib/auth';
 import { getBrief, getCachedBrief, yesterdayPst } from '@/src/lib/brief';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 180;
+export const maxDuration = 300;
 
 // The daily brief. GET /api/brief            → yesterday's (cached per day; built on first request)
 //                  GET /api/brief?date=…     → that day's
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const refresh = sp.get('refresh') === '1' && role === 'admin';
   try {
     if (sp.get('cached') === '1') return NextResponse.json({ brief: await getCachedBrief(date) }, { headers: { 'Cache-Control': 'no-store' } });
-    const brief = await getBrief(date, refresh);
+    const brief = await getBrief(date, refresh, { origin: req.nextUrl.origin, cookie: req.headers.get('cookie') || '' });
     return NextResponse.json({ brief }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e), date }, { status: 500 });
