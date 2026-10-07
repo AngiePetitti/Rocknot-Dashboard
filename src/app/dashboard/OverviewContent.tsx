@@ -523,9 +523,6 @@ export default function OverviewContent() {
         );
       })()}
 
-      {/* ── The intelligence layer: what moved yesterday, why, and what to do ── */}
-      {!isPartner && <DailyBrief isAdmin={session?.user?.role === 'admin'} />}
-
       {/* ── Loud personal task reminder (shared with the Marketing Calendar) ── */}
       {!isPartner && <MyTasksBanner />}
 
@@ -853,6 +850,10 @@ export default function OverviewContent() {
           } : undefined}
         />
       </div>
+
+      {/* ── The intelligence layer: what moved yesterday, why, and what to do.
+          Sits after the headline metrics so the numbers stay first on screen. ── */}
+      {!isPartner && <DailyBrief isAdmin={session?.user?.role === 'admin'} />}
 
       {/* New vs Returning Customer Cards — hidden on Today: the customer
           match hasn't settled mid-day and would misreport the split */}
