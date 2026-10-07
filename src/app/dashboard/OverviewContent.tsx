@@ -20,6 +20,7 @@ import { useClient } from '@/src/components/ClientProvider';
 import { PLATFORMS } from '@/src/lib/client';
 import NcacBreakdown from '@/src/components/NcacBreakdown';
 import MyTasksBanner from '@/src/components/MyTasksBanner';
+import DailyBrief from '@/src/components/DailyBrief';
 
 // MER runs on NET sales (post-discount/returns, excl. taxes+shipping); the
 // goal is the client profile's targetMer on that basis (Rocknot: 3.5x —
@@ -521,6 +522,9 @@ export default function OverviewContent() {
           </Link>
         );
       })()}
+
+      {/* ── The intelligence layer: what moved yesterday, why, and what to do ── */}
+      {!isPartner && <DailyBrief isAdmin={session?.user?.role === 'admin'} />}
 
       {/* ── Loud personal task reminder (shared with the Marketing Calendar) ── */}
       {!isPartner && <MyTasksBanner />}
