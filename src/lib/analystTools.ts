@@ -180,6 +180,11 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_daily_brief',
+    description: "The morning brief: yesterday vs the same weekday over the prior 4 weeks (revenue, orders, AOV, sessions, conversion, with the revenue change decomposed into traffic / conversion / order value), conversion by device, sessions by channel, spend by platform, last-7-days vs prior-7 ad results and new-customer CAC by platform, Google brand vs non-brand, and product momentum — plus the written headline, summary, drivers and recommendation. Use for 'what happened yesterday', 'why did revenue drop', 'morning update', 'anything I should know'. Optional date = YYYY-MM-DD (defaults to yesterday).",
+    input_schema: { type: 'object', properties: { date: { type: 'string', description: 'YYYY-MM-DD (optional; the day to brief on)' } } },
+  },
+  {
     name: 'get_site_analytics',
     description: "Google Analytics 4 for a date range (Traffic tab → Google Analytics view): sessions, users, engagement rate, page views, add-to-carts, purchases; channel groups; top sources (source / medium); landing pages with sessions, engagement, purchases and conversion rate — including the BEST and WORST converting landing pages (≥100 sessions); most-viewed pages. Use for 'which pages convert', 'where is traffic coming from', 'what are people looking at'. GA4 counts differ from Shopify — never mix them: Shopify (get_metrics / get_attribution) is the order and revenue truth.",
     input_schema: {
@@ -523,6 +528,14 @@ By size:\n${rows('bySize', 10)}
 By ship-to region:\n${rows('byRegion', 8)}
 
 ${series}`;
+  }
+
+  if (name === 'get_daily_brief') {
+    const date = String(input.date || '');
+    const d = await get(`/api/brief${/^\d{4}-\d{2}-\d{2}$/.test(date) ? `?date=${date}` : ''}`);
+    if (!d || d.error || !d.brief) return `Daily brief unavailable: ${d?.error || 'no response'}`;
+    const { briefText } = await import('@/src/lib/brief');
+    return briefText(d.brief as unknown as import('@/src/lib/brief').Brief);
   }
 
   if (name === 'get_site_analytics') {
