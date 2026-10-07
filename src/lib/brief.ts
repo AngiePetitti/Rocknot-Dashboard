@@ -18,7 +18,8 @@ import { storeOnlyWhere, getClient, hasPlatform } from '@/src/lib/client';
 import { getAdsOverview } from '@/src/lib/bqAds';
 import { fetchNcac } from '@/src/lib/ncac';
 import { runQuery, isBigQueryConfigured, googleSource, tableExists } from '@/src/lib/bigquery';
-import { getKV, setKV, isChatStoreConfigured } from '@/src/lib/chatStore';
+import { getKV, setKV, isChatStoreConfigured, getGoals } from '@/src/lib/chatStore';
+import { evaluateDecisions, type Decision } from '@/src/lib/decisions';
 
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const str = (v: unknown) => (v == null ? '' : String(v));
@@ -39,7 +40,13 @@ export interface BriefFacts {
   devices: Array<{ device: string; sessions: number; cvr: Delta }>;
   channels: Array<{ channel: string; sessions: Delta }>;
   spendYesterday: { total: Delta; byPlatform: Array<{ platform: string; spend: Delta }> };
-  weekAds: { spend: Delta; purchases: Delta; revenue: Delta; byPlatform: Array<{ platform: string; spend: Delta; purchases: Delta; roas: Delta }> };
+  weekAds: { spend: Delta; purchases: Delta; revenue: Delta; byPlatform: Array<{ platform: string; spend: Delta; purchases: Delta; roas: Delta; clicks: Delta }> };
+  /** Last 7 days of store net revenue vs the 7 before, and MER on that week. */
+  weekRevenue: Delta; weekMer: Delta;
+  /** Month to date against the Goals tab. */
+  mtd: { spend: number; adBudget: number | null; revenue: number; revenueGoal: number | null; dayOfMonth: number; daysInMonth: number } | null;
+  /** The seven operating questions, answered by rule. */
+  decisions: Decision[];
   cac: { blended: Delta; blendedNewCustomers: Delta; byPlatform: Array<{ platform: string; ncac: Delta; newCustomers: Delta }> } | null;
   googleBrand: { brand: { spend: Delta; purchases: Delta; cpa: Delta }; nonBrand: { spend: Delta; purchases: Delta; cpa: Delta } } | null;
   products: Array<{ title: string; revenue: number; shareYesterday: number; share28d: number; orders: number }>;
@@ -176,7 +183,7 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
   const sum = (arr: typeof wp, k: 'spend' | 'conversions' | 'revenue') => arr.reduce((s, p) => s + num(p[k]), 0);
   const weekAds = {
     spend: delta(sum(wp, 'spend'), sum(pp, 'spend')), purchases: delta(sum(wp, 'conversions'), sum(pp, 'conversions')), revenue: delta(sum(wp, 'revenue'), sum(pp, 'revenue')),
-    byPlatform: wp.map(p => { const q = pp.find(x => x.platform === p.platform); return { platform: p.platform, spend: delta(p.spend, num(q?.spend)), purchases: delta(p.conversions, num(q?.conversions)), roas: delta(p.roas, num(q?.roas)) }; }),
+    byPlatform: wp.map(p => { const q = pp.find(x => x.platform === p.platform); return { platform: p.platform, spend: delta(p.spend, num(q?.spend)), purchases: delta(p.conversions, num(q?.conversions)), roas: delta(p.roas, num(q?.roas)), clicks: delta(p.clicks, num(q?.clicks)) }; }),
   };
   const cac = ncacWeek ? {
     blended: delta(ncacWeek.blended.ncac || 0, ncacPrior?.blended.ncac || 0),
@@ -195,11 +202,28 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
     return { title: p.title, revenue: r2(p.net), orders: p.orders, shareYesterday: totalY ? r2((p.net / totalY) * 100) : 0, share28d: totalB && b ? r2((b.net / totalB) * 100) : 0 };
   });
 
-  return {
+  // Week revenue (store net) and MER; month-to-date against the Goals tab.
+  const sumRange = (from: string, to: string) => Array.from(sales.entries()).filter(([d]) => d >= from && d <= to).reduce((s, [, v]) => s + v.net, 0);
+  const weekRevenue = delta(sumRange(week.from, week.to), sumRange(priorWeek.from, priorWeek.to));
+  const weekMer = delta(weekAds.spend.current > 0 ? weekRevenue.current / weekAds.spend.current : 0, weekAds.spend.baseline > 0 ? weekRevenue.baseline / weekAds.spend.baseline : 0);
+  let mtd: BriefFacts['mtd'] = null;
+  try {
+    const monthStart = `${y.slice(0, 7)}-01`;
+    const dayOfMonth = Number(y.slice(8, 10));
+    const daysInMonth = new Date(Number(y.slice(0, 4)), Number(y.slice(5, 7)), 0).getDate();
+    const goals = await getGoals().catch(() => []);
+    const goal = goals.find(g => g.month === y.slice(0, 7) || g.month === monthStart);
+    const mtdSpend = (adsRange?.dailySpend || []).filter(d => d.date >= monthStart && d.date <= y).reduce((s, d) => s + num(d.meta) + num(d.google) + num(d.tiktok) + num(d.snapchat) + num(d.pinterest), 0);
+    mtd = { spend: r2(mtdSpend), adBudget: goal?.adBudget ?? null, revenue: r2(sumRange(monthStart, y)), revenueGoal: goal?.revenueGoal ?? null, dayOfMonth, daysInMonth };
+  } catch { mtd = null; }
+
+  const partial: Omit<BriefFacts, 'decisions'> = {
     date: y, weekday: new Date(`${y}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long' }),
     baseline: { kind: 'same weekday, prior 4 weeks', days: baselineDays }, week, priorWeek,
-    revenue, orders, aov, sessions: sess, cvr, decomposition, devices, channels, spendYesterday, weekAds, cac, googleBrand, products, notes,
+    revenue, orders, aov, sessions: sess, cvr, decomposition, devices, channels, spendYesterday, weekAds, weekRevenue, weekMer, mtd, cac, googleBrand, products, notes,
   };
+  const decisions = evaluateDecisions({ facts: { ...partial, decisions: [] }, weekRevenue, weekMer, mtd });
+  return { ...partial, decisions };
 }
 
 // ── Words ──────────────────────────────────────────────────────────────────
@@ -229,6 +253,7 @@ export async function writeBrief(facts: BriefFacts): Promise<Omit<Brief, 'facts'
 - Explain revenue changes through the decomposition (traffic, conversion, order value) and name where it concentrated (device, channel, platform) only when FACTS show it.
 - CAC: the platform rows are estimates (platform-reported purchases × first-time share) — compare each to its own prior week, never platform against platform; blended is exact.
 - Product momentum: a product whose shareYesterday is well above its share28d is worth a sentence; include its revenue.
+- FACTS.decisions holds the seven operating questions already answered by rule (verdict + reason). Lead with the verdicts that are not "fine"/"hold" — scale, cut, investigate — quoting their reasons' numbers; the recommendation must agree with the decisions (never recommend scaling what the rules say to hold). When everything is fine or hold, say so in one line and spend the words on what moved.
 - Plain language a founder reads in 30 seconds. No hedging, no "it appears". Submit with the write_brief tool.`;
   const res = await client.messages.create({
     model: 'claude-opus-4-8', max_tokens: 1500, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
@@ -257,7 +282,11 @@ export function yesterdayPst(): string { return addDays(todayPst(), -1); }
 export function briefText(b: Brief): string {
   const f = b.facts;
   const d = (x: Delta, unit = '') => `${unit}${x.current.toLocaleString()} vs ${unit}${x.baseline.toLocaleString()} (${x.pct == null ? 'n/a' : `${x.pct > 0 ? '+' : ''}${x.pct}%`})`;
+  const verdicts = f.decisions.map(x => `- ${x.question} → ${x.verdict.toUpperCase()}${x.subject ? ` (${x.subject})` : ''}: ${x.reason} [rule: ${x.rule}]`).join('\n');
   return `MORNING BRIEF for ${f.date} (${f.weekday}) — generated ${b.generatedAt}
+OPERATING DECISIONS (by rule, against the dashboard's own targets):
+${verdicts}
+
 ${b.headline}
 ${b.summary}
 ${b.drivers.map(x => `- ${x}`).join('\n')}
@@ -266,7 +295,7 @@ Recommendation: ${b.recommendation}${b.watch ? `\nWatch: ${b.watch}` : ''}
 FACTS (yesterday vs same-weekday average of the prior 4 weeks): revenue ${d(f.revenue, '$')} · orders ${d(f.orders)} · AOV ${d(f.aov, '$')} · sessions ${d(f.sessions)} · CVR ${d(f.cvr)}%${f.decomposition ? ` · revenue change from traffic ${f.decomposition.fromSessions}pp, conversion ${f.decomposition.fromCvr}pp, order value ${f.decomposition.fromAov}pp` : ''}
 Devices: ${f.devices.map(x => `${x.device} CVR ${d(x.cvr)}%`).join(' · ') || 'n/a'}
 Spend yesterday: ${d(f.spendYesterday.total, '$')} — ${f.spendYesterday.byPlatform.map(p => `${p.platform} ${d(p.spend, '$')}`).join(' · ')}
-Week vs prior week: spend ${d(f.weekAds.spend, '$')} · purchases ${d(f.weekAds.purchases)}${f.cac ? ` · blended nCAC ${d(f.cac.blended, '$')} · ${f.cac.byPlatform.map(p => `${p.platform} nCAC ${d(p.ncac, '$')}`).join(' · ')}` : ''}
+Week vs prior week: revenue ${d(f.weekRevenue, '$')} · MER ${d(f.weekMer)}x · spend ${d(f.weekAds.spend, '$')} · purchases ${d(f.weekAds.purchases)}${f.cac ? ` · blended nCAC ${d(f.cac.blended, '$')} · ${f.cac.byPlatform.map(p => `${p.platform} nCAC ${d(p.ncac, '$')}`).join(' · ')}` : ''}
 ${f.googleBrand ? `Google brand: spend ${d(f.googleBrand.brand.spend, '$')} · CPA ${d(f.googleBrand.brand.cpa, '$')} | non-brand: spend ${d(f.googleBrand.nonBrand.spend, '$')} · CPA ${d(f.googleBrand.nonBrand.cpa, '$')}` : ''}
 Products yesterday: ${f.products.slice(0, 5).map(p => `${p.title} $${p.revenue.toLocaleString()} (${p.shareYesterday}% of revenue vs ${p.share28d}% 28-day share)`).join(' · ')}`;
 }
