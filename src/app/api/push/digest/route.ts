@@ -5,6 +5,7 @@ import { loadDoc } from '@/src/lib/docStore';
 import { getKV, setKV, isChatStoreConfigured } from '@/src/lib/chatStore';
 import { notifyUser, assigneeMatches, pushConfigured } from '@/src/lib/push';
 import { getClient } from '@/src/lib/client';
+import { getCachedBrief, yesterdayPst } from '@/src/lib/brief';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +23,14 @@ export async function POST(req: NextRequest) {
   try { if (await getKV(marker)) return NextResponse.json({ ok: true, alreadySent: true }); } catch { /* send anyway */ }
   let tasks: Array<{ title: string; status: string; assignee?: string; dueDate?: string }> = [];
   try { const raw = await loadDoc('tasks'); tasks = raw ? JSON.parse(raw) : []; } catch { tasks = []; }
+  // Morning brief headline, when today's brief has already been built.
+  try {
+    const b = await getCachedBrief(yesterdayPst());
+    if (b) {
+      const top = (b.findings || [])[0];
+      await notifyUser(email, 'alerts', { title: b.headline.slice(0, 100), body: top ? `${top.kind === 'problem' ? '⚠' : '✦'} ${top.title}` : b.recommendation.slice(0, 140), url: `${req.nextUrl.origin}/dashboard`, tag: `brief-${b.date}` });
+    }
+  } catch { /* tasks digest still goes */ }
   const mine = tasks.filter(t => t.status !== 'done' && t.assignee && assigneeMatches(t.assignee, s?.user?.name || undefined, email));
   const overdue = mine.filter(t => t.dueDate && t.dueDate < today);
   const dueToday = mine.filter(t => t.dueDate === today);

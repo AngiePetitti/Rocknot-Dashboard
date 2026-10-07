@@ -21,6 +21,8 @@ import { runQuery, isBigQueryConfigured, googleSource, tableExists } from '@/src
 import { getKV, setKV, isChatStoreConfigured, getGoals } from '@/src/lib/chatStore';
 import { fetchShopifyDaily } from '@/src/lib/bqOverview';
 import { evaluateDecisions, type Decision } from '@/src/lib/decisions';
+import { runScan, type Anomaly } from '@/src/lib/scan';
+import { investigate, type Finding } from '@/src/lib/investigate';
 
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const str = (v: unknown) => (v == null ? '' : String(v));
@@ -70,6 +72,11 @@ export interface Brief {
   recommendation: string;
   watch?: string;
   facts: BriefFacts;
+  /** The sweep: outliers across every series, ranked by impact. */
+  anomalies?: Anomaly[];
+  /** What Cleo found investigating the top outliers. */
+  findings?: Finding[];
+  scan?: { seriesCount: number; errors: string[]; toolCalls: number; dropped: number; error?: string };
 }
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -253,7 +260,7 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
 
 // ── Words ──────────────────────────────────────────────────────────────────
 
-export async function writeBrief(facts: BriefFacts): Promise<Omit<Brief, 'facts' | 'generatedAt' | 'date'>> {
+export async function writeBrief(facts: BriefFacts, findings: Finding[] = []): Promise<Pick<Brief, 'headline' | 'summary' | 'drivers' | 'recommendation' | 'watch'>> {
   const brand = getClient();
   const pretty = new Date(`${facts.date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
   const tool: Anthropic.Tool = {
@@ -281,11 +288,12 @@ export async function writeBrief(facts: BriefFacts): Promise<Omit<Brief, 'facts'
 - Ad-platform week comparisons use FACTS.adWeek vs FACTS.adPriorWeek (two days behind the store week so attribution has settled) — say "the week to <adWeek.to>" when quoting them. Yesterday's platform purchases/ROAS are an early read: never call them a decline.
 - Product momentum: a product whose shareYesterday is well above its share28d is worth a sentence; include its revenue.
 - FACTS.decisions holds the seven operating questions already answered by rule (verdict + reason). Lead with the verdicts that are not "fine"/"hold" — scale, cut, investigate — quoting their reasons' numbers; the recommendation must agree with the decisions (never recommend scaling what the rules say to hold). When everything is fine or hold, say so in one line and spend the words on what moved.
+- FINDINGS (if any) are what the sweep of every series turned up and Cleo's investigation confirmed — problems and opportunities the standing questions did not ask about. Mention the top one or two in the summary or drivers when their impact rivals the headline movement; the card lists all of them separately, so do not repeat every one.
 - Plain language a founder reads in 30 seconds. No hedging, no "it appears". Submit with the write_brief tool.`;
   const res = await client.messages.create({
     model: 'claude-opus-4-8', max_tokens: 1500, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
     system, tools: [tool], tool_choice: { type: 'tool', name: 'write_brief' },
-    messages: [{ role: 'user', content: `FACTS:\n${JSON.stringify(facts)}` }],
+    messages: [{ role: 'user', content: `FACTS:\n${JSON.stringify(facts)}${findings.length ? `\n\nFINDINGS:\n${JSON.stringify(findings)}` : ''}` }],
   });
   const tu = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
   const out = (tu?.input || {}) as { headline?: string; summary?: string; drivers?: string[]; recommendation?: string; watch?: string };
@@ -294,11 +302,25 @@ export async function writeBrief(facts: BriefFacts): Promise<Omit<Brief, 'facts'
 }
 
 /** Build (or return the cached) brief for a date; `force` rebuilds. */
-export async function getBrief(date: string, force = false): Promise<Brief> {
+export async function getBrief(date: string, force = false, ctx?: { origin: string; cookie: string }): Promise<Brief> {
   if (!force) { const c = await getCachedBrief(date); if (c) return c; }
   const facts = await computeFacts(date);
-  const words = await writeBrief(facts);
-  const brief: Brief = { date, generatedAt: new Date().toISOString(), ...words, facts };
+  // The sweep + investigation: what the standing questions did not ask about.
+  let anomalies: Anomaly[] = []; let findings: Finding[] = [];
+  let scan: Brief['scan'] = undefined;
+  try {
+    const rps = facts.sessions.baseline > 0 ? facts.revenue.baseline / facts.sessions.baseline : 1.5;
+    const sc = await runScan(date, rps, facts.aov.current || facts.aov.baseline || 100);
+    anomalies = sc.anomalies;
+    scan = { seriesCount: sc.seriesCount, errors: sc.errors, toolCalls: 0, dropped: 0 };
+    if (anomalies.length && ctx) {
+      const inv = await investigate(date, anomalies, ctx.origin, ctx.cookie);
+      findings = inv.findings;
+      scan = { ...scan, toolCalls: inv.toolCalls, dropped: inv.dropped, ...(inv.error ? { error: inv.error } : {}) };
+    }
+  } catch (e) { scan = { seriesCount: 0, errors: [e instanceof Error ? e.message : String(e)], toolCalls: 0, dropped: 0 }; }
+  const words = await writeBrief(facts, findings);
+  const brief: Brief = { date, generatedAt: new Date().toISOString(), ...words, facts, anomalies, findings, scan };
   if (isChatStoreConfigured()) { try { await setKV(cacheKey(date), JSON.stringify(brief)); } catch { /* still return it */ } }
   return brief;
 }
@@ -310,9 +332,16 @@ export function briefText(b: Brief): string {
   const f = b.facts;
   const d = (x: Delta, unit = '') => `${unit}${x.current.toLocaleString()} vs ${unit}${x.baseline.toLocaleString()} (${x.pct == null ? 'n/a' : `${x.pct > 0 ? '+' : ''}${x.pct}%`})`;
   const verdicts = f.decisions.map(x => `- ${x.question} → ${x.verdict.toUpperCase()}${x.subject ? ` (${x.subject})` : ''}: ${x.reason} [rule: ${x.rule}]`).join('\n');
+  const findings = (b.findings || []).map(x => `- [${x.kind.toUpperCase()} · ${x.confidence}] ${x.title} — ${x.evidence} Action: ${x.action}`).join('\n');
+  const anomalies = (b.anomalies || []).slice(0, 8).map(a => `- ${a.group} · ${a.detail} (impact ~$${Math.round(a.impact).toLocaleString()})`).join('\n');
   return `MORNING BRIEF for ${f.date} (${f.weekday}) — generated ${b.generatedAt}
 OPERATING DECISIONS (by rule, against the dashboard's own targets):
 ${verdicts}
+
+WHAT ELSE THE SWEEP FOUND (every series checked against its own history; Cleo investigated the top outliers):
+${findings || '(no confirmed findings)'}
+Top outliers: 
+${anomalies || '(none above the noise floor)'}
 
 ${b.headline}
 ${b.summary}
