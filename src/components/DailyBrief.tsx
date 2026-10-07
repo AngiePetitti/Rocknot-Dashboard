@@ -17,6 +17,7 @@ export default function DailyBrief({ isAdmin = false }: { isAdmin?: boolean }) {
   const [state, setState] = useState<'loading' | 'building' | 'ok' | 'error'>('loading');
   const [error, setError] = useState('');
   const [showFacts, setShowFacts] = useState(false);
+  const [more, setMore] = useState(false);
 
   async function load(refresh = false) {
     setState(refresh ? 'building' : 'loading'); setError('');
@@ -70,13 +71,13 @@ export default function DailyBrief({ isAdmin = false }: { isAdmin?: boolean }) {
                 </div>
               )}
               <p className="text-sm text-gray-700 mt-1.5 leading-relaxed">{brief.summary}</p>
-              {brief.drivers.length > 0 && (
+              <p className="text-sm mt-2"><span className="font-semibold text-gray-800">Recommendation: </span><span className="text-gray-700">{brief.recommendation}</span></p>
+              {more && brief.drivers.length > 0 && (
                 <ul className="mt-2 space-y-0.5">
                   {brief.drivers.map((d, i) => <li key={i} className="text-sm text-gray-600 flex gap-2"><span className="text-violet-400">•</span><span>{d}</span></li>)}
                 </ul>
               )}
-              <p className="text-sm mt-2.5"><span className="font-semibold text-gray-800">Recommendation: </span><span className="text-gray-700">{brief.recommendation}</span></p>
-              {brief.watch && <p className="text-xs text-gray-500 mt-1"><span className="font-semibold">Watch: </span>{brief.watch}</p>}
+              {more && brief.watch && <p className="text-xs text-gray-500 mt-1.5"><span className="font-semibold">Watch: </span>{brief.watch}</p>}
               <div className="mt-3 flex items-center gap-3 flex-wrap text-[11px]">
                 <span className={`font-semibold ${pctTone(brief.facts.revenue.pct)}`}>Revenue {fmtPct(brief.facts.revenue.pct)}</span>
                 <span className={`font-semibold ${pctTone(brief.facts.sessions.pct)}`}>Sessions {fmtPct(brief.facts.sessions.pct)}</span>
@@ -84,6 +85,7 @@ export default function DailyBrief({ isAdmin = false }: { isAdmin?: boolean }) {
                 <span className={`font-semibold ${pctTone(brief.facts.aov.pct)}`}>AOV {fmtPct(brief.facts.aov.pct)}</span>
                 {brief.facts.cac && <span className={`font-semibold ${pctTone(brief.facts.cac.blended.pct, true)}`}>Blended nCAC (7d) {fmtPct(brief.facts.cac.blended.pct)}</span>}
                 <span className="text-gray-400">vs same weekday, prior 4 weeks</span>
+                {(brief.drivers.length > 0 || brief.watch) && <button onClick={() => setMore(v => !v)} className="text-violet-600 font-semibold hover:underline">{more ? 'Less' : 'More'}</button>}
                 <button onClick={() => setShowFacts(v => !v)} className="text-violet-600 font-semibold hover:underline">{showFacts ? 'Hide the numbers' : 'Show the numbers'}</button>
                 <Link href="/dashboard/insights" className="text-violet-600 font-semibold hover:underline">Ask {client.analyst.name} →</Link>
               </div>
