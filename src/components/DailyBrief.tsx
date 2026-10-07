@@ -56,6 +56,19 @@ export default function DailyBrief({ isAdmin = false }: { isAdmin?: boolean }) {
           {state === 'ok' && brief && (
             <>
               <h2 className="text-base md:text-lg font-bold text-gray-900 mt-1 leading-snug">{brief.headline}</h2>
+              {brief.facts.decisions?.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {brief.facts.decisions.map(dc => {
+                    const tone = dc.verdict === 'scale' ? 'bg-green-50 text-green-700 border-green-200' : dc.verdict === 'cut' ? 'bg-red-50 text-red-700 border-red-200' : dc.verdict === 'investigate' ? 'bg-amber-50 text-amber-700 border-amber-200' : dc.verdict === 'fine' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-gray-50 text-gray-500 border-gray-200';
+                    const label = { scale: 'Scale', cut: 'Cut', investigate: 'Investigate', fine: 'Fine', hold: 'Hold', unknown: 'n/a' }[dc.verdict];
+                    return (
+                      <span key={dc.key} title={`${dc.reason}\n\nRule: ${dc.rule}`} className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${tone}`}>
+                        {dc.question.replace(/\?$/, '')}: {label}{dc.subject ? ` · ${dc.subject}` : ''}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
               <p className="text-sm text-gray-700 mt-1.5 leading-relaxed">{brief.summary}</p>
               {brief.drivers.length > 0 && (
                 <ul className="mt-2 space-y-0.5">
@@ -74,6 +87,17 @@ export default function DailyBrief({ isAdmin = false }: { isAdmin?: boolean }) {
                 <button onClick={() => setShowFacts(v => !v)} className="text-violet-600 font-semibold hover:underline">{showFacts ? 'Hide the numbers' : 'Show the numbers'}</button>
                 <Link href="/dashboard/insights" className="text-violet-600 font-semibold hover:underline">Ask {client.analyst.name} →</Link>
               </div>
+              {showFacts && brief.facts.decisions?.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  {brief.facts.decisions.map(dc => (
+                    <div key={dc.key} className="rounded-xl bg-gray-50 p-2.5 text-xs">
+                      <p className="font-semibold text-gray-800">{dc.question} <span className="uppercase text-[10px] tracking-wide text-violet-700 ml-1">{dc.verdict}{dc.subject ? ` · ${dc.subject}` : ''}</span></p>
+                      <p className="text-gray-600 mt-0.5">{dc.reason}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">Rule: {dc.rule}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
               {showFacts && (
                 <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                   {[['Revenue', brief.facts.revenue, '$'], ['Orders', brief.facts.orders, ''], ['AOV', brief.facts.aov, '$'], ['Sessions', brief.facts.sessions, ''], ['Conversion', brief.facts.cvr, '%'], ['Ad spend', brief.facts.spendYesterday.total, '$']].map(([label, d, unit]) => {
