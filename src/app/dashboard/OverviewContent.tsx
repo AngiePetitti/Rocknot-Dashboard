@@ -851,10 +851,6 @@ export default function OverviewContent() {
         />
       </div>
 
-      {/* ── The intelligence layer: what moved yesterday, why, and what to do.
-          Sits after the headline metrics so the numbers stay first on screen. ── */}
-      {!isPartner && <DailyBrief isAdmin={session?.user?.role === 'admin'} />}
-
       {/* New vs Returning Customer Cards — hidden on Today: the customer
           match hasn't settled mid-day and would misreport the split */}
       {metrics.newCustomers !== undefined && metrics.newCustomers > 0 && (
@@ -985,6 +981,10 @@ export default function OverviewContent() {
           />
         </div>
       )}
+      {/* ── The intelligence layer: what moved yesterday, why, and what to do.
+          Below every metric card, so the numbers come first. ── */}
+      {!isPartner && <DailyBrief isAdmin={session?.user?.role === 'admin'} />}
+
       {metrics.newCustomers !== undefined && metrics.newCustomers > 0 && tfRaw !== 'today' && !isPartner && (
         <NcacBreakdown tf={tfRaw} dateFrom={dateFrom} dateTo={dateTo} compare={compareOn} targetCac={TARGET_CAC} />
       )}

@@ -19,6 +19,7 @@ import { getAdsOverview } from '@/src/lib/bqAds';
 import { fetchNcac } from '@/src/lib/ncac';
 import { runQuery, isBigQueryConfigured, googleSource, tableExists } from '@/src/lib/bigquery';
 import { getKV, setKV, isChatStoreConfigured, getGoals } from '@/src/lib/chatStore';
+import { fetchShopifyDaily } from '@/src/lib/bqOverview';
 import { evaluateDecisions, type Decision } from '@/src/lib/decisions';
 
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -36,7 +37,13 @@ export interface BriefFacts {
   week: { from: string; to: string }; priorWeek: { from: string; to: string };
   /** Windows used for ad-platform comparisons (two days behind, so attribution has settled). */
   adWeek: { from: string; to: string }; adPriorWeek: { from: string; to: string };
-  revenue: Delta; orders: Delta; aov: Delta; sessions: Delta; cvr: Delta; // cvr in %
+  /** Total sales (the Overview's "Total Revenue" card). */
+  revenue: Delta;
+  /** Net sales incl. return fees (the Overview's "Net Sales" card and MER basis). */
+  netSales: Delta;
+  orders: Delta; aov: Delta; sessions: Delta;
+  /** Shopify conversion rate, %: sessions that completed checkout ÷ sessions (the Overview card additionally removes suspected bots). */
+  cvr: Delta;
   /** How much of the revenue change came from traffic, conversion and order value (percentage points, sum ≈ revenue.pct). */
   decomposition: { fromSessions: number; fromCvr: number; fromAov: number } | null;
   devices: Array<{ device: string; sessions: number; cvr: Delta }>;
@@ -75,10 +82,12 @@ export async function getCachedBrief(date: string): Promise<Brief | null> {
 
 // ── Facts ──────────────────────────────────────────────────────────────────
 
-async function dailySales(from: string, to: string): Promise<Map<string, { orders: number; net: number }>> {
-  const rows = await shopifyql(`FROM sales SHOW orders, net_sales TIMESERIES day ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`, { timeoutMs: 25000 }).catch(() => []);
-  const m = new Map<string, { orders: number; net: number }>();
-  for (const r of rows) { const d = str(r.day).slice(0, 10); if (d) m.set(d, { orders: num(r.orders), net: num(r.net_sales) }); }
+// Same per-day Shopify figures the Overview cards use: totalSales ("Total
+// Revenue"), netSales incl. return fees (the MER basis), aovBasis ÷ orders (AOV).
+async function dailySales(from: string, to: string): Promise<Map<string, { orders: number; net: number; total: number; aovBasis: number }>> {
+  const rows = await fetchShopifyDaily(from, to).catch(() => []);
+  const m = new Map<string, { orders: number; net: number; total: number; aovBasis: number }>();
+  for (const r of rows) if (r.date) m.set(r.date, { orders: r.orders, net: r.netSales, total: r.totalSales, aovBasis: r.aovBasis });
   return m;
 }
 async function dailySessions(from: string, to: string): Promise<Map<string, { sessions: number; completed: number }>> {
@@ -148,17 +157,20 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
   ]);
 
   const avg = (vals: number[]) => (vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0);
-  const sY = sales.get(y) || { orders: 0, net: 0 };
-  const sB = baselineDays.map(d => sales.get(d)).filter(Boolean) as Array<{ orders: number; net: number }>;
+  type SaleDay = { orders: number; net: number; total: number; aovBasis: number };
+  const sY: SaleDay = sales.get(y) || { orders: 0, net: 0, total: 0, aovBasis: 0 };
+  const sB = baselineDays.map(d => sales.get(d)).filter(Boolean) as SaleDay[];
   const vY = sessions.get(y) || { sessions: 0, completed: 0 };
   const vB = baselineDays.map(d => sessions.get(d)).filter(Boolean) as Array<{ sessions: number; completed: number }>;
   if (sB.length < 4) notes.push(`Only ${sB.length} of 4 baseline days had sales data.`);
-  const revenue = delta(sY.net, avg(sB.map(s => s.net)));
+  const revenue = delta(sY.total, avg(sB.map(s => s.total)));
+  const netSales = delta(sY.net, avg(sB.map(s => s.net)));
   const orders = delta(sY.orders, avg(sB.map(s => s.orders)));
-  const aov = delta(sY.orders ? sY.net / sY.orders : 0, avg(sB.map(s => (s.orders ? s.net / s.orders : 0))));
+  const aovOf = (s: SaleDay) => (s.orders ? (s.aovBasis > 0 ? s.aovBasis : s.net) / s.orders : 0);
+  const aov = delta(aovOf(sY), avg(sB.map(aovOf)));
   const sess = delta(vY.sessions, avg(vB.map(v => v.sessions)));
-  const cvrY = vY.sessions ? (sY.orders / vY.sessions) * 100 : 0;
-  const cvrB = avg(vB.map((v, i) => (v.sessions && sB[i] ? (sB[i].orders / v.sessions) * 100 : 0)).filter(x => x > 0));
+  const cvrY = vY.sessions ? (vY.completed / vY.sessions) * 100 : 0;
+  const cvrB = avg(vB.map(v => (v.sessions ? (v.completed / v.sessions) * 100 : 0)).filter(x => x > 0));
   const cvr = delta(cvrY, cvrB);
   // Log decomposition: ln(R1/R0) = ln(S1/S0) + ln(C1/C0) + ln(A1/A0); shares scaled to the revenue % change.
   let decomposition: BriefFacts['decomposition'] = null;
@@ -213,11 +225,12 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
   });
 
   // Week revenue (store net) and MER; month-to-date against the Goals tab.
-  const sumRange = (from: string, to: string) => Array.from(sales.entries()).filter(([d]) => d >= from && d <= to).reduce((s, [, v]) => s + v.net, 0);
-  const weekRevenue = delta(sumRange(week.from, week.to), sumRange(priorWeek.from, priorWeek.to));
-  // MER pairs store revenue and spend over the SAME (settled) ad windows.
-  const adWeekRevenue = delta(sumRange(adWeek.from, adWeek.to), sumRange(adPriorWeek.from, adPriorWeek.to));
-  const weekMer = delta(weekAds.spend.current > 0 ? adWeekRevenue.current / weekAds.spend.current : 0, weekAds.spend.baseline > 0 ? adWeekRevenue.baseline / weekAds.spend.baseline : 0);
+  const sumRange = (from: string, to: string, k: 'net' | 'total') => Array.from(sales.entries()).filter(([d]) => d >= from && d <= to).reduce((s, [, v]) => s + v[k], 0);
+  const weekRevenue = delta(sumRange(week.from, week.to, 'total'), sumRange(priorWeek.from, priorWeek.to, 'total'));
+  // MER exactly as the Overview computes it: NET sales (incl. return fees) ÷
+  // spend, over the SAME (settled) ad windows.
+  const adWeekNet = delta(sumRange(adWeek.from, adWeek.to, 'net'), sumRange(adPriorWeek.from, adPriorWeek.to, 'net'));
+  const weekMer = delta(weekAds.spend.current > 0 ? adWeekNet.current / weekAds.spend.current : 0, weekAds.spend.baseline > 0 ? adWeekNet.baseline / weekAds.spend.baseline : 0);
   let mtd: BriefFacts['mtd'] = null;
   try {
     const monthStart = `${y.slice(0, 7)}-01`;
@@ -226,13 +239,13 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
     const goals = await getGoals().catch(() => []);
     const goal = goals.find(g => g.month === y.slice(0, 7) || g.month === monthStart);
     const mtdSpend = (adsRange?.dailySpend || []).filter(d => d.date >= monthStart && d.date <= y).reduce((s, d) => s + num(d.meta) + num(d.google) + num(d.tiktok) + num(d.snapchat) + num(d.pinterest), 0);
-    mtd = { spend: r2(mtdSpend), adBudget: goal?.adBudget ?? null, revenue: r2(sumRange(monthStart, y)), revenueGoal: goal?.revenueGoal ?? null, dayOfMonth, daysInMonth };
+    mtd = { spend: r2(mtdSpend), adBudget: goal?.adBudget ?? null, revenue: r2(sumRange(monthStart, y, 'net')), revenueGoal: goal?.revenueGoal ?? null, dayOfMonth, daysInMonth };
   } catch { mtd = null; }
 
   const partial: Omit<BriefFacts, 'decisions'> = {
     date: y, weekday: new Date(`${y}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long' }),
     baseline: { kind: 'same weekday, prior 4 weeks', days: baselineDays }, week, priorWeek, adWeek, adPriorWeek,
-    revenue, orders, aov, sessions: sess, cvr, decomposition, devices, channels, spendYesterday, weekAds, weekRevenue, weekMer, mtd, cac, googleBrand, products, notes,
+    revenue, netSales, orders, aov, sessions: sess, cvr, decomposition, devices, channels, spendYesterday, weekAds, weekRevenue, weekMer, mtd, cac, googleBrand, products, notes,
   };
   const decisions = evaluateDecisions({ facts: { ...partial, decisions: [] }, weekRevenue, weekMer, mtd });
   return { ...partial, decisions };
@@ -260,6 +273,7 @@ export async function writeBrief(facts: BriefFacts): Promise<Omit<Brief, 'facts'
   };
   const system = `You are ${brand.analyst.name}, ${brand.name}'s in-house analyst, writing the founder's morning brief for ${pretty}. You are given FACTS as JSON. Rules:
 - Use ONLY numbers that appear in FACTS. Never estimate, extrapolate or round beyond one decimal. If a section is null or empty, do not mention it.
+- Definitions match the Overview cards exactly: "revenue" = total sales; "net sales" = net of discounts and returns incl. return fees; MER = net sales ÷ ad spend (quote it as "MER"); conversion = Shopify's sessions that completed checkout ÷ sessions. Use these words so the founder can find the same number on the cards.
 - "baseline" means the average of the same weekday over the prior four weeks; say "vs the same weekday" or "vs a typical ${facts.weekday}". Week figures compare the last 7 days with the 7 before.
 - Lead with the biggest movement. Movements under 8% in revenue, 10% in conversion or 15% in CAC are "steady" — say so briefly rather than inventing a story.
 - Explain revenue changes through the decomposition (traffic, conversion, order value) and name where it concentrated (device, channel, platform) only when FACTS show it.
@@ -305,7 +319,7 @@ ${b.summary}
 ${b.drivers.map(x => `- ${x}`).join('\n')}
 Recommendation: ${b.recommendation}${b.watch ? `\nWatch: ${b.watch}` : ''}
 
-FACTS (yesterday vs same-weekday average of the prior 4 weeks): revenue ${d(f.revenue, '$')} · orders ${d(f.orders)} · AOV ${d(f.aov, '$')} · sessions ${d(f.sessions)} · CVR ${d(f.cvr)}%${f.decomposition ? ` · revenue change from traffic ${f.decomposition.fromSessions}pp, conversion ${f.decomposition.fromCvr}pp, order value ${f.decomposition.fromAov}pp` : ''}
+FACTS (yesterday vs same-weekday average of the prior 4 weeks): total revenue ${d(f.revenue, '$')} · net sales ${d(f.netSales, '$')} · orders ${d(f.orders)} · AOV ${d(f.aov, '$')} · sessions ${d(f.sessions)} · CVR ${d(f.cvr)}%${f.decomposition ? ` · revenue change from traffic ${f.decomposition.fromSessions}pp, conversion ${f.decomposition.fromCvr}pp, order value ${f.decomposition.fromAov}pp` : ''}
 Devices: ${f.devices.map(x => `${x.device} CVR ${d(x.cvr)}%`).join(' · ') || 'n/a'}
 Spend yesterday: ${d(f.spendYesterday.total, '$')} — ${f.spendYesterday.byPlatform.map(p => `${p.platform} ${d(p.spend, '$')}`).join(' · ')}
 Store week (${f.week.from} → ${f.week.to}) vs prior: revenue ${d(f.weekRevenue, '$')}\nAd week (${f.adWeek.from} → ${f.adWeek.to}, settled) vs prior: MER ${d(f.weekMer)}x · spend ${d(f.weekAds.spend, '$')} · purchases ${d(f.weekAds.purchases)}${f.cac ? ` · blended nCAC ${d(f.cac.blended, '$')} · ${f.cac.byPlatform.map(p => `${p.platform} nCAC ${d(p.ncac, '$')}`).join(' · ')}` : ''}

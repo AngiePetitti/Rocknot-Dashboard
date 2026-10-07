@@ -57,9 +57,9 @@ export default function DailyBrief({ isAdmin = false }: { isAdmin?: boolean }) {
           {state === 'ok' && brief && (
             <>
               <h2 className="text-base md:text-lg font-bold text-gray-900 mt-1 leading-snug">{brief.headline}</h2>
-              {brief.facts.decisions?.length > 0 && (
+              {brief.facts.decisions?.some(dc => dc.verdict === 'scale' || dc.verdict === 'cut' || dc.verdict === 'investigate') && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  {brief.facts.decisions.map(dc => {
+                  {brief.facts.decisions.filter(dc => dc.verdict === 'scale' || dc.verdict === 'cut' || dc.verdict === 'investigate').map(dc => {
                     const tone = dc.verdict === 'scale' ? 'bg-green-50 text-green-700 border-green-200' : dc.verdict === 'cut' ? 'bg-red-50 text-red-700 border-red-200' : dc.verdict === 'investigate' ? 'bg-amber-50 text-amber-700 border-amber-200' : dc.verdict === 'fine' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-gray-50 text-gray-500 border-gray-200';
                     const label = { scale: 'Scale', cut: 'Cut', investigate: 'Investigate', fine: 'Fine', hold: 'Hold', unknown: 'n/a' }[dc.verdict];
                     return (
@@ -80,6 +80,7 @@ export default function DailyBrief({ isAdmin = false }: { isAdmin?: boolean }) {
               {more && brief.watch && <p className="text-xs text-gray-500 mt-1.5"><span className="font-semibold">Watch: </span>{brief.watch}</p>}
               <div className="mt-3 flex items-center gap-3 flex-wrap text-[11px]">
                 <span className={`font-semibold ${pctTone(brief.facts.revenue.pct)}`}>Revenue {fmtPct(brief.facts.revenue.pct)}</span>
+                {brief.facts.netSales && <span className={`font-semibold ${pctTone(brief.facts.netSales.pct)}`}>Net sales {fmtPct(brief.facts.netSales.pct)}</span>}
                 <span className={`font-semibold ${pctTone(brief.facts.sessions.pct)}`}>Sessions {fmtPct(brief.facts.sessions.pct)}</span>
                 <span className={`font-semibold ${pctTone(brief.facts.cvr.pct)}`}>CVR {fmtPct(brief.facts.cvr.pct)}</span>
                 <span className={`font-semibold ${pctTone(brief.facts.aov.pct)}`}>AOV {fmtPct(brief.facts.aov.pct)}</span>
@@ -102,7 +103,7 @@ export default function DailyBrief({ isAdmin = false }: { isAdmin?: boolean }) {
               )}
               {showFacts && (
                 <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                  {[['Revenue', brief.facts.revenue, '$'], ['Orders', brief.facts.orders, ''], ['AOV', brief.facts.aov, '$'], ['Sessions', brief.facts.sessions, ''], ['Conversion', brief.facts.cvr, '%'], ['Ad spend', brief.facts.spendYesterday.total, '$']].map(([label, d, unit]) => {
+                  {[['Total revenue', brief.facts.revenue, '$'], ['Net sales', brief.facts.netSales || brief.facts.revenue, '$'], ['Orders', brief.facts.orders, ''], ['AOV', brief.facts.aov, '$'], ['Sessions', brief.facts.sessions, ''], ['Conversion (Shopify)', brief.facts.cvr, '%'], ['Ad spend', brief.facts.spendYesterday.total, '$']].map(([label, d, unit]) => {
                     const x = d as { current: number; baseline: number; pct: number | null };
                     const f = (v: number) => (unit === '$' ? `$${Math.round(v).toLocaleString()}` : unit === '%' ? `${v.toFixed(1)}%` : Math.round(v).toLocaleString());
                     return (
