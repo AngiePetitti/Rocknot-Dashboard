@@ -140,7 +140,7 @@ export async function windsorOrganicRows(
 // references. Media/identity fields first; metrics-only fallbacks after.
 export const PINTEREST_ORGANIC_FIELDSETS = [
   { name: 'full', fields: ['date', 'pin_id', 'pin_title', 'pin_description', 'pin_permalink', 'pin_media_image_url', 'pin_board_name', 'pin_created_at', 'pin_impression', 'save', 'pin_click', 'pin_outbound_click'] },
-  { name: 'pin_prefixed', fields: ['date', 'pin_id', 'pin_title', 'pin_description', 'pin_link', 'pin_media_image_url', 'pin_board_name', 'pin_created_at', 'pin_impression', 'pin_save', 'pin_pin_click', 'pin_outbound_click'] },
+  { name: 'pin_prefixed', fields: ['date', 'pin_id', 'pin_title', 'pin_description', 'pin_link', 'pin_image_url', 'pin_board_name', 'pin_created_date', 'pin_impression', 'pin_save', 'pin_pin_click', 'pin_outbound_click'] },
   { name: 'alt_names', fields: ['date', 'pin_id', 'pin_title', 'pin_description', 'pin_link', 'pin_media_image_url', 'pin_board_name', 'pin_created_at', 'impression', 'pin_save', 'pin_click', 'outbound_click'] },
   { name: 'no_media', fields: ['date', 'pin_id', 'pin_title', 'pin_permalink', 'pin_created_at', 'pin_impression', 'save', 'pin_click', 'pin_outbound_click'] },
   { name: 'minimal', fields: ['date', 'pin_id', 'pin_title', 'pin_impression', 'pin_click'] },
@@ -195,8 +195,10 @@ export const INSTAGRAM_METRICS = ['reach', 'impressions', 'likes', 'comments', '
 // version, so each metric is read from whichever of its known names exists.
 const PIN_TABLE_ALTS: Record<string, string[]> = {
   pin_id: ['pin_id', 'id'], pin_title: ['pin_title', 'title'], pin_description: ['pin_description', 'description'],
-  pin_permalink: ['pin_permalink', 'pin_link', 'link', 'url'], pin_media_image_url: ['pin_media_image_url', 'media_image_url', 'image_url'],
-  pin_board_name: ['pin_board_name', 'board_name'], pin_created_at: ['pin_created_at', 'created_at'],
+  pin_permalink: ['pin_link', 'pin_permalink', 'link', 'url'],
+  // Windsor's task form lists "Pin image url" and "Pin media cover image url".
+  pin_media_image_url: ['pin_image_url', 'pin_media_cover_image_url', 'pin_media_image_url', 'media_image_url', 'image_url'],
+  pin_board_name: ['pin_board_name', 'board_name'], pin_created_at: ['pin_created_date', 'pin_created_at', 'created_at'],
   impressions: ['pin_impression', 'impression', 'impressions'], saves: ['save', 'pin_save', 'saves'],
   pinClicks: ['pin_click', 'pin_pin_click', 'pin_clicks', 'click'], outboundClicks: ['pin_outbound_click', 'outbound_click', 'outbound_clicks'],
 };
@@ -262,9 +264,9 @@ export async function fetchPinterestOrganic(from: string, to: string): Promise<S
     return {
       id, platform: 'Pinterest' as const,
       title: str(last.pin_title) || str(last.pin_description).slice(0, 80) || `Pin ${id}`,
-      imageUrl: str(last.pin_media_image_url),
+      imageUrl: str(last.pin_media_image_url) || str(last.pin_image_url) || str(last.pin_media_cover_image_url),
       url: str(last.pin_permalink) || str(last.pin_link) || `https://www.pinterest.com/pin/${id}/`,
-      publishedAt: str(last.pin_created_at).slice(0, 10),
+      publishedAt: (str(last.pin_created_at) || str(last.pin_created_date)).slice(0, 10),
       group: str(last.pin_board_name),
       metrics: { impressions: v.metrics.pin_impression || v.metrics.impression || 0, saves: v.metrics.save || v.metrics.pin_save || 0, pinClicks: v.metrics.pin_click || v.metrics.pin_pin_click || 0, outboundClicks: v.metrics.pin_outbound_click || v.metrics.outbound_click || 0 },
     };
