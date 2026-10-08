@@ -342,6 +342,7 @@ export default function OrganicContent() {
                 <h3 className="text-sm font-bold text-gray-800">Instagram Posts &amp; Reels</h3>
                 <p className="text-[11px] text-gray-400">Posts and reels published in this period · reach, likes, saves, comments, shares, views are Instagram&apos;s own lifetime counts for each post</p>
               </div>
+              {ig.note && <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 mb-3">{ig.note}</p>}
               <PostGrid block={ig} sorts={IG_SORTS} ratio="square" emptyText="No Instagram post activity in this period."
                 metricDefs={[{ key: 'reach', label: 'Reach' }, { key: 'likes', label: 'Likes' }, { key: 'saves', label: 'Saves' }, { key: 'comments', label: 'Comments' }, { key: 'shares', label: 'Shares' }, { key: 'views', label: 'Views' }]} />
             </Card>

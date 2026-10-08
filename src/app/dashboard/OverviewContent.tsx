@@ -21,6 +21,7 @@ import { PLATFORMS } from '@/src/lib/client';
 import NcacBreakdown from '@/src/components/NcacBreakdown';
 import MyTasksBanner from '@/src/components/MyTasksBanner';
 import DailyBrief from '@/src/components/DailyBrief';
+import MarketingExpenses from '@/src/components/MarketingExpenses';
 
 // MER runs on NET sales (post-discount/returns, excl. taxes+shipping); the
 // goal is the client profile's targetMer on that basis (Rocknot: 3.5x —
@@ -981,6 +982,14 @@ export default function OverviewContent() {
           />
         </div>
       )}
+      {/* ── True profit: net sales − COGS − live ad spend − every other marketing
+          cost from the budgeting sheet (admin-only; hides when no sheet). ── */}
+      {!isPartner && tfRaw !== 'today' && (
+        <MarketingExpenses tf={tfRaw} dateFrom={dateFrom} dateTo={dateTo}
+          netSales={metrics.netSales ?? metrics.totalRevenue} adSpend={metrics.netAdSpend ?? metrics.totalAdSpend}
+          newCustomers={metrics.newCustomers ?? 0} cogsPct={profitBasis?.cogsPct ?? (client.finance.grossMarginPct != null ? 100 - client.finance.grossMarginPct : null)} />
+      )}
+
       {/* ── The intelligence layer: what moved yesterday, why, and what to do.
           Below every metric card, so the numbers come first. ── */}
       {!isPartner && <DailyBrief isAdmin={session?.user?.role === 'admin'} />}
