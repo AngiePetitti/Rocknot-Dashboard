@@ -177,6 +177,12 @@ export default function ChannelContent({ channelKey }: { channelKey: string }) {
                     <span className="text-gray-600">{label} commission {data.economics.commissionPct != null ? `(${data.economics.commissionPct}%)` : ''}</span>
                     <span className="tabular-nums text-gray-600">{data.economics.commission != null ? `− ${$(data.economics.commission)}` : 'rate not set yet'}</span>
                   </div>
+                  {data.economics.returnFee != null && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">{label} return charges (${data.economics.returnFee} × {(data.economics.returnCount ?? 0).toLocaleString()} returns{data.economics.returnCountBasis === 'estimated' ? ', est.' : ''})</span>
+                      <span className="tabular-nums text-gray-600">− {$(data.economics.returnCharges || 0)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-gray-600">Cost of goods {data.economics.cogsPct != null ? `(${data.economics.cogsPct}% of net)` : ''}</span>
                     <span className="tabular-nums text-gray-600">{data.economics.cogs != null ? `− ${$(data.economics.cogs)}` : 'no margin on file'}</span>
@@ -189,6 +195,7 @@ export default function ChannelContent({ channelKey }: { channelKey: string }) {
               )}
               <p className="text-[11px] text-gray-400 mt-3">
                 Cost of goods uses the {client.finance.grossMarginPct ?? '—'}% gross margin on file. Production and customization labour is shared across channels and is not allocated here yet.
+                {data.economics?.returnCountBasis === 'estimated' && ` Shopify did not report a returned-item count for this period, so the number of returns is estimated from return dollars ÷ average order value.`}
                 {data.economics?.commissionPct == null && ` Add ${label}'s commission rate and this becomes a true contribution figure.`}
               </p>
             </Card>
