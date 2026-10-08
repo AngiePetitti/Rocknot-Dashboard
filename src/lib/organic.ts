@@ -6,6 +6,7 @@
 import { getClient, shopifyDomain, windsorParams, windsorAccount } from '@/src/lib/client';
 import { shopifyql, shopifyConfigured } from '@/src/lib/shopifyql';
 import { isPaidMedium } from '@/src/lib/traffic';
+import { runQuery, isBigQueryConfigured, tableExists, getDataset } from '@/src/lib/bigquery';
 
 export type OrganicPlatform = 'Pinterest' | 'Instagram';
 
@@ -91,24 +92,31 @@ export async function windsorOrganicRows(
   source: 'pinterest_organic' | 'instagram',
   fieldSets: Array<{ name: string; fields: string[] }>,
   from: string, to: string,
+  budgetMs = source === 'pinterest_organic' ? 55000 : 30000,
 ): Promise<{ attempts: WindsorAttempt[]; rows: Array<Record<string, unknown>> | null; fieldSet: string | null; notConnected: boolean }> {
   const attempts: WindsorAttempt[] = [];
   if (!WINDSOR_KEY) return { attempts, rows: null, fieldSet: null, notConnected: true };
   const scoped = windsorParams(source, { date_from: from, date_to: to });
   if (!scoped) return { attempts, rows: null, fieldSet: null, notConnected: true };
-  // Pinterest Organic is pulled live from Pinterest by Windsor and can take
-  // a while on first request; give it room before calling it a timeout.
-  const timeoutMs = source === 'pinterest_organic' ? 45000 : 20000;
+  // Pinterest Organic is pulled live from Pinterest by Windsor and can be slow.
+  // Each source gets a total time budget across ALL its attempts, so one slow
+  // source can never take the whole Organic Content page past the server's
+  // limit (which showed as "Failed to load" for everything).
+  const started = Date.now();
+  const remaining = () => budgetMs - (Date.now() - started);
+  const perRequest = source === 'pinterest_organic' ? 40000 : 20000;
   for (const fs of fieldSets) {
+    if (remaining() < 5000) { attempts.push({ fieldSet: fs.name, fields: fs.fields, error: 'skipped: time budget for this source used up' }); continue; }
     // Self-correcting: when Windsor's error names one of the requested
     // fields ("'save' [Error pulling data…]"), drop it and retry before
     // moving to the next set. Never drops `date` or the id field.
     let fields = [...fs.fields];
     for (let round = 0; round < 5 && fields.length >= 2; round++) {
+      if (remaining() < 5000) break;
       const qs = new URLSearchParams({ api_key: WINDSOR_KEY, fields: fields.join(','), _renderer: 'json', ...scoped });
       let err = '';
       try {
-        const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { next: { revalidate: 600 }, signal: AbortSignal.timeout(timeoutMs) });
+        const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { next: { revalidate: 600 }, signal: AbortSignal.timeout(Math.max(3000, Math.min(perRequest, remaining()))) });
         const json = await res.json();
         if (!json.error && Array.isArray(json.data)) {
           attempts.push({ fieldSet: round ? `${fs.name} (pruned ${fs.fields.length - fields.length})` : fs.name, fields, rows: json.data.slice(0, 3) });
@@ -180,7 +188,48 @@ function sumTotals(items: OrganicPost[], keys: string[]): Record<string, number>
 export const PINTEREST_METRICS = ['impressions', 'saves', 'pinClicks', 'outboundClicks'];
 export const INSTAGRAM_METRICS = ['reach', 'impressions', 'likes', 'comments', 'saves', 'shares', 'views'];
 
+// Preferred source once a Windsor → BigQuery task exists for Pinterest Organic
+// (table `pinterest_organic` in the client's dataset): instant, and no live
+// pull from Pinterest on every page load. Column names vary by connector
+// version, so each metric is read from whichever of its known names exists.
+const PIN_TABLE_ALTS: Record<string, string[]> = {
+  pin_id: ['pin_id', 'id'], pin_title: ['pin_title', 'title'], pin_description: ['pin_description', 'description'],
+  pin_permalink: ['pin_permalink', 'pin_link', 'link', 'url'], pin_media_image_url: ['pin_media_image_url', 'media_image_url', 'image_url'],
+  pin_board_name: ['pin_board_name', 'board_name'], pin_created_at: ['pin_created_at', 'created_at'],
+  impressions: ['pin_impression', 'impression', 'impressions'], saves: ['save', 'pin_save', 'saves'],
+  pinClicks: ['pin_click', 'pin_clicks', 'click'], outboundClicks: ['pin_outbound_click', 'outbound_click', 'outbound_clicks'],
+};
+export async function fetchPinterestOrganicFromTable(from: string, to: string): Promise<SourceBlock<OrganicPost> | null> {
+  if (!isBigQueryConfigured() || !(await tableExists('pinterest_organic'))) return null;
+  try {
+    const ds = getDataset();
+    const cols = await runQuery<{ column_name: string }>(`SELECT column_name FROM \`${ds}.INFORMATION_SCHEMA.COLUMNS\` WHERE table_name = 'pinterest_organic'`);
+    const have = new Set(cols.map(c => c.column_name));
+    const pick = (k: string) => PIN_TABLE_ALTS[k].find(c => have.has(c)) || null;
+    const id = pick('pin_id');
+    if (!id || !have.has('date')) return { status: 'error', error: `pinterest_organic table lacks a pin id / date column (has: ${Array.from(have).join(', ')})`, items: [], totals: {} };
+    const sel = Object.keys(PIN_TABLE_ALTS).map(k => { const c = pick(k); return c ? `CAST(${c} AS STRING) AS ${k}` : `NULL AS ${k}`; }).join(', ');
+    const rows = await runQuery<Record<string, string | null>>(`SELECT CAST(date AS STRING) AS date, ${sel} FROM \`${ds}.pinterest_organic\` WHERE DATE(date) BETWEEN @from AND @to`, { from, to });
+    const rolled = rollUp(rows.map(r => ({ ...r })), 'pin_id', ['impressions', 'saves', 'pinClicks', 'outboundClicks']);
+    const items: OrganicPost[] = Array.from(rolled.entries()).map(([pid, v]) => {
+      const last = v.rows[v.rows.length - 1];
+      return {
+        id: pid, platform: 'Pinterest' as const,
+        title: str(last.pin_title) || str(last.pin_description).slice(0, 80) || `Pin ${pid}`,
+        imageUrl: str(last.pin_media_image_url), url: str(last.pin_permalink) || `https://www.pinterest.com/pin/${pid}/`,
+        publishedAt: str(last.pin_created_at).slice(0, 10), group: str(last.pin_board_name),
+        metrics: { impressions: v.metrics.impressions || 0, saves: v.metrics.saves || 0, pinClicks: v.metrics.pinClicks || 0, outboundClicks: v.metrics.outboundClicks || 0 },
+      };
+    }).filter(p => Object.values(p.metrics).some(x => x > 0)).sort((a, b) => b.metrics.impressions - a.metrics.impressions);
+    return { status: 'ok', items, totals: sumTotals(items, PINTEREST_METRICS), fieldSet: 'bigquery:pinterest_organic' };
+  } catch (e) {
+    return { status: 'error', error: `pinterest_organic table: ${e instanceof Error ? e.message : String(e)}`, items: [], totals: {} };
+  }
+}
+
 export async function fetchPinterestOrganic(from: string, to: string): Promise<SourceBlock<OrganicPost>> {
+  const fromTable = await fetchPinterestOrganicFromTable(from, to);
+  if (fromTable && fromTable.status === 'ok') return fromTable;
   const r = await windsorOrganicRows('pinterest_organic', PINTEREST_ORGANIC_FIELDSETS, from, to);
   if (r.notConnected) {
     // Windsor can't see a profile reached through Business Access; Pinterest's
@@ -458,7 +507,7 @@ export const PINTEREST_ACCOUNT_FIELDSETS = [
 ];
 
 async function fetchAudience(source: 'pinterest_organic' | 'instagram', fieldSets: Array<{ name: string; fields: string[] }>, from: string, to: string): Promise<Audience> {
-  const r = await windsorOrganicRows(source, fieldSets, from, to);
+  const r = await windsorOrganicRows(source, fieldSets, from, to, source === 'pinterest_organic' ? 30000 : 20000);
   if (r.notConnected) return { status: 'not_connected', followers: null, followersStart: null, newFollowers: null };
   if (!r.rows) return { status: 'error', error: r.attempts.map(a => `${a.fieldSet}: ${a.error}`).join(' | '), followers: null, followersStart: null, newFollowers: null, attempts: r.attempts };
   // One row per day (collapse any per-post duplication by taking each day's max).
@@ -491,14 +540,23 @@ async function fetchAudience(source: 'pinterest_organic' | 'instagram', fieldSet
   };
 }
 
+// A block that fails or overruns reports its own error; the rest of the page still renders.
+function guarded<T>(p: Promise<T>, fallback: (err: string) => T, ceilingMs: number): Promise<T> {
+  return Promise.race<T>([
+    p.catch(e => fallback(e instanceof Error ? e.message : String(e))),
+    new Promise<T>(resolve => setTimeout(() => resolve(fallback(`took longer than ${Math.round(ceilingMs / 1000)}s`)), ceilingMs)),
+  ]);
+}
 export async function fetchOrganic(from: string, to: string): Promise<OrganicData> {
+  const errBlock = <T,>(err: string): SourceBlock<T> => ({ status: 'error', error: err, items: [], totals: {} });
+  const errAud = (err: string): Audience => ({ status: 'error', error: err, followers: null, followersStart: null, newFollowers: null });
   const [pinterest, instagram, blog, socialTraffic, pinAudience, igAudience] = await Promise.all([
-    fetchPinterestOrganic(from, to),
-    fetchInstagramOrganic(from, to),
-    fetchBlogPerformance(from, to),
-    fetchSocialTraffic(from, to),
-    fetchAudience('pinterest_organic', PINTEREST_ACCOUNT_FIELDSETS, from, to),
-    fetchAudience('instagram', INSTAGRAM_ACCOUNT_FIELDSETS, from, to),
+    guarded(fetchPinterestOrganic(from, to), errBlock<OrganicPost>, 70000),
+    guarded(fetchInstagramOrganic(from, to), errBlock<OrganicPost>, 45000),
+    guarded(fetchBlogPerformance(from, to), errBlock<BlogPost>, 45000),
+    guarded(fetchSocialTraffic(from, to), () => ({ Pinterest: { sessions: 0, cartAdds: 0, completed: 0 }, Instagram: { sessions: 0, cartAdds: 0, completed: 0 } }), 30000),
+    guarded(fetchAudience('pinterest_organic', PINTEREST_ACCOUNT_FIELDSETS, from, to), errAud, 40000),
+    guarded(fetchAudience('instagram', INSTAGRAM_ACCOUNT_FIELDSETS, from, to), errAud, 30000),
   ]);
   return { range: { from, to }, pinterest, instagram, blog, socialTraffic, audience: { Pinterest: pinAudience, Instagram: igAudience } };
 }

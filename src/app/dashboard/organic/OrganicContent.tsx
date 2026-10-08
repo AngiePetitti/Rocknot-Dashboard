@@ -138,7 +138,7 @@ export default function OrganicContent() {
     const p = new URLSearchParams({ tf: tfRaw });
     if (dateFrom) p.set('date_from', dateFrom);
     if (dateTo) p.set('date_to', dateTo);
-    fetch(`/api/organic?${p}`, { cache: 'no-store' }).then(r => r.json()).then(setData).catch(() => setData({ source: 'error', error: 'Failed to load' }));
+    fetch(`/api/organic?${p}`, { cache: 'no-store' }).then(r => r.json()).then(setData).catch(e => setData({ source: 'error', error: `The organic data request didn't complete (${e instanceof Error ? e.message : 'network'}). Reload to try again; each source now loads independently.` }));
   }, [tfRaw, dateFrom, dateTo]);
 
   const pin = data?.pinterest;
