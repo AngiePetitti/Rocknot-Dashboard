@@ -178,7 +178,7 @@ export default function OrganicContent() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mt-4 mb-6">
             <MetricCard title="Pin Impressions" accentColor="#e11d48"
               value={pin?.status === 'ok' ? n(pin.totals.impressions) : '—'}
-              subtitle={pin?.status === 'ok' ? `${n(pin.totals.saves)} saves · ${n(pin.totals.outboundClicks)} outbound clicks` : 'Pinterest Organic not connected'} />
+              subtitle={pin?.status === 'ok' ? `${n(pin.totals.saves)} saves · ${n(pin.totals.outboundClicks)} outbound clicks${pin.note ? ' · last 7 days only' : ''}` : pin?.status === 'error' ? (/timeout|aborted|budget/i.test(pin.error || '') ? "Pinterest's live feed timed out — see the Pinterest Pins section" : 'Pinterest feed error — see below') : 'Pinterest Organic not connected'} />
             <MetricCard title="Instagram Reach" accentColor="#d946ef"
               value={ig?.status === 'ok' ? n(ig.totals.reach || ig.totals.impressions) : '—'}
               subtitle={ig?.status === 'ok' ? `${n(ig.totals.likes)} likes · ${n(ig.totals.saves)} saves · ${n(ig.totals.comments)} comments` : 'Instagram Insights not connected'} />
