@@ -230,7 +230,21 @@ export async function fetchPinterestOrganicFromTable(from: string, to: string): 
 export async function fetchPinterestOrganic(from: string, to: string): Promise<SourceBlock<OrganicPost>> {
   const fromTable = await fetchPinterestOrganicFromTable(from, to);
   if (fromTable && fromTable.status === 'ok') return fromTable;
-  const r = await windsorOrganicRows('pinterest_organic', PINTEREST_ORGANIC_FIELDSETS, from, to);
+  let r = await windsorOrganicRows('pinterest_organic', PINTEREST_ORGANIC_FIELDSETS, from, to);
+  // Windsor's live Pinterest pull scales with the range; when a long range
+  // times out, fall back to the last 7 days so the tab still shows pins,
+  // labelled as such. The BigQuery task removes this limit entirely.
+  let shortened: string | null = null;
+  const timedOut = !r.rows && !r.notConnected && r.attempts.some(a => /timeout|aborted/i.test(a.error || ''));
+  if (timedOut) {
+    const days = Math.round((Date.parse(to) - Date.parse(from)) / 86400000);
+    if (days > 7) {
+      const shortFrom = new Date(Date.parse(to) - 6 * 86400000).toISOString().slice(0, 10);
+      const r7 = await windsorOrganicRows('pinterest_organic', PINTEREST_ORGANIC_FIELDSETS.slice(0, 2), shortFrom, to, 45000);
+      if (r7.rows) { r = r7; shortened = `Pinterest's live feed timed out for the full range, so this shows the last 7 days (${shortFrom} → ${to}). A Windsor → BigQuery task for Pinterest Organic removes this limit.`; }
+      else r.attempts.push(...r7.attempts.map(a => ({ ...a, fieldSet: `7d:${a.fieldSet}` })));
+    }
+  }
   if (r.notConnected) {
     // Windsor can't see a profile reached through Business Access; Pinterest's
     // own API can, acting through the client's ad account.
@@ -255,7 +269,7 @@ export async function fetchPinterestOrganic(from: string, to: string): Promise<S
     };
   }).filter(p => Object.values(p.metrics).some(x => x > 0))
     .sort((a, b) => b.metrics.impressions - a.metrics.impressions);
-  return { status: 'ok', items, totals: sumTotals(items, PINTEREST_METRICS), fieldSet: r.fieldSet || undefined };
+  return { status: 'ok', items, totals: sumTotals(items, PINTEREST_METRICS), fieldSet: r.fieldSet || undefined, ...(shortened ? { note: shortened } : {}) };
 }
 
 function pickImage(type: string, mediaUrl: string, thumbUrl: string): string {
