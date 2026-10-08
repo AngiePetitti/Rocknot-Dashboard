@@ -78,41 +78,44 @@ function SetupCard({ title, platform, isAdmin, block }: { title: string; platfor
 const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${n(Math.abs(v))}`;
 const PLATFORM_COLORS: Record<'Instagram' | 'Pinterest', string> = { Instagram: '#d946ef', Pinterest: '#e11d48' };
 
-/** One platform's column in the Audience card: followers, net change, and its other account/engagement numbers. */
+/** One platform's panel in the Audience card: followers, net change, and its other account/engagement numbers. */
 function AudienceColumn({ label, a, totals, rangeLabel }: { label: 'Instagram' | 'Pinterest'; a: Audience | undefined; totals: Record<string, number> | undefined; rangeLabel: string }) {
   const color = PLATFORM_COLORS[label];
-  const ok = a?.status === 'ok';
   const stats: Array<[string, number | undefined]> = label === 'Instagram'
-    ? [['Profile views', a?.profileViews], ['Website taps', a?.websiteClicks], ['Reach', totals?.reach || totals?.impressions], ['Likes', totals?.likes], ['Saves', totals?.saves], ['Comments', totals?.comments], ['Shares', totals?.shares]]
-    : [['Monthly views', a?.monthlyViews], ['Following', a?.following], ['Boards', a?.boards], ['Pins', a?.pins], ['Impressions', totals?.impressions], ['Saves', totals?.saves], ['Outbound clicks', totals?.outboundClicks]];
-  const shown = stats.filter(([, v]) => v != null && v > 0);
+    ? [['Views', totals?.views], ['Reach', totals?.reach || totals?.impressions], ['Likes', totals?.likes], ['Saves', totals?.saves], ['Comments', totals?.comments], ['Shares', totals?.shares], ['Profile views', a?.profileViews], ['Website taps', a?.websiteClicks]]
+    : [['Monthly views', a?.monthlyViews], ['Impressions', totals?.impressions], ['Saves', totals?.saves], ['Outbound clicks', totals?.outboundClicks], ['Pins', a?.pins], ['Boards', a?.boards], ['Following', a?.following]];
+  const shown = stats.filter(([, v]) => v != null && v > 0).slice(0, 8);
+  // A net change is only meaningful with more than one dated follower total.
+  const datedTotals = (a?.series || []).filter(pt => pt.followers != null).length;
+  const change = a?.status === 'ok' && a.newFollowers != null && (datedTotals > 1 || a.followers == null) ? a.newFollowers : null;
+  const state = !a || a.status === 'not_connected' ? 'Not connected yet' : a.status === 'error' ? 'Follower data unavailable right now' : null;
   return (
-    <div className="flex-1 min-w-[220px]">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: color }} />
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{label}</p>
+    <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: color }} />
+          <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{label}</p>
+        </div>
+        {change != null && (
+          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${change > 0 ? 'bg-green-50 text-green-600' : change < 0 ? 'bg-red-50 text-red-500' : 'bg-gray-100 text-gray-500'}`}>
+            {change > 0 ? '▲' : change < 0 ? '▼' : '•'} {signed(change)}{a?.followersStart ? ` · ${(Math.round((change / a.followersStart) * 1000) / 10).toFixed(1)}%` : ''} · {rangeLabel.toLowerCase()}
+          </span>
+        )}
       </div>
-      {!a || a.status === 'not_connected' ? (
-        <p className="text-sm text-gray-400 mt-1">Not connected yet</p>
-      ) : a.status === 'error' ? (
-        <p className="text-sm text-gray-400 mt-1">Follower data unavailable from this feed right now</p>
+      {state ? (
+        <p className="text-sm text-gray-400 mt-3">{state}</p>
       ) : (
         <>
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <p className="text-3xl font-bold text-gray-800 leading-none">{a.followers != null ? n(a.followers) : (a.newFollowers != null ? signed(a.newFollowers) : '—')}</p>
-            <p className="text-xs text-gray-400">{a.followers != null ? 'followers' : a.newFollowers != null ? `net new in ${rangeLabel.toLowerCase()}` : 'no follower field in this feed yet'}</p>
+          <div className="flex items-baseline gap-2 mt-2">
+            <p className="text-3xl font-bold text-gray-800 leading-none">{a!.followers != null ? n(a!.followers) : (a!.newFollowers != null ? signed(a!.newFollowers) : '—')}</p>
+            <p className="text-xs text-gray-400">{a!.followers != null ? 'followers' : a!.newFollowers != null ? `net new, ${rangeLabel.toLowerCase()}` : 'no follower field in this feed yet'}</p>
           </div>
-          {a.followers != null && a.newFollowers != null && (
-            <p className={`text-xs font-semibold mt-1 ${a.newFollowers > 0 ? 'text-green-500' : a.newFollowers < 0 ? 'text-red-500' : 'text-gray-400'}`}>
-              {a.newFollowers > 0 ? '▲' : a.newFollowers < 0 ? '▼' : '•'} {signed(a.newFollowers)} in {rangeLabel.toLowerCase()}{a.followersStart ? ` (${(Math.round((a.newFollowers / a.followersStart) * 1000) / 10).toFixed(1)}%)` : ''}
-            </p>
-          )}
           {shown.length > 0 && (
-            <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 mt-3">
+            <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2.5 mt-4 pt-3 border-t border-gray-100">
               {shown.map(([k, v]) => (
-                <div key={k}>
-                  <dt className="text-[10px] uppercase tracking-wider text-gray-400">{k}</dt>
-                  <dd className="text-sm font-semibold text-gray-700">{n(v)}</dd>
+                <div key={k} className="min-w-0">
+                  <dt className="text-[10px] uppercase tracking-wider text-gray-400 truncate">{k}</dt>
+                  <dd className="text-sm font-semibold text-gray-700 tabular-nums">{n(v)}</dd>
                 </div>
               ))}
             </dl>
@@ -241,9 +244,9 @@ export default function OrganicContent() {
             <Card className="mt-4 mb-6">
               <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
                 <h3 className="text-sm font-bold text-gray-800">Audience</h3>
-                <p className="text-[11px] text-gray-400">Followers as of the last day of the period · net change over {rangeLabel.toLowerCase()} · profile and engagement totals for the period</p>
+                <p className="text-[11px] text-gray-400">Followers as of the last day · engagement totals for {rangeLabel.toLowerCase()}</p>
               </div>
-              <div className="flex flex-wrap gap-6 md:gap-10">
+              <div className="grid gap-4 lg:grid-cols-2">
                 <AudienceColumn label="Instagram" a={data.audience.Instagram} totals={ig?.status === 'ok' ? ig.totals : undefined} rangeLabel={rangeLabel} />
                 <AudienceColumn label="Pinterest" a={data.audience.Pinterest} totals={pin?.status === 'ok' ? pin.totals : undefined} rangeLabel={rangeLabel} />
               </div>
@@ -257,7 +260,7 @@ export default function OrganicContent() {
               subtitle={pin?.status === 'ok' ? `${n(pin.totals.saves)} saves · ${n(pin.totals.outboundClicks)} outbound clicks${pin.note ? ' · last 7 days only' : ''}` : pin?.status === 'error' ? (/timeout|aborted|budget/i.test(pin.error || '') ? "Pinterest's live feed timed out — see the Pinterest Pins section" : 'Pinterest feed error — see below') : 'Pinterest Organic not connected'} />
             <MetricCard title="Instagram Reach" accentColor="#d946ef"
               value={ig?.status === 'ok' ? n(ig.totals.reach || ig.totals.impressions) : '—'}
-              subtitle={ig?.status === 'ok' ? `${n(ig.totals.likes)} likes · ${n(ig.totals.saves)} saves · ${n(ig.totals.comments)} comments` : 'Instagram Insights not connected'} />
+              subtitle={ig?.status === 'ok' ? `${n(ig.totals.views)} views · ${n(ig.totals.likes)} likes · ${n(ig.totals.saves)} saves · ${n(ig.totals.comments)} comments` : 'Instagram Insights not connected'} />
             <MetricCard title="Blog Sessions" accentColor="#34d399"
               value={blog?.status === 'ok' ? n(blog.totals.sessions) : '—'}
               subtitle={blog?.status === 'ok' ? `${n(blog.totals.articles)} articles (${n(blog.totals.articleSessions)} sessions) · incl. blog home & tag pages ${n(blog.totals.sessions)} · ${n(blog.totals.completed)} orders · ${pct(blog.totals.completed || 0, blog.totals.sessions || 0)} CVR` : 'Shopify not connected'} />
