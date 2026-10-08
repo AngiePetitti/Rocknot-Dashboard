@@ -154,6 +154,12 @@ export interface ClientProfile {
      * the COGS / contribution cards stay hidden until books are connected.
      */
     grossMarginPct: number | null;
+    /**
+     * The team's marketing budgeting Google Sheet (link-shared, read as CSV):
+     * one row per expense line, one column per month. Feeds the Overview's
+     * fully loaded profit / MER / CAC and Cleo's get_marketing_expenses.
+     */
+    expensesSheet: { id: string; tab: string; year: number } | null;
   };
   revenue: {
     /**
@@ -243,7 +249,7 @@ const ROCKNOT: ClientProfile = {
     metaAccountNameMode: 'exact',
     metaAccountIdDefault: '165092079662754',
   },
-  finance: { qbAccountMatch: 'rocknot', grossMarginPct: null }, // QuickBooks connected — booked months set the basis
+  finance: { qbAccountMatch: 'rocknot', grossMarginPct: null, expensesSheet: null }, // QuickBooks connected — booked months set the basis
   revenue: { includeReturnFees: false },
   windsor: {
     accounts: {
@@ -312,7 +318,11 @@ const KAILEEP: ClientProfile = {
     // 1-day view, reported on the ad-event date.
     pinterestAttribution: { clickWindowDays: 7, engagementWindowDays: 7, viewWindowDays: 1, conversionReportTime: 'TIME_OF_AD_ACTION' },
   },
-  finance: { qbAccountMatch: 'kailee', grossMarginPct: 89 }, // per Airin, Sep 2026: ~89% gross margin across the board
+  finance: {
+    qbAccountMatch: 'kailee', grossMarginPct: 89, // per Airin, Sep 2026: ~89% gross margin across the board
+    // "2026 Marketing Budgeting Sheet - SHOPIFY ONLY", tab FOR DASHBOARD (Oct 2026, per Angie).
+    expensesSheet: { id: '1Zl7XNRfsruSxyGoPDcTGPYr3z7Pabu4E5qYdnbQkjDg', tab: 'FOR DASHBOARD', year: 2026 },
+  },
   revenue: { includeReturnFees: true }, // Kailee P charges a return fee and keeps it
   windsor: {
     accounts: {

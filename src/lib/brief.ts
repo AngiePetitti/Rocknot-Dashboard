@@ -54,6 +54,8 @@ export interface BriefFacts {
   weekAds: { spend: Delta; purchases: Delta; revenue: Delta; byPlatform: Array<{ platform: string; spend: Delta; purchases: Delta; roas: Delta; clicks: Delta }> };
   /** The Overview's figures for the 7 completed days to yesterday vs the 7 before: total revenue, net sales, ad spend (net of credits) and MER. */
   weekRevenue: Delta; weekNetSales: Delta; weekSpend: Delta; weekMer: Delta;
+  /** Marketing costs beyond ad spend for the store week, from the budgeting sheet (prorated); null when no sheet. */
+  weekOtherMarketing: number | null;
   /** Month to date against the Goals tab. */
   mtd: { spend: number; adBudget: number | null; revenue: number; revenueGoal: number | null; dayOfMonth: number; daysInMonth: number } | null;
   /** The seven operating questions, answered by rule. */
@@ -245,6 +247,11 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
   const weekNetSales = delta(ovWeek ? (ovWeek.netSales ?? 0) : sumRange(week.from, week.to, 'net'), ovPrior ? (ovPrior.netSales ?? 0) : sumRange(priorWeek.from, priorWeek.to, 'net'));
   const weekSpend = delta(ovWeek ? (ovWeek.netAdSpend ?? ovWeek.totalAdSpend) : weekAds.spend.current, ovPrior ? (ovPrior.netAdSpend ?? ovPrior.totalAdSpend) : weekAds.spend.baseline);
   const weekMer = delta(ovWeek ? ovWeek.mer : (weekSpend.current > 0 ? weekNetSales.current / weekSpend.current : 0), ovPrior ? ovPrior.mer : (weekSpend.baseline > 0 ? weekNetSales.baseline / weekSpend.baseline : 0));
+  let weekOtherMarketing: number | null = null;
+  try {
+    const { expensesConfigured, fetchExpenseSheet, expensesForRange } = await import('@/src/lib/expenses');
+    if (expensesConfigured()) weekOtherMarketing = r2(expensesForRange(await fetchExpenseSheet(), week.from, week.to).nonAdMarketing);
+  } catch { weekOtherMarketing = null; }
   let mtd: BriefFacts['mtd'] = null;
   try {
     const monthStart = `${y.slice(0, 7)}-01`;
@@ -259,7 +266,7 @@ export async function computeFacts(date: string): Promise<BriefFacts> {
   const partial: Omit<BriefFacts, 'decisions'> = {
     date: y, weekday: new Date(`${y}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long' }),
     baseline: { kind: 'same weekday, prior 4 weeks', days: baselineDays }, week, priorWeek, adWeek, adPriorWeek,
-    revenue, netSales, orders, aov, sessions: sess, cvr, decomposition, devices, channels, spendYesterday, weekAds, weekRevenue, weekNetSales, weekSpend, weekMer, mtd, cac, googleBrand, products, notes,
+    revenue, netSales, orders, aov, sessions: sess, cvr, decomposition, devices, channels, spendYesterday, weekAds, weekRevenue, weekNetSales, weekSpend, weekMer, weekOtherMarketing, mtd, cac, googleBrand, products, notes,
   };
   const decisions = evaluateDecisions({ facts: { ...partial, decisions: [] }, weekRevenue, weekMer, mtd });
   return { ...partial, decisions };
@@ -358,7 +365,7 @@ Recommendation: ${b.recommendation}${b.watch ? `\nWatch: ${b.watch}` : ''}
 FACTS (yesterday vs same-weekday average of the prior 4 weeks): total revenue ${d(f.revenue, '$')} · net sales ${d(f.netSales, '$')} · orders ${d(f.orders)} · AOV ${d(f.aov, '$')} · sessions ${d(f.sessions)} · CVR ${d(f.cvr)}%${f.decomposition ? ` · revenue change from traffic ${f.decomposition.fromSessions}pp, conversion ${f.decomposition.fromCvr}pp, order value ${f.decomposition.fromAov}pp` : ''}
 Devices: ${f.devices.map(x => `${x.device} CVR ${d(x.cvr)}%`).join(' · ') || 'n/a'}
 Spend yesterday: ${d(f.spendYesterday.total, '$')} — ${f.spendYesterday.byPlatform.map(p => `${p.platform} ${d(p.spend, '$')}`).join(' · ')}
-Store week (${f.week.from} → ${f.week.to}, Overview figures) vs prior: total revenue ${d(f.weekRevenue, '$')} · net sales ${d(f.weekNetSales, '$')} · ad spend ${d(f.weekSpend, '$')} · MER ${d(f.weekMer)}x\nAd week (${f.adWeek.from} → ${f.adWeek.to}, settled) vs prior: platform spend ${d(f.weekAds.spend, '$')} · purchases ${d(f.weekAds.purchases)}${f.cac ? ` · blended nCAC ${d(f.cac.blended, '$')} · ${f.cac.byPlatform.map(p => `${p.platform} nCAC ${d(p.ncac, '$')}`).join(' · ')}` : ''}
+Store week (${f.week.from} → ${f.week.to}, Overview figures) vs prior: total revenue ${d(f.weekRevenue, '$')} · net sales ${d(f.weekNetSales, '$')} · ad spend ${d(f.weekSpend, '$')} · MER ${d(f.weekMer)}x${f.weekOtherMarketing != null ? ` · other marketing (sheet, prorated) $${Math.round(f.weekOtherMarketing).toLocaleString()} → fully loaded MER ${(f.weekSpend.current + f.weekOtherMarketing) > 0 ? (f.weekNetSales.current / (f.weekSpend.current + f.weekOtherMarketing)).toFixed(2) : 'n/a'}x` : ''}\nAd week (${f.adWeek.from} → ${f.adWeek.to}, settled) vs prior: platform spend ${d(f.weekAds.spend, '$')} · purchases ${d(f.weekAds.purchases)}${f.cac ? ` · blended nCAC ${d(f.cac.blended, '$')} · ${f.cac.byPlatform.map(p => `${p.platform} nCAC ${d(p.ncac, '$')}`).join(' · ')}` : ''}
 ${f.googleBrand ? `Google brand: spend ${d(f.googleBrand.brand.spend, '$')} · CPA ${d(f.googleBrand.brand.cpa, '$')} | non-brand: spend ${d(f.googleBrand.nonBrand.spend, '$')} · CPA ${d(f.googleBrand.nonBrand.cpa, '$')}` : ''}
 Products yesterday: ${f.products.slice(0, 5).map(p => `${p.title} $${p.revenue.toLocaleString()} (${p.shareYesterday}% of revenue vs ${p.share28d}% 28-day share)`).join(' · ')}`;
 }

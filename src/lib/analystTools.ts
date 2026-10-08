@@ -197,6 +197,11 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_marketing_expenses',
+    description: "Marketing EXPENSES beyond ad spend, from the team's marketing budgeting sheet: agency fees, influencer/PR, paid tools, email/SMS, platforms, content creation, photoshoots, SEO — by month, with the monthly budget, sales goal, actual sales, new customers and the prior year. Use for true profit / fully loaded MER or CAC / budget pacing questions. Ad-platform spend itself should come from get_ad_performance or get_metrics (live); the sheet's ad rows are the team's own entries. Optional date_from/date_to prorate the sheet onto that range.",
+    input_schema: { type: 'object', properties: { date_from: { type: 'string', description: 'YYYY-MM-DD (optional)' }, date_to: { type: 'string', description: 'YYYY-MM-DD (optional)' } } },
+  },
+  {
     name: 'get_goals',
     description: "The company's monthly revenue goals and ad-spend budgets (the Goals tab plan, including which months are pinned/manually set). Compare against get_metrics actuals to judge pace toward the annual target.",
     input_schema: { type: 'object', properties: {} },
@@ -596,6 +601,16 @@ BLOG ARTICLES (Shopify sessions that started on the article; blog home / tag pag
 ${blog.status !== 'ok' ? 'unavailable' : (blog.items.slice(0, 12).map(b => `- ${b.title}${b.kind && b.kind !== 'article' ? ` [${b.kind === 'index' ? 'blog home' : 'tag page'}]` : ''} (${b.publishedAt || 'date n/a'}): ${b.sessions} sessions · ${b.cartAdds} add-to-cart · ${b.completed} orders\n   image: ${b.imageUrl || 'none'}\n   link: ${b.url}`).join('\n') || 'no blog sessions') + `\nTotals: ${blog.totals.sessions || 0} sessions · ${blog.totals.completed || 0} orders · ${blog.totals.articles || 0} articles`}
 
 UNPAID SITE SESSIONS REFERRED BY: Pinterest ${st?.Pinterest?.sessions ?? 0} (${st?.Pinterest?.completed ?? 0} orders) · Instagram ${st?.Instagram?.sessions ?? 0} (${st?.Instagram?.completed ?? 0} orders). Many in-app taps hide the referrer, so this is a floor.`;
+  }
+
+  if (name === 'get_marketing_expenses') {
+    const { expensesConfigured, fetchExpenseSheet, expensesForRange, expensesText } = await import('@/src/lib/expenses');
+    if (!expensesConfigured()) return 'No marketing expenses sheet is connected for this client.';
+    try {
+      const sheet = await fetchExpenseSheet();
+      const range = DATE_RE.test(from) && DATE_RE.test(to) && from <= to ? expensesForRange(sheet, from, to) : null;
+      return expensesText(sheet, range);
+    } catch (e) { return `Marketing expenses sheet unavailable: ${e instanceof Error ? e.message : String(e)}`; }
   }
 
   if (name === 'get_goals') {

@@ -300,11 +300,35 @@ function pickImage(type: string, mediaUrl: string, thumbUrl: string): string {
   return mediaUrl || thumbUrl;
 }
 
+/** Always show at least this many Instagram posts: when the period holds fewer, older posts fill the grid (labelled). */
+export const INSTAGRAM_MIN_POSTS = 12;
+
 export async function fetchInstagramOrganic(from: string, to: string): Promise<SourceBlock<OrganicPost>> {
-  const r = await windsorOrganicRows('instagram', INSTAGRAM_FIELDSETS, from, to);
+  // The period's posts, plus (in parallel, so nothing waits) the 90 days
+  // before it — used only when the period has fewer than INSTAGRAM_MIN_POSTS.
+  const earlierFrom = new Date(Date.parse(from) - 90 * 86400000).toISOString().slice(0, 10);
+  const earlierTo = new Date(Date.parse(from) - 86400000).toISOString().slice(0, 10);
+  const [r, earlier] = await Promise.all([
+    windsorOrganicRows('instagram', INSTAGRAM_FIELDSETS, from, to),
+    windsorOrganicRows('instagram', INSTAGRAM_FIELDSETS.slice(0, 1), earlierFrom, earlierTo, 25000).catch(() => null),
+  ]);
   if (r.notConnected) return { status: 'not_connected', items: [], totals: {} };
   if (!r.rows) return { status: 'error', error: r.attempts.map(a => `${a.fieldSet}: ${a.error}`).join(' | '), items: [], totals: {} };
-  const rolled = rollUp(r.rows, 'media_id', ['media_reach', 'media_impressions', 'media_like_count', 'media_comments_count', 'media_saved', 'media_shares', 'media_views']);
+  const inRange = instagramItems(r.rows);
+  if (inRange.length >= INSTAGRAM_MIN_POSTS || !earlier?.rows?.length) return { status: 'ok', items: inRange, totals: sumTotals(inRange, INSTAGRAM_METRICS), fieldSet: r.fieldSet || undefined };
+  const seen = new Set(inRange.map(p => p.id));
+  const older = instagramItems(earlier.rows).filter(p => !seen.has(p.id)).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, INSTAGRAM_MIN_POSTS - inRange.length);
+  const items = [...inRange, ...older];
+  return {
+    status: 'ok', items, totals: sumTotals(inRange, INSTAGRAM_METRICS), fieldSet: r.fieldSet || undefined,
+    note: inRange.length === 0
+      ? `No posts were published in this period; showing the ${older.length} most recent posts before it. Totals above cover the period only.`
+      : `${inRange.length} post${inRange.length === 1 ? '' : 's'} published in this period; ${older.length} earlier post${older.length === 1 ? '' : 's'} added so the ${INSTAGRAM_MIN_POSTS} most recent show. Totals above cover the period only.`,
+  };
+}
+
+function instagramItems(rows: Array<Record<string, unknown>>): OrganicPost[] {
+  const rolled = rollUp(rows, 'media_id', ['media_reach', 'media_impressions', 'media_like_count', 'media_comments_count', 'media_saved', 'media_shares', 'media_views']);
   const items: OrganicPost[] = Array.from(rolled.entries()).map(([id, v]) => {
     const last = v.rows[v.rows.length - 1];
     const type = str(last.media_type);
@@ -325,7 +349,7 @@ export async function fetchInstagramOrganic(from: string, to: string): Promise<S
     };
   }).filter(p => Object.values(p.metrics).some(x => x > 0))
     .sort((a, b) => (b.metrics.reach || b.metrics.impressions) - (a.metrics.reach || a.metrics.impressions));
-  return { status: 'ok', items, totals: sumTotals(items, INSTAGRAM_METRICS), fieldSet: r.fieldSet || undefined };
+  return items;
 }
 
 // ── Blog ──────────────────────────────────────────────────────────────────

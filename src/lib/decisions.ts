@@ -135,13 +135,16 @@ export function evaluateDecisions(inp: DecisionInputs): Decision[] {
     // The Overview's net sales and (credit-adjusted) spend for the 7 completed days to yesterday.
     const weekNet = f.weekNetSales.current;
     const weekSpendNow = f.weekSpend.current;
+    const other = f.weekOtherMarketing ?? 0;
     if (marginPct != null && weekNet > 0) {
-      const contrib = weekNet * (marginPct / 100) - weekSpendNow;
+      const contrib = weekNet * (marginPct / 100) - weekSpendNow - other;
       const cm = (contrib / weekNet) * 100;
       const pace = mtd && mtd.revenueGoal ? ` MTD revenue ${fmt$(mtd.revenue)} vs ${fmt$(mtd.revenueGoal * (mtd.dayOfMonth / mtd.daysInMonth))} expected by day ${mtd.dayOfMonth} of a ${fmt$(mtd.revenueGoal)} goal.` : '';
       const budget = mtd && mtd.adBudget ? ` Ad spend ${fmt$(mtd.spend)} of a ${fmt$(mtd.adBudget)} budget (${((mtd.spend / mtd.adBudget) * 100).toFixed(0)}% used, ${((mtd.dayOfMonth / mtd.daysInMonth) * 100).toFixed(0)}% of the month gone).` : '';
-      out.push({ key: 'profit', question: 'Are we actually profitable?', verdict: cm >= 20 ? 'fine' : cm >= 0 ? 'hold' : 'investigate', rule: `Contribution = net revenue × ${marginPct}% gross margin − ad spend (marketing overhead not yet connected)`,
-        reason: `7 days to ${f.week.to}: ${fmt$(contrib)} contribution on ${fmt$(weekNet)} net sales (${cm.toFixed(0)}% after COGS and ${fmt$(weekSpendNow)} ad spend; MER ${weekMer.current.toFixed(2)}x vs ${g.targetMer}x goal).${pace}${budget} Fixed marketing costs are not in this number yet.` });
+      const loaded = f.weekOtherMarketing != null;
+      out.push({ key: 'profit', question: 'Are we actually profitable?', verdict: cm >= 20 ? 'fine' : cm >= 0 ? 'hold' : 'investigate',
+        rule: loaded ? `Contribution = net revenue × ${marginPct}% gross margin − ad spend − other marketing (budgeting sheet, prorated)` : `Contribution = net revenue × ${marginPct}% gross margin − ad spend (marketing overhead not yet connected)`,
+        reason: `7 days to ${f.week.to}: ${fmt$(contrib)} contribution on ${fmt$(weekNet)} net sales (${cm.toFixed(0)}% after COGS, ${fmt$(weekSpendNow)} ad spend${loaded ? ` and ${fmt$(other)} other marketing` : ''}; MER ${weekMer.current.toFixed(2)}x vs ${g.targetMer}x goal${loaded && weekSpendNow + other > 0 ? `, fully loaded ${(weekNet / (weekSpendNow + other)).toFixed(2)}x` : ''}).${pace}${budget}${loaded ? ' Rent, non-marketing payroll and other overhead are not in this number.' : ' Fixed marketing costs are not in this number yet.'}` });
     } else {
       out.push({ key: 'profit', question: 'Are we actually profitable?', verdict: 'unknown', rule: 'Contribution after COGS and ad spend', reason: 'Needs a gross margin on the profile and a week of net sales.' });
     }
