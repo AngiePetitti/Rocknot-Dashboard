@@ -140,6 +140,7 @@ export async function windsorOrganicRows(
 // references. Media/identity fields first; metrics-only fallbacks after.
 export const PINTEREST_ORGANIC_FIELDSETS = [
   { name: 'full', fields: ['date', 'pin_id', 'pin_title', 'pin_description', 'pin_permalink', 'pin_media_image_url', 'pin_board_name', 'pin_created_at', 'pin_impression', 'save', 'pin_click', 'pin_outbound_click'] },
+  { name: 'pin_prefixed', fields: ['date', 'pin_id', 'pin_title', 'pin_description', 'pin_link', 'pin_media_image_url', 'pin_board_name', 'pin_created_at', 'pin_impression', 'pin_save', 'pin_pin_click', 'pin_outbound_click'] },
   { name: 'alt_names', fields: ['date', 'pin_id', 'pin_title', 'pin_description', 'pin_link', 'pin_media_image_url', 'pin_board_name', 'pin_created_at', 'impression', 'pin_save', 'pin_click', 'outbound_click'] },
   { name: 'no_media', fields: ['date', 'pin_id', 'pin_title', 'pin_permalink', 'pin_created_at', 'pin_impression', 'save', 'pin_click', 'pin_outbound_click'] },
   { name: 'minimal', fields: ['date', 'pin_id', 'pin_title', 'pin_impression', 'pin_click'] },
@@ -197,7 +198,7 @@ const PIN_TABLE_ALTS: Record<string, string[]> = {
   pin_permalink: ['pin_permalink', 'pin_link', 'link', 'url'], pin_media_image_url: ['pin_media_image_url', 'media_image_url', 'image_url'],
   pin_board_name: ['pin_board_name', 'board_name'], pin_created_at: ['pin_created_at', 'created_at'],
   impressions: ['pin_impression', 'impression', 'impressions'], saves: ['save', 'pin_save', 'saves'],
-  pinClicks: ['pin_click', 'pin_clicks', 'click'], outboundClicks: ['pin_outbound_click', 'outbound_click', 'outbound_clicks'],
+  pinClicks: ['pin_click', 'pin_pin_click', 'pin_clicks', 'click'], outboundClicks: ['pin_outbound_click', 'outbound_click', 'outbound_clicks'],
 };
 export async function fetchPinterestOrganicFromTable(from: string, to: string): Promise<SourceBlock<OrganicPost> | null> {
   if (!isBigQueryConfigured() || !(await tableExists('pinterest_organic'))) return null;
@@ -255,7 +256,7 @@ export async function fetchPinterestOrganic(from: string, to: string): Promise<S
     return { status: 'ok', items: d.items, totals: sumTotals(d.items, PINTEREST_METRICS), fieldSet: 'pinterest_api', ...(d.note ? { note: d.note } : {}) };
   }
   if (!r.rows) return { status: 'error', error: r.attempts.map(a => `${a.fieldSet}: ${a.error}`).join(' | '), items: [], totals: {} };
-  const rolled = rollUp(r.rows, 'pin_id', ['pin_impression', 'impression', 'save', 'pin_save', 'pin_click', 'pin_outbound_click', 'outbound_click']);
+  const rolled = rollUp(r.rows, 'pin_id', ['pin_impression', 'impression', 'save', 'pin_save', 'pin_click', 'pin_pin_click', 'pin_outbound_click', 'outbound_click']);
   const items: OrganicPost[] = Array.from(rolled.entries()).map(([id, v]) => {
     const last = v.rows[v.rows.length - 1];
     return {
@@ -265,7 +266,7 @@ export async function fetchPinterestOrganic(from: string, to: string): Promise<S
       url: str(last.pin_permalink) || str(last.pin_link) || `https://www.pinterest.com/pin/${id}/`,
       publishedAt: str(last.pin_created_at).slice(0, 10),
       group: str(last.pin_board_name),
-      metrics: { impressions: v.metrics.pin_impression || v.metrics.impression || 0, saves: v.metrics.save || v.metrics.pin_save || 0, pinClicks: v.metrics.pin_click || 0, outboundClicks: v.metrics.pin_outbound_click || v.metrics.outbound_click || 0 },
+      metrics: { impressions: v.metrics.pin_impression || v.metrics.impression || 0, saves: v.metrics.save || v.metrics.pin_save || 0, pinClicks: v.metrics.pin_click || v.metrics.pin_pin_click || 0, outboundClicks: v.metrics.pin_outbound_click || v.metrics.outbound_click || 0 },
     };
   }).filter(p => Object.values(p.metrics).some(x => x > 0))
     .sort((a, b) => b.metrics.impressions - a.metrics.impressions);
@@ -508,12 +509,16 @@ export async function fetchSocialTraffic(from: string, to: string): Promise<Reco
 // Account-level (not per-post) fields. Graded like the post sets: the first
 // set Windsor accepts wins; /api/debug/organic shows the attempts.
 export const INSTAGRAM_ACCOUNT_FIELDSETS = [
-  { name: 'full', fields: ['date', 'followers_count', 'follower_count', 'profile_views', 'website_clicks'] },
+  // Windsor names: followers_count (total), follower_count (new per day), profile_views_1d, website_clicks_1d.
+  { name: 'full', fields: ['date', 'followers_count', 'follower_count', 'profile_views_1d', 'website_clicks_1d'] },
   { name: 'followers', fields: ['date', 'followers_count', 'follower_count'] },
   { name: 'count_only', fields: ['date', 'followers_count'] },
   { name: 'daily_only', fields: ['date', 'follower_count'] },
 ];
 export const PINTEREST_ACCOUNT_FIELDSETS = [
+  // Windsor's Pinterest Organic account fields are prefixed "account_" (its UI
+  // lists "Account follower count" etc.); the unprefixed names came back null.
+  { name: 'account_prefixed', fields: ['date', 'account_follower_count', 'account_following_count', 'account_board_count', 'account_monthly_views', 'account_pin_count'] },
   { name: 'full', fields: ['date', 'followers', 'following', 'pin_count', 'board_count', 'monthly_views'] },
   { name: 'followers', fields: ['date', 'followers'] },
   { name: 'alt', fields: ['date', 'follower_count'] },
@@ -526,7 +531,7 @@ async function fetchAudience(source: 'pinterest_organic' | 'instagram', fieldSet
   if (!r.rows) return { status: 'error', error: r.attempts.map(a => `${a.fieldSet}: ${a.error}`).join(' | '), followers: null, followersStart: null, newFollowers: null, attempts: r.attempts };
   // One row per day (collapse any per-post duplication by taking each day's max).
   const byDay = new Map<string, Record<string, number>>();
-  const keys = ['followers_count', 'followers', 'follower_count', 'user_followers', 'profile_views', 'website_clicks', 'following', 'pin_count', 'board_count', 'monthly_views'];
+  const keys = ['followers_count', 'followers', 'follower_count', 'user_followers', 'account_follower_count', 'profile_views', 'profile_views_1d', 'website_clicks', 'website_clicks_1d', 'following', 'account_following_count', 'pin_count', 'board_count', 'monthly_views', 'account_monthly_views'];
   for (const row of r.rows) {
     const d = str(row.date).slice(0, 10);
     if (!d) continue;
@@ -536,7 +541,7 @@ async function fetchAudience(source: 'pinterest_organic' | 'instagram', fieldSet
   }
   const days = Array.from(byDay.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([, v]) => v);
   if (!days.length) return { status: 'ok', followers: null, followersStart: null, newFollowers: null, fieldSet: r.fieldSet || undefined, attempts: r.attempts };
-  const totalKey = ['followers_count', 'followers', 'user_followers'].find(k => days.some(d => d[k] != null));
+  const totalKey = ['followers_count', 'followers', 'user_followers', 'account_follower_count'].find(k => days.some(d => d[k] != null));
   const hasDaily = days.some(d => d.follower_count != null);
   // Instagram's follower_count is NEW followers per day; on Pinterest a
   // follower_count field would be a running total, so only sum it for Instagram.
@@ -549,7 +554,7 @@ async function fetchAudience(source: 'pinterest_organic' | 'instagram', fieldSet
   const sum = (k: string) => (days.some(d => d[k] != null) ? days.reduce((s, d) => s + (d[k] || 0), 0) : undefined);
   return {
     status: 'ok', followers: last, followersStart: first, newFollowers,
-    profileViews: sum('profile_views'), websiteClicks: sum('website_clicks'),
+    profileViews: sum('profile_views') ?? sum('profile_views_1d'), websiteClicks: sum('website_clicks') ?? sum('website_clicks_1d'),
     fieldSet: r.fieldSet || undefined, attempts: r.attempts,
   };
 }
