@@ -59,6 +59,18 @@ export interface OrganicData {
   audience: Record<OrganicPlatform, Audience>;
 }
 
+/** One day of account-level audience data (for the follower growth chart). */
+export interface AudiencePoint {
+  date: string;
+  /** Running follower total that day (null when the feed only reports daily new followers). */
+  followers: number | null;
+  /** Net new followers that day (reported by the feed, or the day-over-day change in the total). */
+  newFollowers: number | null;
+  profileViews?: number;
+  websiteClicks?: number;
+  monthlyViews?: number;
+}
+
 /** Account-level audience for a platform over the range. */
 export interface Audience {
   status: 'ok' | 'not_connected' | 'error';
@@ -71,6 +83,13 @@ export interface Audience {
   newFollowers: number | null;
   profileViews?: number;
   websiteClicks?: number;
+  /** Pinterest: accounts followed, boards, pins and the rolling 30-day "monthly views" as of the last day. */
+  following?: number;
+  boards?: number;
+  pins?: number;
+  monthlyViews?: number;
+  /** Daily points over the range, oldest first (empty when the feed has no dated rows). */
+  series: AudiencePoint[];
   fieldSet?: string;
   attempts?: WindsorAttempt[];
 }
@@ -527,38 +546,90 @@ export const PINTEREST_ACCOUNT_FIELDSETS = [
   { name: 'alt2', fields: ['date', 'user_followers'] },
 ];
 
-async function fetchAudience(source: 'pinterest_organic' | 'instagram', fieldSets: Array<{ name: string; fields: string[] }>, from: string, to: string): Promise<Audience> {
-  const r = await windsorOrganicRows(source, fieldSets, from, to, source === 'pinterest_organic' ? 30000 : 20000);
-  if (r.notConnected) return { status: 'not_connected', followers: null, followersStart: null, newFollowers: null };
-  if (!r.rows) return { status: 'error', error: r.attempts.map(a => `${a.fieldSet}: ${a.error}`).join(' | '), followers: null, followersStart: null, newFollowers: null, attempts: r.attempts };
+const EMPTY_AUD = (): Pick<Audience, 'followers' | 'followersStart' | 'newFollowers' | 'series'> => ({ followers: null, followersStart: null, newFollowers: null, series: [] });
+
+// Field names the audience reader understands, from any of the feeds
+// (Windsor live Instagram, Windsor live Pinterest, the pinterest_organic table).
+const AUD_KEYS = ['followers_count', 'followers', 'follower_count', 'user_followers', 'account_follower_count', 'profile_views', 'profile_views_1d', 'website_clicks', 'website_clicks_1d', 'following', 'account_following_count', 'pin_count', 'account_pin_count', 'board_count', 'account_board_count', 'monthly_views', 'account_monthly_views'];
+
+/** Collapse dated rows (one per day, or one per post per day) into the Audience shape. */
+function audienceFromRows(source: 'pinterest_organic' | 'instagram', rows: Array<Record<string, unknown>>, meta: { fieldSet?: string; attempts?: WindsorAttempt[] }): Audience {
   // One row per day (collapse any per-post duplication by taking each day's max).
   const byDay = new Map<string, Record<string, number>>();
-  const keys = ['followers_count', 'followers', 'follower_count', 'user_followers', 'account_follower_count', 'profile_views', 'profile_views_1d', 'website_clicks', 'website_clicks_1d', 'following', 'account_following_count', 'pin_count', 'board_count', 'monthly_views', 'account_monthly_views'];
-  for (const row of r.rows) {
+  for (const row of rows) {
     const d = str(row.date).slice(0, 10);
     if (!d) continue;
     const cur = byDay.get(d) || {};
-    for (const k of keys) if (row[k] != null && row[k] !== '') cur[k] = Math.max(cur[k] ?? 0, num(row[k]));
+    for (const k of AUD_KEYS) if (row[k] != null && row[k] !== '') cur[k] = Math.max(cur[k] ?? 0, num(row[k]));
     byDay.set(d, cur);
   }
-  const days = Array.from(byDay.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([, v]) => v);
-  if (!days.length) return { status: 'ok', followers: null, followersStart: null, newFollowers: null, fieldSet: r.fieldSet || undefined, attempts: r.attempts };
+  const dated = Array.from(byDay.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  const days = dated.map(([, v]) => v);
+  if (!days.length) return { status: 'ok', ...EMPTY_AUD(), fieldSet: meta.fieldSet, attempts: meta.attempts };
   const totalKey = ['followers_count', 'followers', 'user_followers', 'account_follower_count'].find(k => days.some(d => d[k] != null));
   const hasDaily = days.some(d => d.follower_count != null);
   // Instagram's follower_count is NEW followers per day; on Pinterest a
   // follower_count field would be a running total, so only sum it for Instagram.
-  const dailyKey = hasDaily && (source === 'instagram' || !totalKey) ? 'follower_count' : null;
+  const dailyKey = hasDaily && source === 'instagram' ? 'follower_count' : null;
   const withTotal = totalKey ? days.filter(d => d[totalKey] != null) : [];
   const last = withTotal.length ? withTotal[withTotal.length - 1][totalKey!] : (!totalKey && hasDaily && source !== 'instagram' ? days[days.length - 1].follower_count ?? null : null);
   const first = withTotal.length ? withTotal[0][totalKey!] : null;
-  const dailySum = dailyKey && source === 'instagram' ? days.reduce((s, d) => s + (d[dailyKey] || 0), 0) : null;
+  const dailySum = dailyKey ? days.reduce((s, d) => s + (d[dailyKey] || 0), 0) : null;
   const newFollowers = dailySum != null ? dailySum : (last != null && first != null ? last - first : null);
   const sum = (k: string) => (days.some(d => d[k] != null) ? days.reduce((s, d) => s + (d[k] || 0), 0) : undefined);
+  const latest = (...ks: string[]) => { for (const k of ks) { const v = [...days].reverse().find(d => d[k] != null)?.[k]; if (v != null) return v; } return undefined; };
+  // Daily series: running total where the feed has one; daily net new from the
+  // feed, or the day-over-day change in the total (first day has no prior).
+  let prevTotal: number | null = null;
+  const series: AudiencePoint[] = dated.map(([date, d]) => {
+    const total = totalKey && d[totalKey] != null ? d[totalKey] : (source !== 'instagram' && !totalKey && d.follower_count != null ? d.follower_count : null);
+    const fromFeed = dailyKey && d[dailyKey] != null ? d[dailyKey] : null;
+    const delta = fromFeed != null ? fromFeed : (total != null && prevTotal != null ? total - prevTotal : null);
+    if (total != null) prevTotal = total;
+    const pv = d.profile_views ?? d.profile_views_1d; const wc = d.website_clicks ?? d.website_clicks_1d; const mv = d.account_monthly_views ?? d.monthly_views;
+    return { date, followers: total, newFollowers: delta, ...(pv != null ? { profileViews: pv } : {}), ...(wc != null ? { websiteClicks: wc } : {}), ...(mv != null ? { monthlyViews: mv } : {}) };
+  });
   return {
     status: 'ok', followers: last, followersStart: first, newFollowers,
     profileViews: sum('profile_views') ?? sum('profile_views_1d'), websiteClicks: sum('website_clicks') ?? sum('website_clicks_1d'),
-    fieldSet: r.fieldSet || undefined, attempts: r.attempts,
+    following: latest('account_following_count', 'following'), boards: latest('account_board_count', 'board_count'),
+    pins: latest('account_pin_count', 'pin_count'), monthlyViews: latest('account_monthly_views', 'monthly_views'),
+    series, fieldSet: meta.fieldSet, attempts: meta.attempts,
   };
+}
+
+async function fetchAudience(source: 'pinterest_organic' | 'instagram', fieldSets: Array<{ name: string; fields: string[] }>, from: string, to: string): Promise<Audience> {
+  const r = await windsorOrganicRows(source, fieldSets, from, to, source === 'pinterest_organic' ? 30000 : 20000);
+  if (r.notConnected) return { status: 'not_connected', ...EMPTY_AUD() };
+  if (!r.rows) return { status: 'error', error: r.attempts.map(a => `${a.fieldSet}: ${a.error}`).join(' | '), ...EMPTY_AUD(), attempts: r.attempts };
+  return audienceFromRows(source, r.rows, { fieldSet: r.fieldSet || undefined, attempts: r.attempts });
+}
+
+// Account columns the Windsor → BigQuery task can carry for Pinterest Organic
+// (ticked as "Account follower count" etc. in the task form). Read from the
+// table when present: instant, and no live pull from Pinterest.
+const PIN_TABLE_ACCOUNT_COLS = ['account_follower_count', 'account_following_count', 'account_board_count', 'account_pin_count', 'account_monthly_views', 'followers', 'follower_count', 'following', 'board_count', 'pin_count', 'monthly_views'];
+async function fetchPinterestAudienceFromTable(from: string, to: string): Promise<Audience | null> {
+  if (!isBigQueryConfigured() || !(await tableExists('pinterest_organic'))) return null;
+  try {
+    const ds = getDataset();
+    const cols = await runQuery<{ column_name: string }>(`SELECT column_name FROM \`${ds}.INFORMATION_SCHEMA.COLUMNS\` WHERE table_name = 'pinterest_organic'`);
+    const have = new Set(cols.map(c => c.column_name));
+    const use = PIN_TABLE_ACCOUNT_COLS.filter(c => have.has(c));
+    if (!use.length || !have.has('date')) return null;
+    // Account totals repeat on every pin row for the day, so MAX per day is the day's value.
+    const rows = await runQuery<Record<string, unknown>>(`SELECT CAST(date AS STRING) AS date, ${use.map(c => `MAX(SAFE_CAST(${c} AS FLOAT64)) AS ${c}`).join(', ')} FROM \`${ds}.pinterest_organic\` WHERE DATE(date) BETWEEN @from AND @to GROUP BY date ORDER BY date`, { from, to });
+    if (!rows.length) return null;
+    const a = audienceFromRows('pinterest_organic', rows, { fieldSet: 'bigquery:pinterest_organic' });
+    return a.followers != null || a.newFollowers != null ? a : null;
+  } catch {
+    return null;
+  }
+}
+async function fetchPinterestAudience(from: string, to: string): Promise<Audience> {
+  const fromTable = await fetchPinterestAudienceFromTable(from, to);
+  if (fromTable) return fromTable;
+  return fetchAudience('pinterest_organic', PINTEREST_ACCOUNT_FIELDSETS, from, to);
 }
 
 // A block that fails or overruns reports its own error; the rest of the page still renders.
@@ -570,13 +641,13 @@ function guarded<T>(p: Promise<T>, fallback: (err: string) => T, ceilingMs: numb
 }
 export async function fetchOrganic(from: string, to: string): Promise<OrganicData> {
   const errBlock = <T,>(err: string): SourceBlock<T> => ({ status: 'error', error: err, items: [], totals: {} });
-  const errAud = (err: string): Audience => ({ status: 'error', error: err, followers: null, followersStart: null, newFollowers: null });
+  const errAud = (err: string): Audience => ({ status: 'error', error: err, ...EMPTY_AUD() });
   const [pinterest, instagram, blog, socialTraffic, pinAudience, igAudience] = await Promise.all([
     guarded(fetchPinterestOrganic(from, to), errBlock<OrganicPost>, 70000),
     guarded(fetchInstagramOrganic(from, to), errBlock<OrganicPost>, 45000),
     guarded(fetchBlogPerformance(from, to), errBlock<BlogPost>, 45000),
     guarded(fetchSocialTraffic(from, to), () => ({ Pinterest: { sessions: 0, cartAdds: 0, completed: 0 }, Instagram: { sessions: 0, cartAdds: 0, completed: 0 } }), 30000),
-    guarded(fetchAudience('pinterest_organic', PINTEREST_ACCOUNT_FIELDSETS, from, to), errAud, 40000),
+    guarded(fetchPinterestAudience(from, to), errAud, 40000),
     guarded(fetchAudience('instagram', INSTAGRAM_ACCOUNT_FIELDSETS, from, to), errAud, 30000),
   ]);
   return { range: { from, to }, pinterest, instagram, blog, socialTraffic, audience: { Pinterest: pinAudience, Instagram: igAudience } };

@@ -560,17 +560,29 @@ ${series}`;
     const postLines = (platform: string, b: Block, keys: string[]) => b.status !== 'ok'
       ? (b.status === 'not_connected' ? 'not connected in Windsor yet' : `error: ${b.error}`)
       : (b.items.slice(0, 12).map(p => `- ${p.title}${p.group ? ` [${p.group}]` : ''}${p.publishedAt ? ` (${p.publishedAt})` : ''}: ${m(p.metrics, keys)}\n   image: ${postImg(platform, p)}\n   link: ${p.url || 'n/a'}`).join('\n') || 'no activity') + `\nTotals: ${m(b.totals, keys)}`;
-    const aud = (d.audience || {}) as Record<string, { status: string; followers: number | null; followersStart: number | null; newFollowers: number | null; profileViews?: number; websiteClicks?: number }>;
+    type Pt = { date: string; followers: number | null; newFollowers: number | null };
+    const aud = (d.audience || {}) as Record<string, { status: string; followers: number | null; followersStart: number | null; newFollowers: number | null; profileViews?: number; websiteClicks?: number; following?: number; boards?: number; pins?: number; monthlyViews?: number; series?: Pt[] }>;
+    const k = (v: number) => Math.round(v).toLocaleString();
+    const sg = (v: number) => `${v > 0 ? '+' : v < 0 ? '-' : ''}${k(Math.abs(v))}`;
     const audLine = (label: string) => {
       const a = aud[label];
       if (!a) return `${label}: n/a`;
       if (a.status !== 'ok') return `${label}: ${a.status === 'not_connected' ? 'not connected' : 'unavailable'}`;
-      const parts = [a.followers != null ? `${Math.round(a.followers).toLocaleString()} followers` : '', a.newFollowers != null ? `${a.newFollowers >= 0 ? '+' : ''}${Math.round(a.newFollowers).toLocaleString()} net new in range${a.followersStart != null ? ` (from ${Math.round(a.followersStart).toLocaleString()})` : ''}` : '', a.profileViews != null ? `${Math.round(a.profileViews).toLocaleString()} profile views` : '', a.websiteClicks != null ? `${Math.round(a.websiteClicks).toLocaleString()} website taps` : ''].filter(Boolean);
-      return `${label}: ${parts.join(' · ') || 'no follower fields in the feed'}`;
+      const parts = [a.followers != null ? `${k(a.followers)} followers` : '', a.newFollowers != null ? `${sg(a.newFollowers)} net new in range${a.followersStart != null ? ` (from ${k(a.followersStart)}${a.followersStart ? `, ${(Math.round((a.newFollowers / a.followersStart) * 1000) / 10).toFixed(1)}%` : ''})` : ''}` : '',
+        a.profileViews != null ? `${k(a.profileViews)} profile views` : '', a.websiteClicks != null ? `${k(a.websiteClicks)} website taps` : '',
+        a.monthlyViews != null ? `${k(a.monthlyViews)} monthly views` : '', a.following != null ? `following ${k(a.following)}` : '', a.boards != null ? `${k(a.boards)} boards` : '', a.pins != null ? `${k(a.pins)} pins` : ''].filter(Boolean);
+      const s = (a.series || []).filter(p => p.newFollowers != null);
+      let growth = '';
+      if (s.length > 1) {
+        const best = s.reduce((b, p) => (p.newFollowers! > b.newFollowers! ? p : b)); const worst = s.reduce((b, p) => (p.newFollowers! < b.newFollowers! ? p : b));
+        const down = s.filter(p => p.newFollowers! < 0).length; const net = s.reduce((t, p) => t + p.newFollowers!, 0);
+        growth = `\n   growth day by day: ${net > 0 ? 'growing' : net < 0 ? 'shrinking' : 'flat'} · avg ${(net / s.length).toFixed(1)}/day over ${s.length} days · best day ${best.date} (${sg(best.newFollowers!)}) · worst day ${worst.date} (${sg(worst.newFollowers!)}) · ${down} days lost followers`;
+      }
+      return `${label}: ${parts.join(' · ') || 'no follower fields in the feed'}${growth}`;
     };
     return `Organic content ${from} → ${to}. Each post has an \`image\` URL (its real thumbnail — embed with <img> when a visual is wanted) and a \`link\`.
 
-AUDIENCE (followers, account level):
+AUDIENCE (account level — followers are as of the last day of the range; profile views / website taps / engagement are period totals):
 ${audLine('Instagram')}
 ${audLine('Pinterest')}
 
