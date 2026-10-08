@@ -29,6 +29,10 @@ export interface ChannelData {
   byRegion: ChannelBreakdownRow[];
   economics: {
     commissionPct: number | null; commission: number | null;
+    /** Partner's per-return charge and the returns it was applied to. */
+    returnFee: number | null; returnCount: number | null; returnCharges: number | null;
+    /** 'items' = Shopify's returned item quantity; 'estimated' = return dollars ÷ average gross per order. */
+    returnCountBasis: 'items' | 'estimated' | null;
     cogsPct: number | null; cogs: number | null;
     contribution: number | null; contributionPct: number | null;
   };
@@ -52,6 +56,19 @@ const breakdown = (labelKey: string) => (rows: Row[]): ChannelBreakdownRow[] => 
 
 export function channelConfigured(): boolean { return trafficConfigured(); }
 
+// Returned item count for the channel: Shopify's sales schema names it
+// quantity_returned (paired with quantity_ordered); older schema versions used
+// returned_item_quantity. Either failing just means the count is estimated.
+async function returnedQuantity(where: string, range: string): Promise<number | null> {
+  for (const f of ['quantity_returned', 'returned_item_quantity']) {
+    try {
+      const rows = await shopifyql(`FROM sales SHOW ${f} ${where} ${range}`);
+      if (rows.length && rows[0]?.[f] != null) return Math.abs(Math.round(num(rows[0][f])));
+    } catch { /* try the next name */ }
+  }
+  return null;
+}
+
 export async function fetchChannel(key: string, from: string, to: string, prior?: { from: string; to: string } | null): Promise<ChannelData | null> {
   const channel = marketplaceByKey(key);
   if (!channel) return null;
@@ -67,7 +84,7 @@ export async function fetchChannel(key: string, from: string, to: string, prior?
   const today = todayPst();
   const openFrom = addDays(today, -channel.returnWindowDays);
 
-  const [totals, store, all, open, daily, byLine, byProduct, bySize, byRegion, priorTotals, priorStore] = await Promise.all([
+  const [totals, store, all, open, daily, byLine, byProduct, bySize, byRegion, priorTotals, priorStore, returnedItems] = await Promise.all([
     q('totals', `FROM sales SHOW ${TOTAL_FIELDS} ${W} ${range}`, totalsOf, EMPTY),
     q('store', `FROM sales SHOW ${TOTAL_FIELDS} ${S} ${range}`, totalsOf, EMPTY),
     q('all', `FROM sales SHOW net_sales ${range}`, rows => num(rows[0]?.net_sales), 0),
@@ -81,6 +98,9 @@ export async function fetchChannel(key: string, from: string, to: string, prior?
     q('regions', `FROM sales SHOW orders, gross_sales, returns, net_sales GROUP BY shipping_region ${W} ${range} ORDER BY gross_sales DESC LIMIT 10`, breakdown('shipping_region'), [] as ChannelBreakdownRow[]),
     prior ? q('prior', `FROM sales SHOW ${TOTAL_FIELDS} ${W} SINCE ${prior.from} UNTIL ${prior.to}`, totalsOf, null as ChannelTotals | null) : Promise.resolve(null),
     prior ? q('prior store', `FROM sales SHOW ${TOTAL_FIELDS} ${S} SINCE ${prior.from} UNTIL ${prior.to}`, totalsOf, null as ChannelTotals | null) : Promise.resolve(null),
+    // Count of returns for the partner's per-return charge (one pair per order,
+    // so returned items ≈ returns). Falls back to an estimate when unavailable.
+    channel.returnFee != null ? returnedQuantity(W, range) : Promise.resolve(null),
   ]);
 
   // Contribution: net after returns − marketplace commission − cost of goods.
@@ -89,10 +109,17 @@ export async function fetchChannel(key: string, from: string, to: string, prior?
   const gm = getClient().finance.grossMarginPct;
   const cogsPct = gm != null ? 100 - gm : null;
   const commission = channel.commissionPct != null ? totals.net * channel.commissionPct / 100 : null;
+  // Per-return charge: Shopify's returned item count when it answers, else
+  // return dollars ÷ average gross per order (labelled as an estimate).
+  const avgGrossPerOrder = totals.orders > 0 ? totals.gross / totals.orders : 0;
+  const returnCount = channel.returnFee == null ? null : returnedItems != null ? returnedItems : (avgGrossPerOrder > 0 ? Math.round(totals.returns / avgGrossPerOrder) : 0);
+  const returnCountBasis = channel.returnFee == null ? null : returnedItems != null ? 'items' as const : 'estimated' as const;
+  const returnCharges = channel.returnFee != null && returnCount != null ? returnCount * channel.returnFee : null;
   const cogs = cogsPct != null ? totals.net * cogsPct / 100 : null;
-  const contribution = totals.net - (commission ?? 0) - (cogs ?? 0);
+  const contribution = totals.net - (commission ?? 0) - (returnCharges ?? 0) - (cogs ?? 0);
   const economics = {
     commissionPct: channel.commissionPct, commission,
+    returnFee: channel.returnFee, returnCount, returnCharges, returnCountBasis,
     cogsPct, cogs,
     contribution: cogs != null ? contribution : null,
     contributionPct: cogs != null && totals.net > 0 ? Math.round((contribution / totals.net) * 1000) / 10 : null,

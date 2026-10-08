@@ -504,7 +504,7 @@ ${refLines.join('\n') || 'not available (Shopify not connected)'}`;
     const fmtT = (x: T) => `${x.orders} orders · gross $${Math.round(x.gross).toLocaleString()} · discounts $${Math.round(x.discounts).toLocaleString()} · returns $${Math.round(x.returns).toLocaleString()} (${x.gross > 0 ? Math.round((x.returns / x.gross) * 100) : 0}% of gross) · net $${Math.round(x.net).toLocaleString()} · total sales $${Math.round(x.totalSales).toLocaleString()} · AOV $${Math.round(x.aov)} · customers ${x.customers} (${x.returningCustomers} returning)`;
     const rows = (k: string, n = 10) => ((d[k] as Array<{ label: string; orders: number; gross: number; returns: number; net: number }>) || []).slice(0, n).map(r => `- ${r.label}: ${r.orders} orders · gross $${Math.round(r.gross).toLocaleString()} · returns $${Math.round(r.returns).toLocaleString()} · net $${Math.round(r.net).toLocaleString()}`).join('\n') || 'none';
     const ow = d.openWindow as { from: string; gross: number; orders: number } | null;
-    const eco = d.economics as { commissionPct: number | null; commission: number | null; cogsPct: number | null; cogs: number | null; contribution: number | null; contributionPct: number | null };
+    const eco = d.economics as { commissionPct: number | null; commission: number | null; returnFee: number | null; returnCount: number | null; returnCharges: number | null; returnCountBasis: string | null; cogsPct: number | null; cogs: number | null; contribution: number | null; contributionPct: number | null };
     const prior = d.prior as { range: { from: string; to: string }; totals: T; store: T } | null | undefined;
     const daily = (d.daily as Array<{ date: string; orders: number; gross: number; returns: number; net: number }>) || [];
     const byMonth = new Map<string, { o: number; g: number; r: number; n: number }>();
@@ -513,13 +513,13 @@ ${refLines.join('\n') || 'not available (Shopify not connected)'}`;
       ? `Monthly (month,orders,gross,returns,net):\n${Array.from(byMonth.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([k, b]) => `${k},${b.o},${Math.round(b.g)},${Math.round(b.r)},${Math.round(b.n)}`).join('\n')}`
       : `Daily (date,orders,gross,returns,net):\n${daily.map(r => `${r.date},${r.orders},${Math.round(r.gross)},${Math.round(r.returns)},${Math.round(r.net)}`).join('\n')}`;
     return `${ch.label.toUpperCase()} (Shopify sales channel "${ch.shopifyChannel}", ${ch.returnWindowDays}-day return window) ${from} → ${to}
-${ch.description ? ch.description + '\n' : ''}Recorded at full retail in Shopify; ${ch.commissionPct == null ? 'the partner commission is NOT in Shopify and is not yet configured, so net sales here are before commission.' : `commission ${ch.commissionPct}% is applied in economics below.`}
+${ch.description ? ch.description + '\n' : ''}Recorded at full retail in Shopify; ${ch.commissionPct == null ? 'the partner commission is NOT in Shopify and is not yet configured, so net sales here are before commission.' : `commission ${ch.commissionPct}% is applied in economics below (contribution = net − commission − per-return charges − COGS).`}
 
 ${ch.label}: ${fmtT(t)}
 Online store, same period (for comparison): ${fmtT(st)}
 All channels net: $${Math.round(Number(d.allNet || 0)).toLocaleString()} · ${ch.label} share of net ${Number(d.allNet) > 0 ? Math.round((t.net / Number(d.allNet)) * 100) : 0}%
 ${ow ? `Still inside the return window (sold since ${ow.from}): ${ow.orders} orders · $${Math.round(ow.gross).toLocaleString()} gross that can still come back.` : ''}
-Economics: commission ${eco.commission == null ? 'n/a' : `$${Math.round(eco.commission).toLocaleString()}`} · COGS ${eco.cogs == null ? 'n/a' : `$${Math.round(eco.cogs).toLocaleString()} (${eco.cogsPct}%)`} · contribution ${eco.contribution == null ? 'n/a' : `$${Math.round(eco.contribution).toLocaleString()} (${eco.contributionPct}%)`}
+Economics: commission ${eco.commission == null ? 'n/a' : `$${Math.round(eco.commission).toLocaleString()}`}${eco.returnFee != null ? ` · return charges $${Math.round(eco.returnCharges || 0).toLocaleString()} ($${eco.returnFee} × ${eco.returnCount ?? 0} returns${eco.returnCountBasis === 'estimated' ? ', estimated from return dollars ÷ AOV' : ''})` : ''} · COGS ${eco.cogs == null ? 'n/a' : `$${Math.round(eco.cogs).toLocaleString()} (${eco.cogsPct}%)`} · contribution ${eco.contribution == null ? 'n/a' : `$${Math.round(eco.contribution).toLocaleString()} (${eco.contributionPct}%)`}
 ${prior ? `Prior period ${prior.range.from} → ${prior.range.to}: ${fmtT(prior.totals)}` : ''}
 
 By product line:\n${rows('byLine', 6)}

@@ -58,6 +58,8 @@ export interface MarketplaceChannel {
   sourceMatch: string;
   /** Commission the marketplace keeps, % of retail. null = not set yet (contribution shows without it). */
   commissionPct: number | null;
+  /** Flat charge the marketplace bills per customer return, in dollars. null = none / not set. */
+  returnFee: number | null;
   /** Customer return window in days — sales younger than this are still "open" for returns. */
   returnWindowDays: number;
   /** One line for the tab subtitle. */
@@ -347,11 +349,12 @@ const KAILEEP: ClientProfile = {
   ],
   // Nordstrom dropship (Sep 2026, per Angie): Kailee ships each pair, Shopify
   // records the order at full retail under the Dscopify app's channel, and
-  // Nordstrom keeps a commission that never appears in Shopify. Nordstrom's
-  // 90-day return policy runs far longer than the store's.
+  // Nordstrom keeps a 20% commission that never appears in Shopify and bills
+  // $5 per customer return (per Angie, Oct 2026). Nordstrom's 90-day return
+  // policy runs far longer than the store's.
   marketplaces: [
-    { key: 'nordstrom', label: 'Nordstrom', shopifyChannel: 'Dscopify Dropship', sourceMatch: 'dscopify', commissionPct: null, returnWindowDays: 90,
-      description: 'Nordstrom Marketplace dropship · Shopify sales channel "Dscopify Dropship" · orders at full retail, commission not in Shopify' },
+    { key: 'nordstrom', label: 'Nordstrom', shopifyChannel: 'Dscopify Dropship', sourceMatch: 'dscopify', commissionPct: 20, returnFee: 5, returnWindowDays: 90,
+      description: 'Nordstrom Marketplace dropship · Shopify sales channel "Dscopify Dropship" · orders at full retail; Nordstrom keeps 20% and bills $5 per return, neither in Shopify' },
   ],
   // October 2026 brief: blended MER 5–6 (5 = the pass line), Google ROAS ≥ 6x,
   // CPA target < $27–30.
