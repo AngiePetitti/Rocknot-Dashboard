@@ -9,7 +9,8 @@ import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import MetricCard from '@/src/components/ui/MetricCard';
 import { useClient } from '@/src/components/ClientProvider';
-import type { OrganicData, OrganicPost, BlogPost, SourceBlock } from '@/src/lib/organic';
+import type { OrganicData, OrganicPost, BlogPost, SourceBlock, Audience } from '@/src/lib/organic';
+import FollowerGrowthChart from '@/src/components/charts/FollowerGrowthChart';
 
 interface OrganicResponse extends Partial<OrganicData> { source?: string; error?: string }
 
@@ -72,6 +73,67 @@ function SetupCard({ title, platform, isAdmin, block }: { title: string; platfor
       )}
     </Card>
   );
+}
+
+const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${n(Math.abs(v))}`;
+const PLATFORM_COLORS: Record<'Instagram' | 'Pinterest', string> = { Instagram: '#d946ef', Pinterest: '#e11d48' };
+
+/** One platform's column in the Audience card: followers, net change, and its other account/engagement numbers. */
+function AudienceColumn({ label, a, totals, rangeLabel }: { label: 'Instagram' | 'Pinterest'; a: Audience | undefined; totals: Record<string, number> | undefined; rangeLabel: string }) {
+  const color = PLATFORM_COLORS[label];
+  const ok = a?.status === 'ok';
+  const stats: Array<[string, number | undefined]> = label === 'Instagram'
+    ? [['Profile views', a?.profileViews], ['Website taps', a?.websiteClicks], ['Reach', totals?.reach || totals?.impressions], ['Likes', totals?.likes], ['Saves', totals?.saves], ['Comments', totals?.comments], ['Shares', totals?.shares]]
+    : [['Monthly views', a?.monthlyViews], ['Following', a?.following], ['Boards', a?.boards], ['Pins', a?.pins], ['Impressions', totals?.impressions], ['Saves', totals?.saves], ['Outbound clicks', totals?.outboundClicks]];
+  const shown = stats.filter(([, v]) => v != null && v > 0);
+  return (
+    <div className="flex-1 min-w-[220px]">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: color }} />
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{label}</p>
+      </div>
+      {!a || a.status === 'not_connected' ? (
+        <p className="text-sm text-gray-400 mt-1">Not connected yet</p>
+      ) : a.status === 'error' ? (
+        <p className="text-sm text-gray-400 mt-1">Follower data unavailable from this feed right now</p>
+      ) : (
+        <>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <p className="text-3xl font-bold text-gray-800 leading-none">{a.followers != null ? n(a.followers) : (a.newFollowers != null ? signed(a.newFollowers) : '—')}</p>
+            <p className="text-xs text-gray-400">{a.followers != null ? 'followers' : a.newFollowers != null ? `net new in ${rangeLabel.toLowerCase()}` : 'no follower field in this feed yet'}</p>
+          </div>
+          {a.followers != null && a.newFollowers != null && (
+            <p className={`text-xs font-semibold mt-1 ${a.newFollowers > 0 ? 'text-green-500' : a.newFollowers < 0 ? 'text-red-500' : 'text-gray-400'}`}>
+              {a.newFollowers > 0 ? '▲' : a.newFollowers < 0 ? '▼' : '•'} {signed(a.newFollowers)} in {rangeLabel.toLowerCase()}{a.followersStart ? ` (${(Math.round((a.newFollowers / a.followersStart) * 1000) / 10).toFixed(1)}%)` : ''}
+            </p>
+          )}
+          {shown.length > 0 && (
+            <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 mt-3">
+              {shown.map(([k, v]) => (
+                <div key={k}>
+                  <dt className="text-[10px] uppercase tracking-wider text-gray-400">{k}</dt>
+                  <dd className="text-sm font-semibold text-gray-700">{n(v)}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Growth summary for one platform's daily series. */
+function growthSummary(s: Audience['series']) {
+  const totals = s.filter(p => p.followers != null);
+  const dailies = s.filter(p => p.newFollowers != null);
+  const first = totals[0]; const last = totals[totals.length - 1];
+  const net = first && last && first !== last ? last.followers! - first.followers! : (dailies.length ? dailies.reduce((t, p) => t + (p.newFollowers || 0), 0) : null);
+  const perDay = net != null && dailies.length ? net / Math.max(1, dailies.length) : null;
+  const best = dailies.length ? dailies.reduce((b, p) => (p.newFollowers! > b.newFollowers! ? p : b)) : null;
+  const worst = dailies.length ? dailies.reduce((b, p) => (p.newFollowers! < b.newFollowers! ? p : b)) : null;
+  const down = dailies.filter(p => p.newFollowers! < 0).length;
+  return { first, last, net, perDay, best, worst, down, days: dailies.length };
 }
 
 function PostGrid({ block, sorts, ratio, metricDefs, emptyText }: {
@@ -174,8 +236,22 @@ export default function OrganicContent() {
 
       {data && !data.error && (
         <>
+          {/* ── Audience: followers and the other account-level numbers, across platforms ── */}
+          {data.audience && (
+            <Card className="mt-4 mb-6">
+              <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+                <h3 className="text-sm font-bold text-gray-800">Audience</h3>
+                <p className="text-[11px] text-gray-400">Followers as of the last day of the period · net change over {rangeLabel.toLowerCase()} · profile and engagement totals for the period</p>
+              </div>
+              <div className="flex flex-wrap gap-6 md:gap-10">
+                <AudienceColumn label="Instagram" a={data.audience.Instagram} totals={ig?.status === 'ok' ? ig.totals : undefined} rangeLabel={rangeLabel} />
+                <AudienceColumn label="Pinterest" a={data.audience.Pinterest} totals={pin?.status === 'ok' ? pin.totals : undefined} rangeLabel={rangeLabel} />
+              </div>
+            </Card>
+          )}
+
           {/* ── KPI row ── */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mt-4 mb-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
             <MetricCard title="Pin Impressions" accentColor="#e11d48"
               value={pin?.status === 'ok' ? n(pin.totals.impressions) : '—'}
               subtitle={pin?.status === 'ok' ? `${n(pin.totals.saves)} saves · ${n(pin.totals.outboundClicks)} outbound clicks${pin.note ? ' · last 7 days only' : ''}` : pin?.status === 'error' ? (/timeout|aborted|budget/i.test(pin.error || '') ? "Pinterest's live feed timed out — see the Pinterest Pins section" : 'Pinterest feed error — see below') : 'Pinterest Organic not connected'} />
@@ -190,24 +266,52 @@ export default function OrganicContent() {
               subtitle={`Pinterest ${n(traffic?.Pinterest.sessions)} (${n(traffic?.Pinterest.completed)} orders) · Instagram ${n(traffic?.Instagram.sessions)} (${n(traffic?.Instagram.completed)} orders) · unpaid taps to ${client.siteDomain}`} />
           </div>
 
-          {/* ── Audience: followers across the board ── */}
+          {/* ── Follower growth: how each audience is moving day by day ── */}
           {data.audience && (() => {
-            const aud = data.audience as Record<'Pinterest' | 'Instagram', { status: string; error?: string; followers: number | null; followersStart: number | null; newFollowers: number | null; profileViews?: number; websiteClicks?: number }>;
-            const card = (label: string, a: typeof aud.Instagram, color: string) => {
-              const growth = a.newFollowers != null ? `${a.newFollowers >= 0 ? '+' : '−'}${n(Math.abs(a.newFollowers))} in ${rangeLabel.toLowerCase()}` : '';
-              const extras = [a.profileViews != null ? `${n(a.profileViews)} profile views` : '', a.websiteClicks != null ? `${n(a.websiteClicks)} website taps` : ''].filter(Boolean).join(' · ');
-              return (
-                <MetricCard key={label} title={`${label} Followers`} accentColor={color}
-                  value={a.status === 'ok' && a.followers != null ? n(a.followers) : (a.status === 'ok' && a.newFollowers != null ? `${a.newFollowers >= 0 ? '+' : '−'}${n(Math.abs(a.newFollowers))}` : '—')}
-                  subtitle={a.status === 'not_connected' ? `${label} not connected` : a.status === 'error' ? 'Follower data unavailable from this feed' : [growth, extras].filter(Boolean).join(' · ') || 'No follower fields in this feed yet'}
-                  trend={a.status === 'ok' && a.newFollowers != null && a.followers != null ? { value: `${a.newFollowers >= 0 ? '▲' : '▼'} ${n(Math.abs(a.newFollowers))} followers`, positive: a.newFollowers >= 0 } : undefined} />
-              );
-            };
+            const platforms = (['Instagram', 'Pinterest'] as const).map(label => ({ label, a: data.audience![label] }));
+            const withSeries = platforms.filter(p => p.a.status === 'ok' && p.a.series.length > 1);
             return (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
-                {card('Instagram', aud.Instagram, '#d946ef')}
-                {card('Pinterest', aud.Pinterest, '#e11d48')}
-              </div>
+              <Card className="mb-6">
+                <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+                  <h3 className="text-sm font-bold text-gray-800">Follower Growth</h3>
+                  <p className="text-[11px] text-gray-400">Day by day over {rangeLabel.toLowerCase()} · one chart per platform (their audiences differ in size, so each has its own scale)</p>
+                </div>
+                {withSeries.length === 0 ? (
+                  <p className="text-xs text-gray-400">
+                    {platforms.every(p => p.a.status === 'not_connected') ? 'Connect Instagram Insights or Pinterest Organic in Windsor to see follower growth.'
+                      : 'No day-by-day follower rows for this period yet. Pinterest fills in once the pinterest_organic BigQuery task has run; Instagram needs more than one day in the range.'}
+                  </p>
+                ) : (
+                  <div className={`grid gap-6 ${withSeries.length > 1 ? 'lg:grid-cols-2' : ''}`}>
+                    {withSeries.map(({ label, a }) => {
+                      const g = growthSummary(a.series);
+                      const up = g.net != null && g.net > 0; const flat = g.net === 0;
+                      return (
+                        <div key={label}>
+                          <div className="flex items-baseline justify-between gap-3 flex-wrap mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: PLATFORM_COLORS[label] }} />
+                              <p className="text-xs font-semibold text-gray-600">{label} followers</p>
+                            </div>
+                            {g.net != null && (
+                              <p className={`text-xs font-semibold ${up ? 'text-green-500' : flat ? 'text-gray-400' : 'text-red-500'}`}>
+                                {up ? '▲ Growing' : flat ? '• Flat' : '▼ Shrinking'} · {signed(g.net)}{g.first && g.last ? ` (${n(g.first.followers!)} → ${n(g.last.followers!)})` : ''}
+                              </p>
+                            )}
+                          </div>
+                          <FollowerGrowthChart label={label} color={PLATFORM_COLORS[label]} series={a.series} />
+                          <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-[11px] text-gray-500">
+                            {g.perDay != null && <span>Avg <b className="text-gray-700">{`${g.perDay > 0 ? '+' : g.perDay < 0 ? '−' : ''}${Math.abs(g.perDay).toFixed(1)}`}</b> / day</span>}
+                            {g.best && g.best.newFollowers! > 0 && <span>Best day <b className="text-gray-700">{g.best.date.slice(5)}</b> ({signed(g.best.newFollowers!)})</span>}
+                            {g.worst && g.worst.newFollowers! < 0 && <span>Biggest drop <b className="text-gray-700">{g.worst.date.slice(5)}</b> ({signed(g.worst.newFollowers!)})</span>}
+                            {g.days > 0 && <span><b className="text-gray-700">{g.down}</b> of {g.days} days lost followers</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
             );
           })()}
 
