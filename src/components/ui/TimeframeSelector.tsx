@@ -117,8 +117,8 @@ export default function TimeframeSelector() {
         </button>
       </div>
 
-      {/* Compare toggle — always visible */}
-      <div className="flex items-center gap-2 pl-0.5">
+      {/* Compare toggle + basis — one row on desktop, two on phones */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-0.5">
         <label className="flex items-center gap-1.5 cursor-pointer select-none">
           <div
             onClick={() => handleCompareToggle(!compare)}
@@ -126,15 +126,16 @@ export default function TimeframeSelector() {
           >
             <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${compare ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </div>
-          <span className="text-xs text-gray-500 font-medium">
-            Compare to {compareTo === 'prior' ? priorPeriodLabel() : compareTo === 'month' ? 'same period last month' : 'same period last year'}
+          <span className="text-xs text-gray-500 font-medium whitespace-nowrap">
+            Compare to {compareTo === 'prior' ? priorPeriodLabel().toLowerCase() : compareTo === 'month' ? 'last month' : 'last year'}
           </span>
         </label>
-        <div className="flex items-center gap-1 ml-1">
-          {([['prior', 'Prior period'], ['month', 'Month over month'], ['year', 'Year over year']] as const).map(([mode, label]) => (
-            <button key={mode} type="button" onClick={() => handleCompareTo(mode)}
-              className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition-colors ${compare && compareTo === mode ? 'bg-violet-100 text-violet-700' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}>
-              {label}
+        <div className="inline-flex items-center rounded-lg bg-gray-100 p-0.5">
+          {([['prior', 'Prior period', 'Prior'], ['month', 'Month over month', 'MoM'], ['year', 'Year over year', 'YoY']] as const).map(([mode, label, short]) => (
+            <button key={mode} type="button" onClick={() => handleCompareTo(mode)} title={label}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-semibold whitespace-nowrap transition-colors ${compare && compareTo === mode ? 'bg-white text-violet-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              <span className="sm:hidden">{short}</span>
+              <span className="hidden sm:inline">{label}</span>
             </button>
           ))}
         </div>
