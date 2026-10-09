@@ -531,9 +531,11 @@ export async function fetchBlogPerformance(from: string, to: string): Promise<So
       articles: articleItems.length,
       articleSessions: articleItems.reduce((s, b) => s + b.sessions, 0),
       articlesKnown: articles.size,
-      // Session-weighted GA4 bounce rate across the blog pages that have one (0–100).
-      ...(() => { const w = items.filter(b => b.bounceRate != null && b.gaSessions > 0); const n = w.reduce((s, b) => s + b.gaSessions, 0); return n > 0 ? { bounceRatePct: Math.round((w.reduce((s, b) => s + b.bounceRate! * b.gaSessions, 0) / n) * 1000) / 10, bouncePages: w.length } : {}; })(),
     };
+    // Session-weighted GA4 bounce rate across the blog pages that have one (0–100).
+    const withBounce = items.filter(b => b.bounceRate != null && b.gaSessions > 0);
+    const gaN = withBounce.reduce((s, b) => s + b.gaSessions, 0);
+    if (gaN > 0) { totals.bounceRatePct = Math.round((withBounce.reduce((s, b) => s + b.bounceRate! * b.gaSessions, 0) / gaN) * 1000) / 10; totals.bouncePages = withBounce.length; }
     return { status: 'ok', items, totals, ...(gaLanding ? {} : { note: 'Bounce rate needs Google Analytics 4 (connected in Windsor) — GA4 returned nothing for this period.' }) };
   } catch (e) {
     return { status: 'error', error: e instanceof Error ? e.message : String(e), items: [], totals: {} };
