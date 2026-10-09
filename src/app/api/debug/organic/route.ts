@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
       if (isBigQueryConfigured()) {
         const ds = getDataset();
         const cols = await runQuery<{ column_name: string; data_type: string }>(`SELECT column_name, data_type FROM \`${ds}.INFORMATION_SCHEMA.COLUMNS\` WHERE table_name = 'pinterest_organic' ORDER BY ordinal_position`);
-        const shape = cols.length ? await runQuery<Record<string, unknown>>(`SELECT COUNT(*) AS rows, CAST(MIN(date) AS STRING) AS first_date, CAST(MAX(date) AS STRING) AS last_date FROM \`${ds}.pinterest_organic\``) : [];
+        const shape = cols.length ? await runQuery<Record<string, unknown>>(`SELECT COUNT(*) AS row_count, CAST(MIN(date) AS STRING) AS first_date, CAST(MAX(date) AS STRING) AS last_date FROM \`${ds}.pinterest_organic\``) : [];
         const sampleRow = cols.length ? await runQuery<Record<string, unknown>>(`SELECT * FROM \`${ds}.pinterest_organic\` ORDER BY date DESC LIMIT 1`) : [];
         out.pinterestTableShape = { columns: cols.map(c => `${c.column_name}:${c.data_type}`), ...(shape[0] || {}), latestRow: sampleRow[0] || null };
       }

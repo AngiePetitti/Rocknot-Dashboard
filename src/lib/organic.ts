@@ -241,9 +241,14 @@ export async function fetchPinterestOrganicFromTable(from: string, to: string): 
       impressions: /impression/, saves: /\bsave|_save/, pinClicks: /^(pin_)?pin_click|^pin_click|^click/, outboundClicks: /outbound/,
     };
     const pick = (k: string) => PIN_TABLE_ALTS[k].find(c => have.has(c)) || Array.from(have).find(c => guess[k]?.test(c) && !/account_/.test(c)) || null;
-    const id = pick('pin_id');
+    let id = pick('pin_id');
+    // A task saved without the pin id still has a title/description: group on
+    // that so the tab shows something, and say what the task is missing.
+    const idFallback = !id ? (pick('pin_title') || pick('pin_description')) : null;
+    if (idFallback) id = idFallback;
     if (!id || !have.has('date')) return { status: 'error', error: `pinterest_organic table lacks a pin id / date column (has: ${Array.from(have).join(', ')})`, items: [], totals: {} };
-    const sel = Object.keys(PIN_TABLE_ALTS).map(k => { const c = pick(k); return c ? `CAST(${c} AS STRING) AS ${k}` : `NULL AS ${k}`; }).join(', ');
+    const missing = Object.keys(PIN_TABLE_ALTS).filter(k => !pick(k));
+    const sel = Object.keys(PIN_TABLE_ALTS).map(k => { const c = k === 'pin_id' ? id : pick(k); return c ? `CAST(${c} AS STRING) AS ${k}` : `NULL AS ${k}`; }).join(', ');
     const rows = await runQuery<Record<string, string | null>>(`SELECT CAST(date AS STRING) AS date, ${sel} FROM \`${ds}.pinterest_organic\` WHERE DATE(date) BETWEEN @from AND @to`, { from, to });
     const rolled = rollUp(rows.map(r => ({ ...r })), 'pin_id', ['impressions', 'saves', 'pinClicks', 'outboundClicks']);
     const items: OrganicPost[] = Array.from(rolled.entries()).map(([pid, v]) => {
@@ -251,12 +256,15 @@ export async function fetchPinterestOrganicFromTable(from: string, to: string): 
       return {
         id: pid, platform: 'Pinterest' as const,
         title: str(last.pin_title) || str(last.pin_description).slice(0, 80) || `Pin ${pid}`,
-        imageUrl: str(last.pin_media_image_url), url: str(last.pin_permalink) || `https://www.pinterest.com/pin/${pid}/`,
+        imageUrl: str(last.pin_media_image_url), url: str(last.pin_permalink) || (/^\d+$/.test(pid) ? `https://www.pinterest.com/pin/${pid}/` : ''),
         publishedAt: str(last.pin_created_at).slice(0, 10), group: str(last.pin_board_name),
         metrics: { impressions: v.metrics.impressions || 0, saves: v.metrics.saves || 0, pinClicks: v.metrics.pinClicks || 0, outboundClicks: v.metrics.outboundClicks || 0 },
       };
-    }).filter(p => Object.values(p.metrics).some(x => x > 0)).sort((a, b) => b.metrics.impressions - a.metrics.impressions);
-    return { status: 'ok', items, totals: sumTotals(items, PINTEREST_METRICS), fieldSet: 'bigquery:pinterest_organic' };
+    }).filter(p => Object.values(p.metrics).some(x => x > 0)).sort((a, b) => (b.metrics.impressions || b.metrics.pinClicks) - (a.metrics.impressions || a.metrics.pinClicks));
+    const note = missing.length
+      ? `The Windsor → BigQuery task for Pinterest Organic saved only ${Array.from(have).filter(c => /^pin/.test(c)).join(', ') || 'no pin fields'}. Edit the task in Windsor and tick ${missing.map(k => ({ pin_id: 'Pin id', pin_title: 'Pin title', pin_description: 'Pin description', pin_permalink: 'Pin link', pin_media_image_url: 'Pin image url', pin_board_name: 'Pin board name', pin_created_at: 'Pin created date', impressions: 'Pin impression', saves: 'Pin save', pinClicks: 'Pin pin click', outboundClicks: 'Pin outbound click' }[k] || k)).join(', ')}, then run a backfill. ${idFallback ? 'Until then pins are grouped by their text, not their id.' : ''}`
+      : undefined;
+    return { status: 'ok', items, totals: sumTotals(items, PINTEREST_METRICS), fieldSet: 'bigquery:pinterest_organic', ...(note ? { note } : {}) };
   } catch (e) {
     return { status: 'error', error: `pinterest_organic table: ${e instanceof Error ? e.message : String(e)}`, items: [], totals: {} };
   }
