@@ -233,8 +233,6 @@ export async function fetchPinterestOrganicFromTable(from: string, to: string): 
     const ds = getDataset();
     const cols = await runQuery<{ column_name: string }>(`SELECT column_name FROM \`${ds}.INFORMATION_SCHEMA.COLUMNS\` WHERE table_name = 'pinterest_organic'`);
     const have = new Set(cols.map(c => c.column_name));
-    // Known names first, then anything that looks right (e.g. a pin_pin_id or
-    // pin_media_url the connector version renamed).
     const guess: Record<string, RegExp> = {
       pin_id: /(^|_)pin_id$|^id$/, pin_title: /title$/, pin_description: /description$/, pin_permalink: /(permalink|_link|_url)$/i,
       pin_media_image_url: /image.*url|cover.*url|media_url$/, pin_board_name: /board.*name/, pin_created_at: /created/,
@@ -242,29 +240,48 @@ export async function fetchPinterestOrganicFromTable(from: string, to: string): 
     };
     const pick = (k: string) => PIN_TABLE_ALTS[k].find(c => have.has(c)) || Array.from(have).find(c => guess[k]?.test(c) && !/account_/.test(c)) || null;
     let id = pick('pin_id');
-    // A task saved without the pin id still has a title/description: group on
-    // that so the tab shows something, and say what the task is missing.
     const idFallback = !id ? (pick('pin_title') || pick('pin_description')) : null;
     if (idFallback) id = idFallback;
     if (!id || !have.has('date')) return { status: 'error', error: `pinterest_organic table lacks a pin id / date column (has: ${Array.from(have).join(', ')})`, items: [], totals: {} };
     const missing = Object.keys(PIN_TABLE_ALTS).filter(k => !pick(k));
-    const sel = Object.keys(PIN_TABLE_ALTS).map(k => { const c = k === 'pin_id' ? id : pick(k); return c ? `CAST(${c} AS STRING) AS ${k}` : `NULL AS ${k}`; }).join(', ');
-    const rows = await runQuery<Record<string, string | null>>(`SELECT CAST(date AS STRING) AS date, ${sel} FROM \`${ds}.pinterest_organic\` WHERE DATE(date) BETWEEN @from AND @to`, { from, to });
-    const rolled = rollUp(rows.map(r => ({ ...r })), 'pin_id', ['impressions', 'saves', 'pinClicks', 'outboundClicks']);
-    const items: OrganicPost[] = Array.from(rolled.entries()).map(([pid, v]) => {
-      const last = v.rows[v.rows.length - 1];
+    const METRICS = ['impressions', 'saves', 'pinClicks', 'outboundClicks'] as const;
+    const TEXT = ['pin_title', 'pin_description', 'pin_permalink', 'pin_media_image_url', 'pin_board_name', 'pin_created_at'] as const;
+    // Aggregate in SQL: the table holds one row per pin per day (hundreds of
+    // thousands of pins), so pulling raw rows for a range is far too big.
+    // Per metric: the sum across days, the max, and how many distinct values —
+    // a value that never changes across several days is a lifetime counter
+    // (use the max), otherwise the days are daily counts (use the sum).
+    const mcols = METRICS.map(k => { const c = pick(k); return c
+      ? `SUM(SAFE_CAST(${c} AS FLOAT64)) AS ${k}_sum, MAX(SAFE_CAST(${c} AS FLOAT64)) AS ${k}_max, COUNT(DISTINCT SAFE_CAST(${c} AS FLOAT64)) AS ${k}_n`
+      : `0 AS ${k}_sum, 0 AS ${k}_max, 0 AS ${k}_n`; }).join(', ');
+    const tcols = TEXT.map(k => { const c = pick(k); return c ? `ANY_VALUE(CAST(${c} AS STRING) HAVING MAX date) AS ${k}` : `NULL AS ${k}`; }).join(', ');
+    const sql = `SELECT CAST(${id} AS STRING) AS pin_id, COUNT(DISTINCT DATE(date)) AS days, ${tcols}, ${mcols}
+      FROM \`${ds}.pinterest_organic\` WHERE DATE(date) BETWEEN @from AND @to AND ${id} IS NOT NULL
+      GROUP BY pin_id
+      HAVING (impressions_sum + saves_sum + pinClicks_sum + outboundClicks_sum) > 0
+      ORDER BY impressions_sum DESC, pinClicks_sum DESC, saves_sum DESC LIMIT 400`;
+    const rows = await runQuery<Record<string, unknown>>(sql, { from, to });
+    const val = (r: Record<string, unknown>, k: string) => { const days = num(r.days); const sum = num(r[`${k}_sum`]); const mx = num(r[`${k}_max`]); const n = num(r[`${k}_n`]); return days > 1 && n <= 1 && mx > 0 ? mx : sum; };
+    const items: OrganicPost[] = rows.map(r => {
+      const pid = str(r.pin_id);
       return {
         id: pid, platform: 'Pinterest' as const,
-        title: str(last.pin_title) || str(last.pin_description).slice(0, 80) || `Pin ${pid}`,
-        imageUrl: str(last.pin_media_image_url), url: str(last.pin_permalink) || (/^\d+$/.test(pid) ? `https://www.pinterest.com/pin/${pid}/` : ''),
-        publishedAt: str(last.pin_created_at).slice(0, 10), group: str(last.pin_board_name),
-        metrics: { impressions: v.metrics.impressions || 0, saves: v.metrics.saves || 0, pinClicks: v.metrics.pinClicks || 0, outboundClicks: v.metrics.outboundClicks || 0 },
+        title: str(r.pin_title) || str(r.pin_description).replace(/\s+/g, ' ').trim().slice(0, 80) || `Pin ${pid}`,
+        imageUrl: str(r.pin_media_image_url), url: str(r.pin_permalink) || (/^\d+$/.test(pid) ? `https://www.pinterest.com/pin/${pid}/` : ''),
+        publishedAt: str(r.pin_created_at).slice(0, 10), group: str(r.pin_board_name),
+        metrics: { impressions: val(r, 'impressions'), saves: val(r, 'saves'), pinClicks: val(r, 'pinClicks'), outboundClicks: val(r, 'outboundClicks') },
       };
-    }).filter(p => Object.values(p.metrics).some(x => x > 0)).sort((a, b) => (b.metrics.impressions || b.metrics.pinClicks) - (a.metrics.impressions || a.metrics.pinClicks));
-    const note = missing.length
-      ? `The Windsor → BigQuery task for Pinterest Organic saved only ${Array.from(have).filter(c => /^pin/.test(c)).join(', ') || 'no pin fields'}. Edit the task in Windsor and tick ${missing.map(k => ({ pin_id: 'Pin id', pin_title: 'Pin title', pin_description: 'Pin description', pin_permalink: 'Pin link', pin_media_image_url: 'Pin image url', pin_board_name: 'Pin board name', pin_created_at: 'Pin created date', impressions: 'Pin impression', saves: 'Pin save', pinClicks: 'Pin pin click', outboundClicks: 'Pin outbound click' }[k] || k)).join(', ')}, then run a backfill. ${idFallback ? 'Until then pins are grouped by their text, not their id.' : ''}`
-      : undefined;
-    return { status: 'ok', items, totals: sumTotals(items, PINTEREST_METRICS), fieldSet: 'bigquery:pinterest_organic', ...(note ? { note } : {}) };
+    }).sort((a, b) => (b.metrics.impressions || b.metrics.pinClicks) - (a.metrics.impressions || a.metrics.pinClicks));
+    const labels: Record<string, string> = { pin_id: 'Pin id', pin_title: 'Pin title', pin_description: 'Pin description', pin_permalink: 'Pin link', pin_media_image_url: 'Pin image url', pin_board_name: 'Pin board name', pin_created_at: 'Pin created date', impressions: 'Pin impression', saves: 'Pin save', pinClicks: 'Pin pin click', outboundClicks: 'Pin outbound click' };
+    const notes: string[] = [];
+    if (missing.length) notes.push(`The Windsor → BigQuery task for Pinterest Organic saved only ${Array.from(have).filter(c => /^pin/.test(c)).join(', ') || 'no pin fields'}. Edit the task in Windsor and tick ${missing.map(k => labels[k] || k).join(', ')}, then run a backfill.${idFallback ? ' Until then pins are grouped by their text, not their id.' : ''}`);
+    if (!items.length) {
+      // Say what the range holds so an empty grid explains itself.
+      const cnt = await runQuery<{ n: number | string }>(`SELECT COUNT(*) AS n FROM \`${ds}.pinterest_organic\` WHERE DATE(date) BETWEEN @from AND @to`, { from, to }).catch(() => [{ n: -1 }]);
+      const n = num(cnt[0]?.n);
+      notes.push(n > 0 ? `${n.toLocaleString()} rows for ${from} → ${to} but every impression / save / click column is zero or empty (reading ${METRICS.map(k => `${labels[k]} ← ${pick(k) || 'none'}`).join(', ')}).` : n === 0 ? `No rows for ${from} → ${to} in the table.` : '');
+    }
+    return { status: 'ok', items, totals: sumTotals(items, PINTEREST_METRICS), fieldSet: 'bigquery:pinterest_organic', ...(notes.filter(Boolean).length ? { note: notes.filter(Boolean).join(' ') } : {}) };
   } catch (e) {
     return { status: 'error', error: `pinterest_organic table: ${e instanceof Error ? e.message : String(e)}`, items: [], totals: {} };
   }
