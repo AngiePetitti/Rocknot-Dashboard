@@ -99,6 +99,9 @@ export default function OverviewContent() {
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
   const compareOn = searchParams.get('compare') === 'true';
+  const compareTo = (['month', 'year'].includes(searchParams.get('compare_to') || '') ? searchParams.get('compare_to') : 'prior') as 'prior' | 'month' | 'year';
+  const compareBasis = compareTo === 'month' ? 'same period last month' : compareTo === 'year' ? 'same period last year' : 'prior period';
+  const deltaLabel = compareTo === 'month' ? 'vs last month' : compareTo === 'year' ? 'vs last year' : 'vs prior period';
 
   const [metrics, setMetrics] = useState<LiveMetrics>(EMPTY_METRICS);
   const [revenueData, setRevenueData] = useState<DailyRevenue[]>([]);
@@ -306,6 +309,7 @@ export default function OverviewContent() {
     // fetch there unless the Compare toggle is on — it nearly doubled the
     // live view's load time.
     if (compareOn || tfRaw !== 'today') params.set('compare', 'true');
+    if (compareOn && compareTo !== 'prior') params.set('compare_to', compareTo);
 
     // Platform-reported purchases (Meta purchases, Google conversions …) for the
     // Cost / Purchase column — same endpoint the Ad Performance tab reads.
@@ -369,7 +373,7 @@ export default function OverviewContent() {
       // keep the 5-minute window (their numbers barely move).
       tfRaw === 'today' || tfRaw === 'mtd' ? 45_000 : undefined
     );
-  }, [tfRaw, dateFrom, dateTo, compareOn]);
+  }, [tfRaw, dateFrom, dateTo, compareOn, compareTo]);
 
   // Inventory (current stock — same regardless of timeframe) and returns (for
   // the selected period) power the login briefing. Fetched separately so they
@@ -477,7 +481,7 @@ export default function OverviewContent() {
         title={isPartner ? 'Marketing Performance' : 'MER Dashboard'}
         subtitle={`${isPartner ? 'Partner view · ads against company goals · ' : 'Overview · '}${isCustom && dateFrom && dateTo
           ? `${dateFrom} → ${dateTo}${compareOn && priorLabel ? ` vs ${priorLabel}` : ''}`
-          : `${TIMEFRAME_LABELS[tf] || tf}${compareOn && priorLabel ? ` vs prior period` : ''}`}`}
+          : `${TIMEFRAME_LABELS[tf] || tf}${compareOn && priorLabel ? ` vs ${compareBasis}${compareTo !== 'prior' ? ` (${priorLabel})` : ''}` : ''}`}`}
       >
         <TimeframeSelector />
       </Header>
@@ -546,6 +550,7 @@ export default function OverviewContent() {
             if (dateFrom) p.set('date_from', dateFrom);
             if (dateTo) p.set('date_to', dateTo);
             if (compareOn || tfRaw !== 'today') p.set('compare', 'true');
+            if (compareOn && compareTo !== 'prior') p.set('compare_to', compareTo);
             fetch(`/api/windsor?${p}`)
               .then(r => r.json())
               .then(data => {
@@ -809,7 +814,7 @@ export default function OverviewContent() {
               ? {
                   current: metrics.totalRevenue,
                   prior: priorPeriod.totalRevenue,
-                  label: tfRaw === 'yesterday' ? 'vs day before' : undefined,
+                  label: tfRaw === 'yesterday' && compareTo === 'prior' ? 'vs day before' : compareOn ? deltaLabel : undefined,
                 }
               : undefined
           }
@@ -819,7 +824,7 @@ export default function OverviewContent() {
           value={formatCurrency(metrics.totalAdSpend)}
           subtitle={`${(metrics.netSales ?? metrics.totalRevenue) > 0 ? `${((metrics.totalAdSpend / (metrics.netSales ?? metrics.totalRevenue)) * 100).toFixed(1)}% of net sales goes to marketing · ` : ''}${metrics.metaSpend ? `Meta ${formatCurrency(metrics.metaSpend)} · Google ${formatCurrency(metrics.googleSpend ?? 0)}${metrics.tiktokSpend ? ` · TikTok ${formatCurrency(metrics.tiktokSpend)}` : ''}${metrics.snapchatSpend ? ` · Snap ${formatCurrency(metrics.snapchatSpend)}` : ''}${metrics.pinterestSpend ? ` · Pinterest ${formatCurrency(metrics.pinterestSpend)}` : ''}` : 'All ad platforms'}`}
           accentColor="#f9a8d4"
-          comparison={compareOn && priorPeriod ? { current: metrics.totalAdSpend, prior: priorPeriod.totalAdSpend } : undefined}
+          comparison={compareOn && priorPeriod ? { current: metrics.totalAdSpend, prior: priorPeriod.totalAdSpend, label: deltaLabel } : undefined}
         />
         <MetricCard
           title="Avg Order Value"
@@ -836,7 +841,7 @@ export default function OverviewContent() {
               : 'Per transaction';
           })()}
           accentColor="#fde68a"
-          comparison={compareOn && priorPeriod ? { current: metrics.aov, prior: priorPeriod.aov } : undefined}
+          comparison={compareOn && priorPeriod ? { current: metrics.aov, prior: priorPeriod.aov, label: deltaLabel } : undefined}
         />
         <MetricCard
           title="Blended MER"
@@ -844,7 +849,7 @@ export default function OverviewContent() {
           subtitle="Across all platforms"
           accentColor={metrics.mer >= MER_GOAL ? '#86efac' : '#fca5a5'}
           valueColor={merColor}
-          comparison={compareOn && priorPeriod ? { current: metrics.mer, prior: priorPeriod.mer } : undefined}
+          comparison={compareOn && priorPeriod ? { current: metrics.mer, prior: priorPeriod.mer, label: deltaLabel } : undefined}
           trend={!(compareOn && priorPeriod) ? {
             value: metrics.mer >= MER_GOAL ? `Above ${MER_GOAL}x goal` : `Below ${MER_GOAL}x goal`,
             positive: metrics.mer >= MER_GOAL,
@@ -995,7 +1000,7 @@ export default function OverviewContent() {
       {!isPartner && <DailyBrief isAdmin={session?.user?.role === 'admin'} />}
 
       {metrics.newCustomers !== undefined && metrics.newCustomers > 0 && tfRaw !== 'today' && !isPartner && (
-        <NcacBreakdown tf={tfRaw} dateFrom={dateFrom} dateTo={dateTo} compare={compareOn} targetCac={TARGET_CAC} />
+        <NcacBreakdown tf={tfRaw} dateFrom={dateFrom} dateTo={dateTo} compare={compareOn} compareTo={compareTo} targetCac={TARGET_CAC} />
       )}
 
       {/* ── By product line (women's vs kids …) ── */}
@@ -1225,7 +1230,7 @@ export default function OverviewContent() {
           </Card>
 
           <p className="lg:col-span-2 text-[11px] text-gray-400 -mt-1">
-            Sales, ads, customers &amp; returns reflect {isCustom && dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : (TIMEFRAME_LABELS[tf] || tf)}{compareOn ? ' (vs prior period)' : ''}. Inventory &amp; stock alerts are always current.
+            Sales, ads, customers &amp; returns reflect {isCustom && dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : (TIMEFRAME_LABELS[tf] || tf)}{compareOn ? ` (vs ${compareBasis})` : ''}. Inventory &amp; stock alerts are always current.
           </p>
         </div>
       )}

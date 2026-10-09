@@ -12,6 +12,7 @@ export default function TimeframeSelector() {
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
   const compareOn = searchParams.get('compare') === 'true';
+  const compareTo = (['prior', 'month', 'year'].includes(searchParams.get('compare_to') || '') ? searchParams.get('compare_to') : 'prior') as 'prior' | 'month' | 'year';
 
   const [showCustom, setShowCustom] = useState(current === 'custom');
   const [from, setFrom] = useState(dateFrom || '');
@@ -52,6 +53,16 @@ export default function TimeframeSelector() {
     const params = new URLSearchParams(searchParams.toString());
     if (val) params.set('compare', 'true');
     else params.delete('compare');
+    router.push(`${pathname}?${params.toString()}`);
+  }
+
+  // Comparison basis: the period right before, the same dates last month, or
+  // the same dates last year. Turning a basis on also turns compare on.
+  function handleCompareTo(mode: 'prior' | 'month' | 'year') {
+    setCompare(true);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('compare', 'true');
+    if (mode === 'prior') params.delete('compare_to'); else params.set('compare_to', mode);
     router.push(`${pathname}?${params.toString()}`);
   }
 
@@ -116,9 +127,17 @@ export default function TimeframeSelector() {
             <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${compare ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </div>
           <span className="text-xs text-gray-500 font-medium">
-            Compare to {priorPeriodLabel()}
+            Compare to {compareTo === 'prior' ? priorPeriodLabel() : compareTo === 'month' ? 'same period last month' : 'same period last year'}
           </span>
         </label>
+        <div className="flex items-center gap-1 ml-1">
+          {([['prior', 'Prior period'], ['month', 'Month over month'], ['year', 'Year over year']] as const).map(([mode, label]) => (
+            <button key={mode} type="button" onClick={() => handleCompareTo(mode)}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition-colors ${compare && compareTo === mode ? 'bg-violet-100 text-violet-700' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Custom date range panel */}

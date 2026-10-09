@@ -10,7 +10,7 @@ import type { NcacData, NcacPlatform } from '@/src/lib/ncac';
  * platform's de-duplicated spend; new customers are Shopify first-time buyers
  * whose order carried that platform's UTM tag or came from its site.
  */
-export default function NcacBreakdown({ tf, dateFrom, dateTo, compare, targetCac }: { tf: string; dateFrom?: string; dateTo?: string; compare?: boolean; targetCac: number }) {
+export default function NcacBreakdown({ tf, dateFrom, dateTo, compare, compareTo, targetCac }: { tf: string; dateFrom?: string; dateTo?: string; compare?: boolean; compareTo?: 'prior' | 'month' | 'year'; targetCac: number }) {
   const [data, setData] = useState<NcacData | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   useEffect(() => {
@@ -19,8 +19,9 @@ export default function NcacBreakdown({ tf, dateFrom, dateTo, compare, targetCac
     if (dateFrom) p.set('date_from', dateFrom);
     if (dateTo) p.set('date_to', dateTo);
     if (compare) p.set('compare', 'true');
+    if (compare && compareTo && compareTo !== 'prior') p.set('compare_to', compareTo);
     fetch(`/api/windsor/ncac?${p}`, { cache: 'no-store' }).then(r => r.json()).then(d => { if (d?.error) setFailed(String(d.error)); else setData(d); }).catch(e => setFailed(String(e)));
-  }, [tf, dateFrom, dateTo, compare]);
+  }, [tf, dateFrom, dateTo, compare, compareTo]);
 
   if (failed) return <Card className="mb-6"><p className="text-xs text-gray-400">New-customer CAC by platform unavailable: {failed}</p></Card>;
   if (!data) return <Card className="mb-6"><p className="text-xs text-gray-400">Loading new-customer CAC by platform…</p></Card>;
