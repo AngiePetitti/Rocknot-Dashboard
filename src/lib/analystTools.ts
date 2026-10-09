@@ -573,7 +573,7 @@ ${series}`;
       const a = aud[label];
       if (!a) return `${label}: n/a`;
       if (a.status !== 'ok') return `${label}: ${a.status === 'not_connected' ? 'not connected' : 'unavailable'}`;
-      const parts = [a.followers != null ? `${k(a.followers)} followers` : '', a.newFollowers != null ? `${sg(a.newFollowers)} net new in range${a.followersStart != null ? ` (from ${k(a.followersStart)}${a.followersStart ? `, ${(Math.round((a.newFollowers / a.followersStart) * 1000) / 10).toFixed(1)}%` : ''})` : ''}` : '',
+      const parts = [a.followers != null ? `${k(a.followers)} followers${(a as { asOf?: string }).asOf ? ` (latest snapshot, as of ${(a as { asOf?: string }).asOf}; no follower history for this period)` : ''}` : '', a.newFollowers != null ? `${sg(a.newFollowers)} net new in range${a.followersStart != null ? ` (from ${k(a.followersStart)}${a.followersStart ? `, ${(Math.round((a.newFollowers / a.followersStart) * 1000) / 10).toFixed(1)}%` : ''})` : ''}` : '',
         a.profileViews != null ? `${k(a.profileViews)} profile views` : '', a.websiteClicks != null ? `${k(a.websiteClicks)} website taps` : '',
         a.monthlyViews != null ? `${k(a.monthlyViews)} monthly views` : '', a.following != null ? `following ${k(a.following)}` : '', a.boards != null ? `${k(a.boards)} boards` : '', a.pins != null ? `${k(a.pins)} pins` : ''].filter(Boolean);
       const s = (a.series || []).filter(p => p.newFollowers != null);
