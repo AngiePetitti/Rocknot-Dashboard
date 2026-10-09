@@ -272,6 +272,17 @@ export async function fetchPinterestOrganicFromTable(from: string, to: string): 
         metrics: { impressions: val(r, 'impressions'), saves: val(r, 'saves'), pinClicks: val(r, 'pinClicks'), outboundClicks: val(r, 'outboundClicks') },
       };
     }).sort((a, b) => (b.metrics.impressions || b.metrics.pinClicks) - (a.metrics.impressions || a.metrics.pinClicks));
+    // The same pin can appear under several ids in the feed (one per board it
+    // was saved to, or per row id in some connector versions) with identical
+    // title, image and numbers. Show it once.
+    const seen = new Set<string>();
+    const deduped = items.filter(p => {
+      const key = `${p.title}|${p.imageUrl}|${p.publishedAt}|${p.metrics.impressions}|${p.metrics.saves}|${p.metrics.pinClicks}|${p.metrics.outboundClicks}`;
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    });
+    const collapsed = items.length - deduped.length;
+    items.length = 0; items.push(...deduped);
     const labels: Record<string, string> = { pin_id: 'Pin id', pin_title: 'Pin title', pin_description: 'Pin description', pin_permalink: 'Pin link', pin_media_image_url: 'Pin image url', pin_board_name: 'Pin board name', pin_created_at: 'Pin created date', impressions: 'Pin impression', saves: 'Pin save', pinClicks: 'Pin pin click', outboundClicks: 'Pin outbound click' };
     const notes: string[] = [];
     if (missing.length) notes.push(`The Windsor → BigQuery task for Pinterest Organic saved only ${Array.from(have).filter(c => /^pin/.test(c)).join(', ') || 'no pin fields'}. Edit the task in Windsor and tick ${missing.map(k => labels[k] || k).join(', ')}, then run a backfill.${idFallback ? ' Until then pins are grouped by their text, not their id.' : ''}`);
@@ -281,6 +292,7 @@ export async function fetchPinterestOrganicFromTable(from: string, to: string): 
       const n = num(cnt[0]?.n);
       notes.push(n > 0 ? `${n.toLocaleString()} rows for ${from} → ${to} but every impression / save / click column is zero or empty (reading ${METRICS.map(k => `${labels[k]} ← ${pick(k) || 'none'}`).join(', ')}).` : n === 0 ? `No rows for ${from} → ${to} in the table.` : '');
     }
+    if (collapsed > 0) notes.push(`${collapsed} duplicate pin row${collapsed === 1 ? '' : 's'} (same pin, image and numbers under different ids — read via ${id}) collapsed.`);
     return { status: 'ok', items, totals: sumTotals(items, PINTEREST_METRICS), fieldSet: 'bigquery:pinterest_organic', ...(notes.filter(Boolean).length ? { note: notes.filter(Boolean).join(' ') } : {}) };
   } catch (e) {
     return { status: 'error', error: `pinterest_organic table: ${e instanceof Error ? e.message : String(e)}`, items: [], totals: {} };
