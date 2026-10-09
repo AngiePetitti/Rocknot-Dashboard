@@ -85,9 +85,11 @@ function AudienceColumn({ label, a, totals, rangeLabel }: { label: 'Instagram' |
     ? [['Views', totals?.views], ['Reach', totals?.reach || totals?.impressions], ['Likes', totals?.likes], ['Saves', totals?.saves], ['Comments', totals?.comments], ['Shares', totals?.shares], ['Profile views', a?.profileViews], ['Website taps', a?.websiteClicks]]
     : [['Monthly views', a?.monthlyViews], ['Impressions', totals?.impressions], ['Saves', totals?.saves], ['Outbound clicks', totals?.outboundClicks], ['Pins', a?.pins], ['Boards', a?.boards], ['Following', a?.following]];
   const shown = stats.filter(([, v]) => v != null && v > 0).slice(0, 8);
-  // A net change is only meaningful with more than one dated follower total.
-  const datedTotals = (a?.series || []).filter(pt => pt.followers != null).length;
-  const change = a?.status === 'ok' && a.newFollowers != null && (datedTotals > 1 || a.followers == null) ? a.newFollowers : null;
+  // A net change needs more than one dated point: either running totals on
+  // several days, or the feed's own daily new-follower counts (Instagram
+  // reports follower_count per day even when the total is a single snapshot).
+  const datedPoints = (a?.series || []).filter(pt => pt.followers != null || pt.newFollowers != null).length;
+  const change = a?.status === 'ok' && a.newFollowers != null && !a.asOf && (datedPoints > 1 || a.followers == null) ? a.newFollowers : null;
   const state = !a || a.status === 'not_connected' ? 'Not connected yet' : a.status === 'error' ? 'Follower data unavailable right now' : null;
   return (
     <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-4">
@@ -98,7 +100,7 @@ function AudienceColumn({ label, a, totals, rangeLabel }: { label: 'Instagram' |
         </div>
         {change != null && (
           <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${change > 0 ? 'bg-green-50 text-green-600' : change < 0 ? 'bg-red-50 text-red-500' : 'bg-gray-100 text-gray-500'}`}>
-            {change > 0 ? '▲' : change < 0 ? '▼' : '•'} {signed(change)}{a?.followersStart ? ` · ${(Math.round((change / a.followersStart) * 1000) / 10).toFixed(1)}%` : ''} · {rangeLabel.toLowerCase()}
+            {change > 0 ? '▲ Growing' : change < 0 ? '▼ Declining' : '• Flat'} · {signed(change)}{a?.followersStart ? ` (${(Math.round((change / a.followersStart) * 1000) / 10).toFixed(1)}%)` : ''} · {rangeLabel.toLowerCase()}
           </span>
         )}
       </div>
@@ -108,7 +110,7 @@ function AudienceColumn({ label, a, totals, rangeLabel }: { label: 'Instagram' |
         <>
           <div className="flex items-baseline gap-2 mt-2">
             <p className="text-3xl font-bold text-gray-800 leading-none">{a!.followers != null ? n(a!.followers) : (a!.newFollowers != null ? signed(a!.newFollowers) : '—')}</p>
-            <p className="text-xs text-gray-400">{a!.followers != null ? (a!.asOf ? `followers as of ${a!.asOf} (latest snapshot — the feed has no follower history for this period)` : 'followers') : a!.newFollowers != null ? `net new, ${rangeLabel.toLowerCase()}` : 'no follower count from this feed for this period'}</p>
+            <p className="text-xs text-gray-400">{a!.followers != null ? (a!.asOf ? `followers as of ${a!.asOf} (latest snapshot — the feed has no follower history for this period)` : change == null ? 'followers · change shows once the feed has two or more days of follower history' : 'followers') : a!.newFollowers != null ? `net new, ${rangeLabel.toLowerCase()}` : 'no follower count from this feed for this period'}</p>
           </div>
           {shown.length > 0 && (
             <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2.5 mt-4 pt-3 border-t border-gray-100">
