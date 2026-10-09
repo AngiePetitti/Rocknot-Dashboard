@@ -108,7 +108,7 @@ function AudienceColumn({ label, a, totals, rangeLabel }: { label: 'Instagram' |
         <>
           <div className="flex items-baseline gap-2 mt-2">
             <p className="text-3xl font-bold text-gray-800 leading-none">{a!.followers != null ? n(a!.followers) : (a!.newFollowers != null ? signed(a!.newFollowers) : '—')}</p>
-            <p className="text-xs text-gray-400">{a!.followers != null ? 'followers' : a!.newFollowers != null ? `net new, ${rangeLabel.toLowerCase()}` : 'no follower field in this feed yet'}</p>
+            <p className="text-xs text-gray-400">{a!.followers != null ? (a!.asOf ? `followers as of ${a!.asOf} (latest snapshot — the feed has no follower history for this period)` : 'followers') : a!.newFollowers != null ? `net new, ${rangeLabel.toLowerCase()}` : 'no follower count from this feed for this period'}</p>
           </div>
           {shown.length > 0 && (
             <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2.5 mt-4 pt-3 border-t border-gray-100">

@@ -94,6 +94,8 @@ export interface Audience {
   monthlyViews?: number;
   /** Daily points over the range, oldest first (empty when the feed has no dated rows). */
   series: AudiencePoint[];
+  /** Set when the range had no follower total and the latest snapshot was used instead (its date). */
+  asOf?: string;
   fieldSet?: string;
   attempts?: WindsorAttempt[];
 }
@@ -647,7 +649,20 @@ async function fetchAudience(source: 'pinterest_organic' | 'instagram', fieldSet
   const r = await windsorOrganicRows(source, fieldSets, from, to, source === 'pinterest_organic' ? 30000 : 20000);
   if (r.notConnected) return { status: 'not_connected', ...EMPTY_AUD() };
   if (!r.rows) return { status: 'error', error: r.attempts.map(a => `${a.fieldSet}: ${a.error}`).join(' | '), ...EMPTY_AUD(), attempts: r.attempts };
-  return audienceFromRows(source, r.rows, { fieldSet: r.fieldSet || undefined, attempts: r.attempts });
+  const a = audienceFromRows(source, r.rows, { fieldSet: r.fieldSet || undefined, attempts: r.attempts });
+  if (a.followers != null || a.newFollowers != null) return a;
+  // Follower count is a snapshot the feed only carries for days since the
+  // connection existed. A past range (e.g. last month) can come back empty,
+  // so show the latest snapshot and say when it is from.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const recentFrom = new Date(Date.parse(today) - 13 * 86400000).toISOString().slice(0, 10);
+  if (to >= recentFrom) return a;
+  const recent = await windsorOrganicRows(source, fieldSets, recentFrom, today, 15000).catch(() => null);
+  if (!recent?.rows?.length) return a;
+  const latest = audienceFromRows(source, recent.rows, { fieldSet: recent.fieldSet || undefined });
+  const lastPoint = [...latest.series].reverse().find(p => p.followers != null);
+  if (latest.followers == null || !lastPoint) return a;
+  return { ...a, followers: latest.followers, asOf: lastPoint.date, following: latest.following ?? a.following, boards: latest.boards ?? a.boards, pins: latest.pins ?? a.pins, monthlyViews: latest.monthlyViews ?? a.monthlyViews };
 }
 
 // Account columns the Windsor → BigQuery task can carry for Pinterest Organic
