@@ -205,6 +205,22 @@ function rollUp(rows: Array<Record<string, unknown>>, idKey: string, metricKeys:
   return out;
 }
 
+/**
+ * One card per pin: the same pin shows up under several ids (saved to more
+ * than one board, repinned, or per connector row id) with the same title and
+ * the same numbers. Image URLs and dates can differ between those copies, so
+ * the key is the title plus the four counts — a repeat of both is the same pin.
+ */
+export function dedupePins(items: OrganicPost[]): OrganicPost[] {
+  const seen = new Set<string>();
+  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return items.filter(p => {
+    const key = `${norm(p.title)}|${p.metrics.impressions || 0}|${p.metrics.saves || 0}|${p.metrics.pinClicks || 0}|${p.metrics.outboundClicks || 0}`;
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+}
+
 function sumTotals(items: OrganicPost[], keys: string[]): Record<string, number> {
   const t: Record<string, number> = {};
   for (const k of keys) t[k] = items.reduce((s, p) => s + (p.metrics[k] || 0), 0);
@@ -275,12 +291,7 @@ export async function fetchPinterestOrganicFromTable(from: string, to: string): 
     // The same pin can appear under several ids in the feed (one per board it
     // was saved to, or per row id in some connector versions) with identical
     // title, image and numbers. Show it once.
-    const seen = new Set<string>();
-    const deduped = items.filter(p => {
-      const key = `${p.title}|${p.imageUrl}|${p.publishedAt}|${p.metrics.impressions}|${p.metrics.saves}|${p.metrics.pinClicks}|${p.metrics.outboundClicks}`;
-      if (seen.has(key)) return false;
-      seen.add(key); return true;
-    });
+    const deduped = dedupePins(items);
     const collapsed = items.length - deduped.length;
     items.length = 0; items.push(...deduped);
     const labels: Record<string, string> = { pin_id: 'Pin id', pin_title: 'Pin title', pin_description: 'Pin description', pin_permalink: 'Pin link', pin_media_image_url: 'Pin image url', pin_board_name: 'Pin board name', pin_created_at: 'Pin created date', impressions: 'Pin impression', saves: 'Pin save', pinClicks: 'Pin pin click', outboundClicks: 'Pin outbound click' };
@@ -314,6 +325,13 @@ export async function pinterestTableCoverage(): Promise<{ rows: number; first: s
 }
 
 export async function fetchPinterestOrganic(from: string, to: string): Promise<SourceBlock<OrganicPost>> {
+  const block = await fetchPinterestOrganicInner(from, to);
+  if (block.status !== 'ok') return block;
+  const items = dedupePins(block.items);
+  return { ...block, items, totals: sumTotals(items, PINTEREST_METRICS) };
+}
+
+async function fetchPinterestOrganicInner(from: string, to: string): Promise<SourceBlock<OrganicPost>> {
   // Order of preference: the BigQuery table (instant, complete) → Pinterest's
   // own API when connected (fast, top pins with images) → Windsor's live
   // pull, which fetches analytics for every pin on the account and times out
