@@ -5,7 +5,7 @@ import Card from '@/src/components/ui/Card';
 
 import { ROLE_LABELS, ROLE_HELP, type Role } from '@/src/lib/access';
 
-interface ListedUser { email: string; role: Role; locked: boolean; source: 'env' | 'sheet'; }
+interface ListedUser { email: string; role: Role; locked: boolean; source: 'owner' | 'env' | 'sheet'; }
 
 export default function AdminUsers({ currentEmail }: { currentEmail: string }) {
   const [users, setUsers] = useState<ListedUser[]>([]);
@@ -82,7 +82,7 @@ export default function AdminUsers({ currentEmail }: { currentEmail: string }) {
                 <div className="w-8 h-8 rounded-full bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center shrink-0">{u.email.charAt(0).toUpperCase()}</div>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-gray-800 truncate">{u.email}{u.email === currentEmail && <span className="text-gray-400 font-normal"> (you)</span>}</p>
-                  {u.locked && <p className="text-[10px] text-gray-400">Permanent admin (set in env) — manage in Vercel</p>}
+                  {u.locked && <p className="text-[10px] text-gray-400">{u.source === 'owner' ? 'Agency owner — permanent' : 'Permanent admin (set in env) — manage in Vercel'}</p>}
                 </div>
                 {u.locked ? (
                   <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${u.role === 'partner' ? 'bg-amber-50 text-amber-700' : 'bg-violet-50 text-violet-700'}`} title={ROLE_HELP[u.role]}>{ROLE_LABELS[u.role] || u.role}</span>
@@ -100,7 +100,7 @@ export default function AdminUsers({ currentEmail }: { currentEmail: string }) {
             ))}
           </div>
         )}
-        <p className="text-[11px] text-gray-400 mt-3">Changes take effect the next time that person signs in (sessions last up to 8 hours). Admins configured in the AUTH_ADMINS env var are permanent and can&apos;t be removed here.</p>
+        <p className="text-[11px] text-gray-400 mt-3">Changes take effect the next time that person signs in (sessions last up to 8 hours). Any admin can add people, change roles and remove people. The agency owner accounts are permanent and can&apos;t be changed or removed by anyone.</p>
       </Card>
     </div>
   );

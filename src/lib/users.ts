@@ -12,11 +12,16 @@ const TAB = 'Users';
 function envList(name: string): string[] {
   return (process.env[name] || '').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
 }
-export const envAdmins = () => envList('AUTH_ADMINS');
+// Agency owners: always admins on every client dashboard, never removable or
+// demotable from the Team & Access tab, whatever AUTH_ADMINS says on a given
+// deployment. Other admins can add and remove everyone else.
+export const OWNER_EMAILS = ['info@area6marketing.com', 'petittillc@gmail.com'];
+export const isOwner = (email: string) => OWNER_EMAILS.includes(email.toLowerCase().trim());
+export const envAdmins = () => Array.from(new Set([...OWNER_EMAILS, ...envList('AUTH_ADMINS')]));
 export const envMembers = () => envList('AUTH_MEMBERS');
 
 export interface StoredUser { email: string; role: Role; }
-export interface ListedUser { email: string; role: Role; locked: boolean; source: 'env' | 'sheet'; }
+export interface ListedUser { email: string; role: Role; locked: boolean; source: 'owner' | 'env' | 'sheet'; }
 
 function storeConfigured(): boolean {
   return Boolean(SHEET_ID && (process.env.GCP_SERVICE_ACCOUNT_KEY || '').trim());
@@ -97,7 +102,7 @@ export async function listUsers(): Promise<ListedUser[]> {
   const stored = await getStoredUsers();
   const seen = new Set<string>();
   const out: ListedUser[] = [];
-  for (const e of envAdmins()) { out.push({ email: e, role: 'admin', locked: true, source: 'env' }); seen.add(e); }
+  for (const e of envAdmins()) { out.push({ email: e, role: 'admin', locked: true, source: isOwner(e) ? 'owner' : 'env' }); seen.add(e); }
   for (const e of envMembers()) if (!seen.has(e) && !stored.some(u => u.email === e)) { out.push({ email: e, role: 'team', locked: true, source: 'env' }); seen.add(e); }
   for (const u of stored) if (!seen.has(u.email)) { out.push({ ...u, locked: false, source: 'sheet' }); seen.add(u.email); }
   return out.sort((a, b) => (a.role === b.role ? a.email.localeCompare(b.email) : a.role === 'admin' ? -1 : 1));
@@ -108,6 +113,7 @@ const isEnvManaged = (email: string) => envAdmins().includes(email) || envMember
 export async function upsertUser(email: string, role: Role): Promise<void> {
   const e = email.toLowerCase().trim();
   if (!e || !e.includes('@')) throw new Error('Enter a valid email');
+  if (isOwner(e)) throw new Error('This is an agency owner account — it is permanent and cannot be changed.');
   if (isEnvManaged(e)) throw new Error('This user is managed via env vars and can\'t be edited here.');
   const stored = await getStoredUsers();
   const idx = stored.findIndex(u => u.email === e);
@@ -117,6 +123,7 @@ export async function upsertUser(email: string, role: Role): Promise<void> {
 
 export async function removeUser(email: string): Promise<void> {
   const e = email.toLowerCase().trim();
+  if (isOwner(e)) throw new Error('This is an agency owner account — it is permanent and cannot be removed.');
   if (isEnvManaged(e)) throw new Error('This user is managed via env vars and can\'t be removed here.');
   const stored = await getStoredUsers();
   await writeStoredUsers(stored.filter(u => u.email !== e));
