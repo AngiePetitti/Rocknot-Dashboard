@@ -33,6 +33,10 @@ export interface BlogPost {
   sessions: number;
   cartAdds: number;
   completed: number;
+  /** GA4 bounce rate for sessions landing on this page (0–1); null when GA4 has no row for it. */
+  bounceRate: number | null;
+  /** GA4 sessions behind the bounce rate (GA4 and Shopify count sessions differently). */
+  gaSessions: number;
 }
 
 export interface SourceBlock<T> {
@@ -472,9 +476,11 @@ export async function fetchBlogPerformance(from: string, to: string): Promise<So
     // Blog articles sit in the long tail of landing pages, so pull wide;
     // fall back to a smaller page if Shopify refuses the limit.
     const landingQl = (limit: number) => `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY landing_page_path SINCE ${from} UNTIL ${to} ORDER BY sessions DESC LIMIT ${limit}`;
-    const [rows, adminArticles] = await Promise.all([
+    const [rows, adminArticles, gaLanding] = await Promise.all([
       shopifyql(landingQl(5000), { timeoutMs: 25000 }).catch(() => shopifyql(landingQl(1000), { timeoutMs: 20000 })),
       fetchArticles(),
+      // Bounce rate lives in GA4 (Shopify's sessions report has none); missing GA4 just leaves the column blank.
+      import('@/src/lib/ga4').then(mod => mod.fetchGaLandingEngagement(from, to)).catch(() => null),
     ]);
     // No read_content scope → public Atom feeds for the blogs visitors landed on.
     let articles = adminArticles;
@@ -505,6 +511,7 @@ export async function fetchBlogPerformance(from: string, to: string): Promise<So
         url: `https://${getClient().siteDomain}${path}`,
         publishedAt: meta?.publishedAt || '',
         sessions: 0, cartAdds: 0, completed: 0,
+        bounceRate: gaLanding?.get(path)?.bounceRate ?? null, gaSessions: gaLanding?.get(path)?.sessions ?? 0,
       };
       cur.sessions += num(r.sessions); cur.cartAdds += num(r.sessions_with_cart_additions); cur.completed += num(r.sessions_that_completed_checkout);
       byPath.set(path, cur);
@@ -517,15 +524,17 @@ export async function fetchBlogPerformance(from: string, to: string): Promise<So
       const og = await fetchOgImages(needImg);
       for (const b of articleItems) if (!b.imageUrl && og.get(b.path)) b.imageUrl = og.get(b.path)!;
     }
-    const totals = {
+    const totals: Record<string, number> = {
       sessions: items.reduce((s, b) => s + b.sessions, 0),
       cartAdds: items.reduce((s, b) => s + b.cartAdds, 0),
       completed: items.reduce((s, b) => s + b.completed, 0),
       articles: articleItems.length,
       articleSessions: articleItems.reduce((s, b) => s + b.sessions, 0),
       articlesKnown: articles.size,
+      // Session-weighted GA4 bounce rate across the blog pages that have one (0–100).
+      ...(() => { const w = items.filter(b => b.bounceRate != null && b.gaSessions > 0); const n = w.reduce((s, b) => s + b.gaSessions, 0); return n > 0 ? { bounceRatePct: Math.round((w.reduce((s, b) => s + b.bounceRate! * b.gaSessions, 0) / n) * 1000) / 10, bouncePages: w.length } : {}; })(),
     };
-    return { status: 'ok', items, totals };
+    return { status: 'ok', items, totals, ...(gaLanding ? {} : { note: 'Bounce rate needs Google Analytics 4 (connected in Windsor) — GA4 returned nothing for this period.' }) };
   } catch (e) {
     return { status: 'error', error: e instanceof Error ? e.message : String(e), items: [], totals: {} };
   }
