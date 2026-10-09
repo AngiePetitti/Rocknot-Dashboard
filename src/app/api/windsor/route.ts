@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { parseCompareMode, priorRangeFor } from '@/src/lib/timeframes';
 import { Timeframe } from '@/src/lib/mockData';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getOverview, fetchShopifyDaily, fetchShopifyTotals, fetchShopifyCustomerSplit } from '@/src/lib/bqOverview';
@@ -465,6 +466,7 @@ export async function GET(request: NextRequest) {
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
   const withCompare = searchParams.get('compare') === 'true';
+  const compareMode = parseCompareMode(searchParams.get('compare_to'));
   const debug = searchParams.get('debug') === 'true';
 
   if (!WINDSOR_API_KEY) {
@@ -494,7 +496,13 @@ export async function GET(request: NextRequest) {
       let bqPrior = null;
       let bqPriorLabel = '';
       if (withCompare) {
-        if (isCustom && dateFrom && dateTo) {
+        if (compareMode !== 'prior') {
+          // Same dates one month / one year earlier.
+          const pr = priorRangeFor(compareMode, isCustom ? 'custom' : tf, currentParams.date_from, currentParams.date_to);
+          const p = await getOverview(pr.from, pr.to);
+          bqPrior = p.metrics;
+          bqPriorLabel = pr.label;
+        } else if (isCustom && dateFrom && dateTo) {
           const days = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1;
           const priorTo = addDays(dateFrom, -1);
           const priorFrom = addDays(dateFrom, -days);
@@ -520,7 +528,7 @@ export async function GET(request: NextRequest) {
         metrics: overview.metrics,
         revenueData: overview.revenueData,
         ...(overview.adsError ? { adsError: overview.adsError } : {}),
-        ...(bqPrior ? { priorPeriod: bqPrior, priorLabel: bqPriorLabel } : {}),
+        ...(bqPrior ? { priorPeriod: bqPrior, priorLabel: bqPriorLabel, compareMode } : {}),
       }, await partnerSession()), { headers: cacheHeaders(false) });
     }
 
@@ -826,7 +834,11 @@ export async function GET(request: NextRequest) {
 
     if (withCompare) {
       let priorParams: Record<string, string>;
-      if (isCustom && dateFrom && dateTo) {
+      if (compareMode !== 'prior') {
+        const pr = priorRangeFor(compareMode, isCustom ? 'custom' : tf, currentParams.date_from, currentParams.date_to);
+        priorParams = { date_from: pr.from, date_to: pr.to };
+        priorLabel = pr.label;
+      } else if (isCustom && dateFrom && dateTo) {
         const days = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1;
         const priorTo = addDays(dateFrom, -1);
         const priorFrom = addDays(dateFrom, -days);
@@ -867,7 +879,7 @@ export async function GET(request: NextRequest) {
       revenueData: current.revenueData,
       ...(latestAvailableDate ? { dataLag: true, latestAvailableDate } : {}),
       ...(shopifyLiveError && current.metrics.totalRevenue === 0 ? { shopifyLiveError } : {}),
-      ...(priorPeriod ? { priorPeriod, priorLabel } : {}),
+      ...(priorPeriod ? { priorPeriod, priorLabel, compareMode } : {}),
       ...(lastWindsorError ? { adsError: `Windsor API error: ${lastWindsorError} — if the API key was rotated, update WINDSOR_API_KEY in Vercel and redeploy.` } : {}),
     }, await partnerSession()), { headers: cacheHeaders(includesToday) });
 

@@ -60,6 +60,7 @@ export default function ChannelContent({ channelKey }: { channelKey: string }) {
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
   const compareOn = searchParams.get('compare') === 'true';
+  const compareTo = searchParams.get('compare_to') || '';
   const rangeLabel = tfRaw === 'custom' && dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : (TIMEFRAME_LABELS[tfRaw] || 'Last 30 Days');
   const [data, setData] = useState<ChannelResponse | null>(null);
 
@@ -69,8 +70,9 @@ export default function ChannelContent({ channelKey }: { channelKey: string }) {
     if (dateFrom) p.set('date_from', dateFrom);
     if (dateTo) p.set('date_to', dateTo);
     if (compareOn) p.set('compare', 'true');
+    if (compareOn && (compareTo === 'month' || compareTo === 'year')) p.set('compare_to', compareTo);
     fetch(`/api/channel/${channelKey}?${p}`, { cache: 'no-store' }).then(r => r.json()).then(setData).catch(() => setData({ source: 'error', error: 'Failed to load' }));
-  }, [channelKey, tfRaw, dateFrom, dateTo, compareOn]);
+  }, [channelKey, tfRaw, dateFrom, dateTo, compareOn, compareTo]);
 
   const t = data?.totals;
   const s = data?.store;

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchChannel, channelConfigured } from '@/src/lib/channel';
 import { marketplaceByKey } from '@/src/lib/client';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
-import { timeframeRange, addDays } from '@/src/lib/timeframes';
+import { timeframeRange, addDays, parseCompareMode, priorRangeFor } from '@/src/lib/timeframes';
 import { Timeframe } from '@/src/lib/mockData';
 
 export const dynamic = 'force-dynamic';
@@ -17,15 +17,8 @@ export async function GET(request: NextRequest, { params }: { params: { key: str
   const { from, to } = timeframeRange(tf, sp.get('date_from'), sp.get('date_to'));
   let prior: { from: string; to: string } | null = null;
   if (sp.get('compare') === 'true') {
-    if (tf === 'last_month' || tf === 'mtd') {
-      const [y, m] = from.split('-').map(Number);
-      const pFrom = new Date(y, m - 2, 1).toLocaleDateString('en-CA');
-      const pTo = tf === 'mtd' ? new Date(y, m - 2, Number(to.slice(8, 10))).toLocaleDateString('en-CA') : new Date(y, m - 1, 0).toLocaleDateString('en-CA');
-      prior = { from: pFrom, to: pTo < pFrom ? pFrom : pTo };
-    } else {
-      const days = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
-      prior = { from: addDays(from, -days), to: addDays(from, -1) };
-    }
+    const pr = priorRangeFor(parseCompareMode(sp.get('compare_to')), tf, from, to);
+    prior = { from: pr.from, to: pr.to };
   }
   try {
     const data = await fetchChannel(params.key, from, to, prior);
