@@ -270,12 +270,48 @@ export async function fetchPinterestOrganicFromTable(from: string, to: string): 
   }
 }
 
+/** What the pinterest_organic table currently holds (row count, first and last date); cached briefly. */
+let pinCoverageCache: { t: number; v: { rows: number; first: string | null; last: string | null } } | null = null;
+export async function pinterestTableCoverage(): Promise<{ rows: number; first: string | null; last: string | null } | null> {
+  if (!isBigQueryConfigured() || !(await tableExists('pinterest_organic'))) return null;
+  if (pinCoverageCache && Date.now() - pinCoverageCache.t < 10 * 60 * 1000) return pinCoverageCache.v;
+  try {
+    const ds = getDataset();
+    const r = await runQuery<{ row_count: number | string; first_date: string | null; last_date: string | null }>(`SELECT COUNT(*) AS row_count, CAST(MIN(date) AS STRING) AS first_date, CAST(MAX(date) AS STRING) AS last_date FROM \`${ds}.pinterest_organic\``);
+    const v = { rows: num(r[0]?.row_count), first: r[0]?.first_date || null, last: r[0]?.last_date || null };
+    pinCoverageCache = { t: Date.now(), v };
+    return v;
+  } catch { return null; }
+}
+
 export async function fetchPinterestOrganic(from: string, to: string): Promise<SourceBlock<OrganicPost>> {
+  // Order of preference: the BigQuery table (instant, complete) → Pinterest's
+  // own API when connected (fast, top pins with images) → Windsor's live
+  // pull, which fetches analytics for every pin on the account and times out
+  // on an account this size, so it is the last resort, never the default.
   const fromTable = await fetchPinterestOrganicFromTable(from, to);
-  if (fromTable && fromTable.status === 'ok') return fromTable;
-  // The table exists but could not be read: say so instead of silently
-  // waiting on the slow live pull, which is what hid this for days.
-  if (fromTable && fromTable.status === 'error') return { ...fromTable, error: `BigQuery pinterest_organic table: ${fromTable.error} — check /api/debug/organic → pinterestTable` };
+  if (fromTable && fromTable.status === 'ok' && fromTable.items.length) return fromTable;
+  const { fetchPinterestOrganicDirect, pinterestOrganicDirectConfigured } = await import('@/src/lib/pinterestOrganicDirect');
+  if (pinterestOrganicDirectConfigured()) {
+    const d: { items: OrganicPost[]; note?: string; error?: string } = await fetchPinterestOrganicDirect(from, to).catch(e => ({ items: [], error: e instanceof Error ? e.message : String(e) }));
+    if (!d.error && d.items.length) return { status: 'ok', items: d.items, totals: sumTotals(d.items, PINTEREST_METRICS), fieldSet: 'pinterest_api', ...(d.note ? { note: d.note } : {}) };
+  }
+  if (fromTable) {
+    // The table exists but has nothing for this range: show the newest days
+    // it does hold, and say what is covered, rather than a timeout.
+    const cov = await pinterestTableCoverage();
+    const tableErr = fromTable.status === 'error' ? fromTable.error : '';
+    if (cov && cov.rows > 0 && cov.last && cov.first) {
+      const winFrom = cov.last > from ? from : new Date(Math.max(Date.parse(cov.first), Date.parse(cov.last) - 29 * 86400000)).toISOString().slice(0, 10);
+      const winTo = cov.last;
+      const recent = winFrom !== from || winTo !== to ? await fetchPinterestOrganicFromTable(winFrom, winTo) : null;
+      const note = `The Pinterest Organic table in BigQuery currently holds ${cov.first} → ${cov.last} (${cov.rows.toLocaleString()} rows); Windsor's daily run adds new days as they land. ${recent && recent.status === 'ok' && recent.items.length ? `Showing the latest days it has (${winFrom} → ${winTo}) instead of ${from} → ${to}.` : `Nothing for ${from} → ${to} yet.`}`;
+      if (recent && recent.status === 'ok' && recent.items.length) return { ...recent, note: [recent.note, note].filter(Boolean).join(' ') };
+      return { status: 'ok', items: [], totals: {}, fieldSet: 'bigquery:pinterest_organic', note: [tableErr, note].filter(Boolean).join(' ') };
+    }
+    if (cov && cov.rows === 0) return { status: 'error', error: 'The Pinterest Organic table in BigQuery exists but is still empty — the Windsor backfill has not written rows yet. Check the task in Windsor; nothing to change on the dashboard.', items: [], totals: {} };
+    if (tableErr) return { ...fromTable, error: `BigQuery pinterest_organic table: ${tableErr} — check /api/debug/organic → pinterestTable` };
+  }
   let r = await windsorOrganicRows('pinterest_organic', PINTEREST_ORGANIC_FIELDSETS, from, to);
   // Windsor's live Pinterest pull scales with the range; when a long range
   // times out, fall back to the last 7 days so the tab still shows pins,
@@ -294,7 +330,6 @@ export async function fetchPinterestOrganic(from: string, to: string): Promise<S
   if (r.notConnected) {
     // Windsor can't see a profile reached through Business Access; Pinterest's
     // own API can, acting through the client's ad account.
-    const { fetchPinterestOrganicDirect, pinterestOrganicDirectConfigured } = await import('@/src/lib/pinterestOrganicDirect');
     if (!pinterestOrganicDirectConfigured()) return { status: 'not_connected', items: [], totals: {} };
     const d = await fetchPinterestOrganicDirect(from, to);
     if (d.error) return { status: 'error', error: d.error, items: [], totals: {} };

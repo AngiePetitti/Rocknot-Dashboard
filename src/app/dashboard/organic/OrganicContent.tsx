@@ -330,7 +330,7 @@ export default function OrganicContent() {
                 <p className="text-[11px] text-gray-400">Organic pins with activity in this period · impressions, saves and clicks are Pinterest&apos;s own counts</p>
               </div>
               {pin.note && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 mb-3">{pin.note}</p>}
-              <PostGrid block={pin} sorts={PIN_SORTS} ratio="pin" emptyText="No organic pin activity in this period."
+              <PostGrid block={pin} sorts={PIN_SORTS} ratio="pin" emptyText={pin.note ? 'No pins to show for these days yet.' : 'No organic pin activity in this period.'}
                 metricDefs={[{ key: 'impressions', label: 'Impr.' }, { key: 'saves', label: 'Saves' }, { key: 'outboundClicks', label: 'Outbound' }, { key: 'pinClicks', label: 'Pin clicks' }]} />
             </Card>
           )}
