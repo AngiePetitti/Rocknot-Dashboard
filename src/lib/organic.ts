@@ -231,7 +231,14 @@ export async function fetchPinterestOrganicFromTable(from: string, to: string): 
     const ds = getDataset();
     const cols = await runQuery<{ column_name: string }>(`SELECT column_name FROM \`${ds}.INFORMATION_SCHEMA.COLUMNS\` WHERE table_name = 'pinterest_organic'`);
     const have = new Set(cols.map(c => c.column_name));
-    const pick = (k: string) => PIN_TABLE_ALTS[k].find(c => have.has(c)) || null;
+    // Known names first, then anything that looks right (e.g. a pin_pin_id or
+    // pin_media_url the connector version renamed).
+    const guess: Record<string, RegExp> = {
+      pin_id: /(^|_)pin_id$|^id$/, pin_title: /title$/, pin_description: /description$/, pin_permalink: /(permalink|_link|_url)$/i,
+      pin_media_image_url: /image.*url|cover.*url|media_url$/, pin_board_name: /board.*name/, pin_created_at: /created/,
+      impressions: /impression/, saves: /\bsave|_save/, pinClicks: /^(pin_)?pin_click|^pin_click|^click/, outboundClicks: /outbound/,
+    };
+    const pick = (k: string) => PIN_TABLE_ALTS[k].find(c => have.has(c)) || Array.from(have).find(c => guess[k]?.test(c) && !/account_/.test(c)) || null;
     const id = pick('pin_id');
     if (!id || !have.has('date')) return { status: 'error', error: `pinterest_organic table lacks a pin id / date column (has: ${Array.from(have).join(', ')})`, items: [], totals: {} };
     const sel = Object.keys(PIN_TABLE_ALTS).map(k => { const c = pick(k); return c ? `CAST(${c} AS STRING) AS ${k}` : `NULL AS ${k}`; }).join(', ');
@@ -256,6 +263,9 @@ export async function fetchPinterestOrganicFromTable(from: string, to: string): 
 export async function fetchPinterestOrganic(from: string, to: string): Promise<SourceBlock<OrganicPost>> {
   const fromTable = await fetchPinterestOrganicFromTable(from, to);
   if (fromTable && fromTable.status === 'ok') return fromTable;
+  // The table exists but could not be read: say so instead of silently
+  // waiting on the slow live pull, which is what hid this for days.
+  if (fromTable && fromTable.status === 'error') return { ...fromTable, error: `BigQuery pinterest_organic table: ${fromTable.error} — check /api/debug/organic → pinterestTable` };
   let r = await windsorOrganicRows('pinterest_organic', PINTEREST_ORGANIC_FIELDSETS, from, to);
   // Windsor's live Pinterest pull scales with the range; when a long range
   // times out, fall back to the last 7 days so the tab still shows pins,
