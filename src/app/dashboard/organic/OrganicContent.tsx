@@ -194,7 +194,7 @@ export default function OrganicContent() {
   const rangeLabel = tfRaw === 'custom' && dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : (TIMEFRAME_LABELS[tfRaw] || 'Last 30 Days');
   const [data, setData] = useState<OrganicResponse | null>(null);
   const [showAllBlog, setShowAllBlog] = useState(false);
-  type BlogSort = 'publishedAt' | 'sessions' | 'cartAdds' | 'completed' | 'cvr';
+  type BlogSort = 'publishedAt' | 'sessions' | 'cartAdds' | 'completed' | 'cvr' | 'bounce';
   const [blogSort, setBlogSort] = useState<{ key: BlogSort; dir: 'asc' | 'desc' }>({ key: 'sessions', dir: 'desc' });
   const toggleBlogSort = (key: BlogSort) => setBlogSort(s => (s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' }));
 
@@ -212,7 +212,7 @@ export default function OrganicContent() {
   const traffic = data?.socialTraffic;
   const blogItems: BlogPost[] = useMemo(() => {
     const items = [...(blog?.items || [])];
-    const val = (b: BlogPost) => blogSort.key === 'cvr' ? (b.sessions > 0 ? b.completed / b.sessions : -1)
+    const val = (b: BlogPost) => blogSort.key === 'bounce' ? (b.bounceRate ?? -1) : blogSort.key === 'cvr' ? (b.sessions > 0 ? b.completed / b.sessions : -1)
       : blogSort.key === 'publishedAt' ? (b.publishedAt || '') : b[blogSort.key];
     items.sort((a, b) => {
       const x = val(a), y = val(b);
@@ -352,8 +352,9 @@ export default function OrganicContent() {
           <Card className="mb-6">
             <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
               <h3 className="text-sm font-bold text-gray-800">Blog Posts</h3>
-              <p className="text-[11px] text-gray-400">Sessions that started on the article · Shopify sessions report · titles and covers from the Shopify blog</p>
+              <p className="text-[11px] text-gray-400">Sessions that started on the article · Shopify sessions report · bounce rate from Google Analytics 4 (sessions under 10s with no conversion and one page){blog?.status === 'ok' && blog.totals.bounceRatePct != null ? ` · blog-wide ${blog.totals.bounceRatePct}%` : ''}</p>
             </div>
+            {blog?.status === 'ok' && blog.note && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 mb-3">{blog.note}</p>}
             {blog?.status === 'error' && <p className="text-xs text-red-600 mb-2">{blog.error}</p>}
             {blog?.status === 'ok' && blogItems.length > 0 && (blog.totals.articlesKnown || 0) === 0 && isAdmin && (
               <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
@@ -373,6 +374,7 @@ export default function OrganicContent() {
                       <SortTH k="cartAdds" label="Add to cart" />
                       <SortTH k="completed" label="Orders" />
                       <SortTH k="cvr" label="CVR" />
+                      <SortTH k="bounce" label="Bounce" />
                     </tr>
                   </thead>
                   <tbody>
@@ -395,6 +397,7 @@ export default function OrganicContent() {
                         <td className="py-2 pl-2 text-right tabular-nums text-gray-600">{n(b.cartAdds)}</td>
                         <td className="py-2 pl-2 text-right tabular-nums">{n(b.completed)}</td>
                         <td className="py-2 pl-2 text-right tabular-nums text-gray-600">{pct(b.completed, b.sessions)}</td>
+                        <td className={`py-2 pl-2 text-right tabular-nums ${b.bounceRate == null ? 'text-gray-300' : b.bounceRate >= 0.7 ? 'text-red-500' : b.bounceRate <= 0.4 ? 'text-green-600' : 'text-gray-600'}`} title={b.bounceRate != null ? `${n(b.gaSessions)} GA4 sessions` : 'No GA4 row for this page'}>{b.bounceRate == null ? '—' : `${(b.bounceRate * 100).toFixed(0)}%`}</td>
                       </tr>
                     ))}
                   </tbody>

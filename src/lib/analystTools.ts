@@ -556,7 +556,7 @@ ${series}`;
     type Post = { id: string; title: string; group: string; publishedAt: string; url: string; imageUrl: string; metrics: Record<string, number> };
     type Block = { status: string; error?: string; items: Post[]; totals: Record<string, number> };
     const pin = d.pinterest as Block; const ig = d.instagram as Block;
-    const blog = d.blog as { status: string; items: Array<{ title: string; path: string; url: string; imageUrl: string; kind?: string; publishedAt: string; sessions: number; cartAdds: number; completed: number }>; totals: Record<string, number> };
+    const blog = d.blog as { status: string; items: Array<{ title: string; path: string; url: string; imageUrl: string; kind?: string; publishedAt: string; sessions: number; cartAdds: number; completed: number; bounceRate?: number | null }>; totals: Record<string, number> };
     const st = d.socialTraffic as Record<string, { sessions: number; completed: number }>;
     const m = (o: Record<string, number>, keys: string[]) => keys.filter(k => o[k]).map(k => `${k} ${Math.round(o[k]).toLocaleString()}`).join(' · ');
     // Same-origin image proxy (platform CDN links expire) — see /api/creatives/thumb.
@@ -597,8 +597,8 @@ ${postLines('Pinterest', pin, ['impressions', 'saves', 'pinClicks', 'outboundCli
 INSTAGRAM POSTS & REELS (Instagram's own counts):
 ${postLines('Instagram', ig, ['reach', 'likes', 'comments', 'saves', 'shares', 'views'])}
 
-BLOG ARTICLES (Shopify sessions that started on the article; blog home / tag pages marked):
-${blog.status !== 'ok' ? 'unavailable' : (blog.items.slice(0, 12).map(b => `- ${b.title}${b.kind && b.kind !== 'article' ? ` [${b.kind === 'index' ? 'blog home' : 'tag page'}]` : ''} (${b.publishedAt || 'date n/a'}): ${b.sessions} sessions · ${b.cartAdds} add-to-cart · ${b.completed} orders\n   image: ${b.imageUrl || 'none'}\n   link: ${b.url}`).join('\n') || 'no blog sessions') + `\nTotals: ${blog.totals.sessions || 0} sessions · ${blog.totals.completed || 0} orders · ${blog.totals.articles || 0} articles`}
+BLOG ARTICLES (Shopify sessions that started on the article; bounce rate = GA4's share of sessions under 10s with no conversion and one page; blog home / tag pages marked):
+${blog.status !== 'ok' ? 'unavailable' : (blog.items.slice(0, 12).map(b => `- ${b.title}${b.kind && b.kind !== 'article' ? ` [${b.kind === 'index' ? 'blog home' : 'tag page'}]` : ''} (${b.publishedAt || 'date n/a'}): ${b.sessions} sessions · ${b.cartAdds} add-to-cart · ${b.completed} orders${b.bounceRate != null ? ` · bounce ${Math.round(b.bounceRate * 100)}% (GA4)` : ''}\n   image: ${b.imageUrl || 'none'}\n   link: ${b.url}`).join('\n') || 'no blog sessions') + `\nTotals: ${blog.totals.sessions || 0} sessions · ${blog.totals.completed || 0} orders · ${blog.totals.articles || 0} articles${blog.totals.bounceRatePct != null ? ` · blog-wide bounce ${blog.totals.bounceRatePct}% (GA4, session-weighted)` : ''}`}
 
 UNPAID SITE SESSIONS REFERRED BY: Pinterest ${st?.Pinterest?.sessions ?? 0} (${st?.Pinterest?.completed ?? 0} orders) · Instagram ${st?.Instagram?.sessions ?? 0} (${st?.Instagram?.completed ?? 0} orders). Many in-app taps hide the referrer, so this is a floor.`;
   }

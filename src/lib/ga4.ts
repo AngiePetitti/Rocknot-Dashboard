@@ -247,3 +247,31 @@ export function ga4Text(g: GaData, from: string, to: string): string {
   if (g.status === 'partial') lines.push(`Some GA4 blocks failed: ${g.error}`);
   return lines.join('\n\n');
 }
+
+/**
+ * GA4 landing-page engagement, keyed by path (query string and trailing
+ * slash stripped): sessions, engaged sessions, and the bounce rate GA4
+ * defines as 1 − engaged ÷ sessions. Used by the blog table on the Organic
+ * tab (Shopify's sessions report has no bounce or engagement metric).
+ */
+export async function fetchGaLandingEngagement(from: string, to: string): Promise<Map<string, { sessions: number; engaged: number; bounceRate: number | null }> | null> {
+  const attempts: GaAttempt[] = [];
+  let landing: { rows: Array<Record<string, unknown>> | null; error?: string } = { rows: null };
+  for (const c of CONNECTORS) {
+    landing = await windsorRows('landing', c, from, to, attempts);
+    if (landing.rows) break;
+    if (landing.error === 'not connected') return null;
+  }
+  if (!landing.rows) return null;
+  const out = new Map<string, { sessions: number; engaged: number; bounceRate: number | null }>();
+  for (const r of landing.rows) {
+    const raw = d(r, 'landing_page');
+    if (!raw) continue;
+    const path = raw.split('?')[0].replace(/\/+$/, '') || '/';
+    const cur = out.get(path) || { sessions: 0, engaged: 0, bounceRate: null };
+    cur.sessions += m(r, 'sessions'); cur.engaged += m(r, 'engaged_sessions');
+    out.set(path, cur);
+  }
+  out.forEach(v => { v.bounceRate = v.sessions > 0 ? Math.max(0, Math.min(1, 1 - v.engaged / v.sessions)) : null; });
+  return out;
+}
