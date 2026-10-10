@@ -11,6 +11,8 @@ import MetricCard from '@/src/components/ui/MetricCard';
 import { useClient } from '@/src/components/ClientProvider';
 import type { OrganicData, OrganicPost, BlogPost, SourceBlock, Audience } from '@/src/lib/organic';
 import FollowerGrowthChart from '@/src/components/charts/FollowerGrowthChart';
+import { timeframeRange, priorRangeFor, parseCompareMode } from '@/src/lib/timeframes';
+import type { Timeframe } from '@/src/lib/mockData';
 
 interface OrganicResponse extends Partial<OrganicData> { source?: string; error?: string }
 
@@ -78,12 +80,20 @@ function SetupCard({ title, platform, isAdmin, block }: { title: string; platfor
 const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${n(Math.abs(v))}`;
 const PLATFORM_COLORS: Record<'Instagram' | 'Pinterest', string> = { Instagram: '#d946ef', Pinterest: '#e11d48' };
 
+/** Green / red change versus the comparison period (lower-is-better metrics are not used here). */
+function Delta({ cur, prev, label }: { cur: number | null | undefined; prev: number | null | undefined; label?: string }) {
+  if (cur == null || prev == null || prev === 0) return null;
+  const d = ((cur - prev) / prev) * 100;
+  if (!Number.isFinite(d)) return null;
+  return <span className={`block text-[11px] font-semibold ${d > 0 ? 'text-green-500' : d < 0 ? 'text-red-500' : 'text-gray-400'}`}>{d > 0 ? '▲' : d < 0 ? '▼' : '•'} {Math.abs(d).toFixed(1)}%{label ? ` ${label}` : ''}</span>;
+}
+
 /** One platform's panel in the Audience card: followers, net change, and its other account/engagement numbers. */
-function AudienceColumn({ label, a, totals, rangeLabel }: { label: 'Instagram' | 'Pinterest'; a: Audience | undefined; totals: Record<string, number> | undefined; rangeLabel: string }) {
+function AudienceColumn({ label, a, totals, rangeLabel, prior, priorTotals, compareLabel }: { label: 'Instagram' | 'Pinterest'; a: Audience | undefined; totals: Record<string, number> | undefined; rangeLabel: string; prior?: Audience; priorTotals?: Record<string, number>; compareLabel?: string }) {
   const color = PLATFORM_COLORS[label];
-  const stats: Array<[string, number | undefined]> = label === 'Instagram'
-    ? [['Views', totals?.views], ['Reach', totals?.reach || totals?.impressions], ['Likes', totals?.likes], ['Saves', totals?.saves], ['Comments', totals?.comments], ['Shares', totals?.shares], ['Profile views', a?.profileViews], ['Website taps', a?.websiteClicks]]
-    : [['Monthly views', a?.monthlyViews], ['Impressions', totals?.impressions], ['Saves', totals?.saves], ['Outbound clicks', totals?.outboundClicks], ['Pins', a?.pins], ['Boards', a?.boards], ['Following', a?.following]];
+  const stats: Array<[string, number | undefined, number | undefined]> = label === 'Instagram'
+    ? [['Views', totals?.views, priorTotals?.views], ['Reach', totals?.reach || totals?.impressions, priorTotals?.reach || priorTotals?.impressions], ['Likes', totals?.likes, priorTotals?.likes], ['Saves', totals?.saves, priorTotals?.saves], ['Comments', totals?.comments, priorTotals?.comments], ['Shares', totals?.shares, priorTotals?.shares], ['Profile views', a?.profileViews, prior?.profileViews], ['Website taps', a?.websiteClicks, prior?.websiteClicks]]
+    : [['Monthly views', a?.monthlyViews, prior?.monthlyViews], ['Impressions', totals?.impressions, priorTotals?.impressions], ['Saves', totals?.saves, priorTotals?.saves], ['Outbound clicks', totals?.outboundClicks, priorTotals?.outboundClicks], ['Pins', a?.pins, prior?.pins], ['Boards', a?.boards, prior?.boards], ['Following', a?.following, prior?.following]];
   const shown = stats.filter(([, v]) => v != null && v > 0).slice(0, 8);
   // A net change needs more than one dated point: either running totals on
   // several days, or the feed's own daily new-follower counts (Instagram
@@ -110,14 +120,15 @@ function AudienceColumn({ label, a, totals, rangeLabel }: { label: 'Instagram' |
         <>
           <div className="flex items-baseline gap-2 mt-2">
             <p className="text-3xl font-bold text-gray-800 leading-none">{a!.followers != null ? n(a!.followers) : (a!.newFollowers != null ? signed(a!.newFollowers) : '—')}</p>
+            {compareLabel && a!.followers != null && prior?.followers != null && !prior.asOf && <Delta cur={a!.followers} prev={prior.followers} label={compareLabel} />}
             <p className="text-xs text-gray-400">{a!.followers != null ? (a!.asOf ? `followers as of ${a!.asOf} (latest snapshot — the feed has no follower history for this period)` : change == null ? 'followers · change shows once the feed has two or more days of follower history' : 'followers') : a!.newFollowers != null ? `net new, ${rangeLabel.toLowerCase()}` : 'no follower count from this feed for this period'}</p>
           </div>
           {shown.length > 0 && (
             <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2.5 mt-4 pt-3 border-t border-gray-100">
-              {shown.map(([k, v]) => (
+              {shown.map(([k, v, pv]) => (
                 <div key={k} className="min-w-0">
                   <dt className="text-[10px] uppercase tracking-wider text-gray-400 truncate">{k}</dt>
-                  <dd className="text-sm font-semibold text-gray-700 tabular-nums">{n(v)}</dd>
+                  <dd className="text-sm font-semibold text-gray-700 tabular-nums">{n(v)}{compareLabel && <Delta cur={v} prev={pv} />}</dd>
                 </div>
               ))}
             </dl>
@@ -195,6 +206,10 @@ export default function OrganicContent() {
   const dateTo = searchParams.get('date_to') || '';
   const rangeLabel = tfRaw === 'custom' && dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : (TIMEFRAME_LABELS[tfRaw] || 'Last 30 Days');
   const [data, setData] = useState<OrganicResponse | null>(null);
+  const [priorData, setPriorData] = useState<OrganicResponse | null>(null);
+  const compareOn = searchParams.get('compare') === 'true';
+  const compareMode = parseCompareMode(searchParams.get('compare_to'));
+  const compareLabel = compareOn ? `vs ${compareMode === 'prior' ? 'prior period' : compareMode === 'month' ? 'last month' : 'last year'}` : undefined;
   const [showAllBlog, setShowAllBlog] = useState(false);
   type BlogSort = 'publishedAt' | 'sessions' | 'cartAdds' | 'completed' | 'cvr' | 'bounce';
   const [blogSort, setBlogSort] = useState<{ key: BlogSort; dir: 'asc' | 'desc' }>({ key: 'sessions', dir: 'desc' });
@@ -206,7 +221,15 @@ export default function OrganicContent() {
     if (dateFrom) p.set('date_from', dateFrom);
     if (dateTo) p.set('date_to', dateTo);
     fetch(`/api/organic?${p}`, { cache: 'no-store' }).then(r => r.json()).then(setData).catch(e => setData({ source: 'error', error: `The organic data request didn't complete (${e instanceof Error ? e.message : 'network'}). Reload to try again; each source now loads independently.` }));
-  }, [tfRaw, dateFrom, dateTo]);
+    // Comparison period (prior / same dates last month / same dates last year), fetched alongside.
+    setPriorData(null);
+    if (compareOn) {
+      const cur = timeframeRange(tfRaw as Timeframe | 'custom', dateFrom || null, dateTo || null);
+      const pr = priorRangeFor(compareMode, tfRaw as Timeframe | 'custom', cur.from, cur.to);
+      const q = new URLSearchParams({ tf: 'custom', date_from: pr.from, date_to: pr.to });
+      fetch(`/api/organic?${q}`, { cache: 'no-store' }).then(r => r.json()).then(d => { if (!d?.error) setPriorData(d); }).catch(() => {});
+    }
+  }, [tfRaw, dateFrom, dateTo, compareOn, compareMode]);
 
   const pin = data?.pinterest;
   const ig = data?.instagram;
@@ -246,11 +269,13 @@ export default function OrganicContent() {
             <Card className="mt-4 mb-6">
               <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
                 <h3 className="text-sm font-bold text-gray-800">Audience</h3>
-                <p className="text-[11px] text-gray-400">Followers as of the last day · engagement totals for {rangeLabel.toLowerCase()}</p>
+                <p className="text-[11px] text-gray-400">Followers as of the last day · engagement totals for {rangeLabel.toLowerCase()}{compareLabel ? ` · changes ${compareLabel}` : ''}</p>
               </div>
               <div className="grid gap-4 lg:grid-cols-2">
-                <AudienceColumn label="Instagram" a={data.audience.Instagram} totals={ig?.status === 'ok' ? ig.totals : undefined} rangeLabel={rangeLabel} />
-                <AudienceColumn label="Pinterest" a={data.audience.Pinterest} totals={pin?.status === 'ok' ? pin.totals : undefined} rangeLabel={rangeLabel} />
+                <AudienceColumn label="Instagram" a={data.audience.Instagram} totals={ig?.status === 'ok' ? ig.totals : undefined} rangeLabel={rangeLabel}
+                  prior={priorData?.audience?.Instagram} priorTotals={priorData?.instagram?.status === 'ok' ? priorData.instagram.totals : undefined} compareLabel={compareLabel} />
+                <AudienceColumn label="Pinterest" a={data.audience.Pinterest} totals={pin?.status === 'ok' ? pin.totals : undefined} rangeLabel={rangeLabel}
+                  prior={priorData?.audience?.Pinterest} priorTotals={priorData?.pinterest?.status === 'ok' ? priorData.pinterest.totals : undefined} compareLabel={compareLabel} />
               </div>
             </Card>
           )}
@@ -258,15 +283,19 @@ export default function OrganicContent() {
           {/* ── KPI row ── */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
             <MetricCard title="Pin Impressions" accentColor="#e11d48"
+              comparison={compareLabel && pin?.status === 'ok' && priorData?.pinterest?.status === 'ok' ? { current: pin.totals.impressions || 0, prior: priorData.pinterest.totals.impressions || 0, label: compareLabel } : undefined}
               value={pin?.status === 'ok' ? n(pin.totals.impressions) : '—'}
               subtitle={pin?.status === 'ok' ? `${n(pin.totals.saves)} saves · ${n(pin.totals.outboundClicks)} outbound clicks${pin.note ? ' · last 7 days only' : ''}` : pin?.status === 'error' ? (/timeout|aborted|budget/i.test(pin.error || '') ? "Pinterest's live feed timed out — see the Pinterest Pins section" : 'Pinterest feed error — see below') : 'Pinterest Organic not connected'} />
             <MetricCard title="Instagram Reach" accentColor="#d946ef"
+              comparison={compareLabel && ig?.status === 'ok' && priorData?.instagram?.status === 'ok' ? { current: ig.totals.reach || ig.totals.impressions || 0, prior: priorData.instagram.totals.reach || priorData.instagram.totals.impressions || 0, label: compareLabel } : undefined}
               value={ig?.status === 'ok' ? n(ig.totals.reach || ig.totals.impressions) : '—'}
               subtitle={ig?.status === 'ok' ? `${n(ig.totals.views)} views · ${n(ig.totals.likes)} likes · ${n(ig.totals.saves)} saves · ${n(ig.totals.comments)} comments` : 'Instagram Insights not connected'} />
             <MetricCard title="Blog Sessions" accentColor="#34d399"
+              comparison={compareLabel && blog?.status === 'ok' && priorData?.blog?.status === 'ok' ? { current: blog.totals.sessions || 0, prior: priorData.blog.totals.sessions || 0, label: compareLabel } : undefined}
               value={blog?.status === 'ok' ? n(blog.totals.sessions) : '—'}
               subtitle={blog?.status === 'ok' ? `${n(blog.totals.articles)} articles (${n(blog.totals.articleSessions)} sessions) · incl. blog home & tag pages ${n(blog.totals.sessions)} · ${n(blog.totals.completed)} orders · ${pct(blog.totals.completed || 0, blog.totals.sessions || 0)} CVR` : 'Shopify not connected'} />
             <MetricCard title="Organic Social Visits" accentColor="#818cf8"
+              comparison={compareLabel && traffic && priorData?.socialTraffic ? { current: (traffic.Pinterest.sessions || 0) + (traffic.Instagram.sessions || 0), prior: (priorData.socialTraffic.Pinterest.sessions || 0) + (priorData.socialTraffic.Instagram.sessions || 0), label: compareLabel } : undefined}
               value={n((traffic?.Pinterest.sessions || 0) + (traffic?.Instagram.sessions || 0))}
               subtitle={`Pinterest ${n(traffic?.Pinterest.sessions)} (${n(traffic?.Pinterest.completed)} orders) · Instagram ${n(traffic?.Instagram.sessions)} (${n(traffic?.Instagram.completed)} orders) · unpaid taps to ${client.siteDomain}`} />
           </div>
@@ -279,42 +308,45 @@ export default function OrganicContent() {
               <Card className="mb-6">
                 <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
                   <h3 className="text-sm font-bold text-gray-800">Follower Growth</h3>
-                  <p className="text-[11px] text-gray-400">Day by day over {rangeLabel.toLowerCase()} · one chart per platform (their audiences differ in size, so each has its own scale)</p>
+                  <p className="text-[11px] text-gray-400">Net new followers per day{data.audienceRange ? ` · ${data.audienceRange.from} → ${data.audienceRange.to}` : ''} · both platforms on one scale; running totals in the headers</p>
                 </div>
                 {withSeries.length === 0 ? (
                   <p className="text-xs text-gray-400">
                     {platforms.every(p => p.a.status === 'not_connected') ? 'Connect Instagram Insights or Pinterest Organic in Windsor to see follower growth.'
-                      : 'No day-by-day follower rows for this period yet. Pinterest fills in once the pinterest_organic BigQuery task has run; Instagram needs more than one day in the range.'}
+                      : 'No day-by-day follower rows for this window yet. Windsor stores a follower snapshot each day from the date the account was connected, so this chart fills in going forward.'}
                   </p>
                 ) : (
-                  <div className={`grid gap-6 ${withSeries.length > 1 ? 'lg:grid-cols-2' : ''}`}>
-                    {withSeries.map(({ label, a }) => {
-                      const g = growthSummary(a.series);
-                      const up = g.net != null && g.net > 0; const flat = g.net === 0;
-                      return (
-                        <div key={label}>
-                          <div className="flex items-baseline justify-between gap-3 flex-wrap mb-2">
-                            <div className="flex items-center gap-2">
-                              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: PLATFORM_COLORS[label] }} />
-                              <p className="text-xs font-semibold text-gray-600">{label} followers</p>
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-2 mb-3">
+                      {platforms.filter(p => p.a.status === 'ok').map(({ label, a }) => {
+                        const g = growthSummary(a.series);
+                        const up = g.net != null && g.net > 0; const flat = g.net === 0;
+                        return (
+                          <div key={label} className="rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2">
+                            <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                              <div className="flex items-center gap-2">
+                                <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: PLATFORM_COLORS[label] }} />
+                                <p className="text-xs font-semibold text-gray-600">{label}</p>
+                                {g.first && g.last && <p className="text-xs text-gray-400 tabular-nums">{n(g.first.followers!)} → {n(g.last.followers!)}</p>}
+                              </div>
+                              {g.net != null ? (
+                                <p className={`text-xs font-semibold ${up ? 'text-green-500' : flat ? 'text-gray-400' : 'text-red-500'}`}>{up ? '▲ Growing' : flat ? '• Flat' : '▼ Declining'} · {signed(g.net)}</p>
+                              ) : <p className="text-xs text-gray-400">no history in this window yet</p>}
                             </div>
-                            {g.net != null && (
-                              <p className={`text-xs font-semibold ${up ? 'text-green-500' : flat ? 'text-gray-400' : 'text-red-500'}`}>
-                                {up ? '▲ Growing' : flat ? '• Flat' : '▼ Shrinking'} · {signed(g.net)}{g.first && g.last ? ` (${n(g.first.followers!)} → ${n(g.last.followers!)})` : ''}
-                              </p>
+                            {g.days > 0 && (
+                              <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-[11px] text-gray-500">
+                                {g.perDay != null && <span>Avg <b className="text-gray-700">{`${g.perDay > 0 ? '+' : g.perDay < 0 ? '−' : ''}${Math.abs(g.perDay).toFixed(1)}`}</b> / day</span>}
+                                {g.best && g.best.newFollowers! > 0 && <span>Best <b className="text-gray-700">{g.best.date.slice(5)}</b> ({signed(g.best.newFollowers!)})</span>}
+                                {g.worst && g.worst.newFollowers! < 0 && <span>Biggest drop <b className="text-gray-700">{g.worst.date.slice(5)}</b> ({signed(g.worst.newFollowers!)})</span>}
+                                <span><b className="text-gray-700">{g.down}</b> of {g.days} days lost followers</span>
+                              </div>
                             )}
                           </div>
-                          <FollowerGrowthChart label={label} color={PLATFORM_COLORS[label]} series={a.series} />
-                          <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-[11px] text-gray-500">
-                            {g.perDay != null && <span>Avg <b className="text-gray-700">{`${g.perDay > 0 ? '+' : g.perDay < 0 ? '−' : ''}${Math.abs(g.perDay).toFixed(1)}`}</b> / day</span>}
-                            {g.best && g.best.newFollowers! > 0 && <span>Best day <b className="text-gray-700">{g.best.date.slice(5)}</b> ({signed(g.best.newFollowers!)})</span>}
-                            {g.worst && g.worst.newFollowers! < 0 && <span>Biggest drop <b className="text-gray-700">{g.worst.date.slice(5)}</b> ({signed(g.worst.newFollowers!)})</span>}
-                            {g.days > 0 && <span><b className="text-gray-700">{g.down}</b> of {g.days} days lost followers</span>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                    <FollowerGrowthChart platforms={withSeries.map(({ label, a }) => ({ label, color: PLATFORM_COLORS[label], series: a.series }))} />
+                  </>
                 )}
               </Card>
             );
