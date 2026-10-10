@@ -61,6 +61,8 @@ export interface OrganicData {
   socialTraffic: Record<OrganicPlatform, SocialTraffic>;
   /** Followers and profile activity per platform. */
   audience: Record<OrganicPlatform, Audience>;
+  /** The window the audience series covers (at least 30 days ending on range.to). */
+  audienceRange?: { from: string; to: string };
 }
 
 /** One day of account-level audience data (for the follower growth chart). */
@@ -795,15 +797,19 @@ function guarded<T>(p: Promise<T>, fallback: (err: string) => T, ceilingMs: numb
 export async function fetchOrganic(from: string, to: string): Promise<OrganicData> {
   const errBlock = <T,>(err: string): SourceBlock<T> => ({ status: 'error', error: err, items: [], totals: {} });
   const errAud = (err: string): Audience => ({ status: 'error', error: err, ...EMPTY_AUD() });
+  // Followers are charted over at least a 30-day window ending on the range's
+  // last day, so a 7-day view still shows a month of movement.
+  const spanDays = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
+  const audFrom = spanDays < 30 ? new Date(Date.parse(to) - 29 * 86400000).toISOString().slice(0, 10) : from;
   const [pinterest, instagram, blog, socialTraffic, pinAudience, igAudience] = await Promise.all([
     guarded(fetchPinterestOrganic(from, to), errBlock<OrganicPost>, 70000),
     guarded(fetchInstagramOrganic(from, to), errBlock<OrganicPost>, 45000),
     guarded(fetchBlogPerformance(from, to), errBlock<BlogPost>, 45000),
     guarded(fetchSocialTraffic(from, to), () => ({ Pinterest: { sessions: 0, cartAdds: 0, completed: 0 }, Instagram: { sessions: 0, cartAdds: 0, completed: 0 } }), 30000),
-    guarded(fetchPinterestAudience(from, to), errAud, 40000),
-    guarded(fetchAudience('instagram', INSTAGRAM_ACCOUNT_FIELDSETS, from, to), errAud, 30000),
+    guarded(fetchPinterestAudience(audFrom, to), errAud, 40000),
+    guarded(fetchAudience('instagram', INSTAGRAM_ACCOUNT_FIELDSETS, audFrom, to), errAud, 30000),
   ]);
-  return { range: { from, to }, pinterest, instagram, blog, socialTraffic, audience: { Pinterest: pinAudience, Instagram: igAudience } };
+  return { range: { from, to }, audienceRange: { from: audFrom, to }, pinterest, instagram, blog, socialTraffic, audience: { Pinterest: pinAudience, Instagram: igAudience } };
 }
 
 /** Whether a source is wired for this client (for the tab's setup hints). */
