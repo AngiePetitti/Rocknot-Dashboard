@@ -212,10 +212,13 @@ function rollUp(rows: Array<Record<string, unknown>>, idKey: string, metricKeys:
  * the key is the title plus the four counts — a repeat of both is the same pin.
  */
 export function dedupePins(items: OrganicPost[]): OrganicPost[] {
+  // Same four counts = same pin. Pinterest reports one set of numbers for a
+  // product pin family (colour / size variants carry different titles and
+  // ids but identical impressions, saves and clicks), so the title cannot be
+  // part of the key. Items arrive ranked, so the first copy is kept.
   const seen = new Set<string>();
-  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   return items.filter(p => {
-    const key = `${norm(p.title)}|${p.metrics.impressions || 0}|${p.metrics.saves || 0}|${p.metrics.pinClicks || 0}|${p.metrics.outboundClicks || 0}`;
+    const key = `${p.metrics.impressions || 0}|${p.metrics.saves || 0}|${p.metrics.pinClicks || 0}|${p.metrics.outboundClicks || 0}`;
     if (seen.has(key)) return false;
     seen.add(key); return true;
   });
@@ -746,7 +749,7 @@ async function fetchAudience(source: 'pinterest_organic' | 'instagram', fieldSet
   // so show the latest snapshot and say when it is from.
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const recentFrom = new Date(Date.parse(today) - 13 * 86400000).toISOString().slice(0, 10);
-  if (to >= recentFrom) return a;
+  if (from <= recentFrom && to >= today) return a; // the range already covered the latest days
   const recent = await windsorOrganicRows(source, fieldSets, recentFrom, today, 15000).catch(() => null);
   if (!recent?.rows?.length) return a;
   const latest = audienceFromRows(source, recent.rows, { fieldSet: recent.fieldSet || undefined });

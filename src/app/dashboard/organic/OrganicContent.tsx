@@ -275,6 +275,9 @@ export default function OrganicContent() {
           {data.audience && (() => {
             const platforms = (['Instagram', 'Pinterest'] as const).map(label => ({ label, a: data.audience![label] }));
             const withSeries = platforms.filter(p => p.a.status === 'ok' && p.a.series.length > 1);
+            // Connected platforms with no day-by-day history for this period yet (e.g. Instagram
+            // before Windsor started storing its follower snapshots) get a line, not silence.
+            const noHistory = platforms.filter(p => p.a.status === 'ok' && p.a.series.length <= 1);
             return (
               <Card className="mb-6">
                 <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
@@ -287,6 +290,12 @@ export default function OrganicContent() {
                       : 'No day-by-day follower rows for this period yet. Pinterest fills in once the pinterest_organic BigQuery task has run; Instagram needs more than one day in the range.'}
                   </p>
                 ) : (
+                  <>
+                  {noHistory.length > 0 && (
+                    <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 mb-4">
+                      {noHistory.map(p => p.label).join(' and ')}: no day-by-day follower history for {rangeLabel.toLowerCase()} yet — Windsor stores a follower snapshot each day from the date the account was connected, so this chart fills in going forward.
+                    </p>
+                  )}
                   <div className={`grid gap-6 ${withSeries.length > 1 ? 'lg:grid-cols-2' : ''}`}>
                     {withSeries.map(({ label, a }) => {
                       const g = growthSummary(a.series);
@@ -315,6 +324,7 @@ export default function OrganicContent() {
                       );
                     })}
                   </div>
+                  </>
                 )}
               </Card>
             );
