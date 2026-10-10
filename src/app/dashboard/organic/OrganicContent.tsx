@@ -331,7 +331,7 @@ export default function OrganicContent() {
                               </div>
                               {g.net != null ? (
                                 <p className={`text-xs font-semibold ${up ? 'text-green-500' : flat ? 'text-gray-400' : 'text-red-500'}`}>{up ? '▲ Growing' : flat ? '• Flat' : '▼ Declining'} · {signed(g.net)}</p>
-                              ) : <p className="text-xs text-gray-400">no history in this window yet</p>}
+                              ) : <p className="text-xs text-gray-400">{a.historyNote ? 'history starts partway through this window' : 'no history in this window yet — the dashboard records a daily count from today'}</p>}
                             </div>
                             {g.days > 0 && (
                               <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-[11px] text-gray-500">
@@ -345,6 +345,9 @@ export default function OrganicContent() {
                         );
                       })}
                     </div>
+                    {platforms.some(p => p.a.historyNote) && (
+                      <p className="text-[11px] text-gray-400 mb-2">{platforms.filter(p => p.a.historyNote).map(p => p.a.historyNote).join(' ')}</p>
+                    )}
                     <FollowerGrowthChart platforms={withSeries.map(({ label, a }) => ({ label, color: PLATFORM_COLORS[label], series: a.series }))} />
                   </>
                 )}
