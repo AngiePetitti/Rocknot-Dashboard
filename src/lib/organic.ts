@@ -98,6 +98,8 @@ export interface Audience {
   series: AudiencePoint[];
   /** Set when the range had no follower total and the latest snapshot was used instead (its date). */
   asOf?: string;
+  /** Explains a shortened history window (e.g. Instagram serves daily follower counts for the last 30 days only). */
+  historyNote?: string;
   fieldSet?: string;
   attempts?: WindsorAttempt[];
 }
@@ -744,12 +746,26 @@ async function fetchAudience(source: 'pinterest_organic' | 'instagram', fieldSet
   const r = await windsorOrganicRows(source, fieldSets, from, to, source === 'pinterest_organic' ? 30000 : 20000);
   if (r.notConnected) return { status: 'not_connected', ...EMPTY_AUD() };
   if (!r.rows) return { status: 'error', error: r.attempts.map(a => `${a.fieldSet}: ${a.error}`).join(' | '), ...EMPTY_AUD(), attempts: r.attempts };
-  const a = audienceFromRows(source, r.rows, { fieldSet: r.fieldSet || undefined, attempts: r.attempts });
+  let a = audienceFromRows(source, r.rows, { fieldSet: r.fieldSet || undefined, attempts: r.attempts });
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  // Instagram serves daily follower counts for the last 30 days only; a range
+  // that starts earlier comes back with no follower fields at all. Re-ask for
+  // the part of the range inside that window and say so.
+  if (a.followers == null && a.newFollowers == null && source === 'instagram') {
+    const windowFrom = new Date(Date.parse(today) - 29 * 86400000).toISOString().slice(0, 10);
+    const clipFrom = from > windowFrom ? from : windowFrom;
+    if (clipFrom > from && clipFrom <= to) {
+      const clipped = await windsorOrganicRows(source, fieldSets, clipFrom, to, 15000).catch(() => null);
+      if (clipped?.rows?.length) {
+        const b = audienceFromRows(source, clipped.rows, { fieldSet: clipped.fieldSet || undefined, attempts: [...r.attempts, ...clipped.attempts] });
+        if (b.followers != null || b.newFollowers != null) a = { ...b, historyNote: `Instagram serves daily follower history for the last 30 days only, so this covers ${clipFrom} → ${to}; the dashboard keeps its own daily record from here on.` };
+      }
+    }
+  }
   if (a.followers != null || a.newFollowers != null) return a;
   // Follower count is a snapshot the feed only carries for days since the
   // connection existed. A past range (e.g. last month) can come back empty,
   // so show the latest snapshot and say when it is from.
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const recentFrom = new Date(Date.parse(today) - 13 * 86400000).toISOString().slice(0, 10);
   if (from <= recentFrom && to >= today) return a; // the range already covered the latest days
   const recent = await windsorOrganicRows(source, fieldSets, recentFrom, today, 15000).catch(() => null);
@@ -809,7 +825,24 @@ export async function fetchOrganic(from: string, to: string): Promise<OrganicDat
     guarded(fetchPinterestAudience(audFrom, to), errAud, 40000),
     guarded(fetchAudience('instagram', INSTAGRAM_ACCOUNT_FIELDSETS, audFrom, to), errAud, 30000),
   ]);
-  return { range: { from, to }, audienceRange: { from: audFrom, to }, pinterest, instagram, blog, socialTraffic, audience: { Pinterest: pinAudience, Instagram: igAudience } };
+  // Our own daily record fills days the feeds no longer serve, and today's count is saved for the future.
+  const audience: Record<OrganicPlatform, Audience> = { Pinterest: pinAudience, Instagram: igAudience };
+  try {
+    const { loadFollowerHistory, mergeFollowerHistory, recordFollowerSnapshots } = await import('@/src/lib/followerHistory');
+    const store = await loadFollowerHistory();
+    (Object.keys(audience) as OrganicPlatform[]).forEach(pl => {
+      const a = audience[pl];
+      if (a.status !== 'ok') return;
+      const merged = mergeFollowerHistory(pl, a.series, store, audFrom, to);
+      if (merged.length !== a.series.length) {
+        const withTotal = merged.filter(p => p.followers != null);
+        const first = withTotal[0]; const last = withTotal[withTotal.length - 1];
+        audience[pl] = { ...a, series: merged, followers: a.followers ?? last?.followers ?? null, followersStart: first?.followers ?? a.followersStart, newFollowers: first && last && first !== last ? last.followers! - first.followers! : a.newFollowers, asOf: a.asOf && last && last.date >= (a.asOf || '') ? undefined : a.asOf };
+      }
+    });
+    void recordFollowerSnapshots(audience);
+  } catch { /* best-effort */ }
+  return { range: { from, to }, audienceRange: { from: audFrom, to }, pinterest, instagram, blog, socialTraffic, audience };
 }
 
 /** Whether a source is wired for this client (for the tab's setup hints). */
