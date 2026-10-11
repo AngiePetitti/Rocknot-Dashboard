@@ -555,6 +555,10 @@ export default function OverviewContent() {
             // fresh result back into the session cache, so one tap of
             // Refresh is enough — previously the stale cached copy could
             // resurface and it took two refreshes to see current numbers.
+            // Also invalidate any in-flight background load: the slow fetch
+            // kicked off at page load could resolve AFTER this manual
+            // refresh and overwrite fresher numbers with older ones.
+            activeReqKey.current = `manual-refresh-${Date.now()}`;
             fetch(`/api/windsor?${p}`, { cache: 'no-store' })
               .then(r => r.json())
               .then(data => {

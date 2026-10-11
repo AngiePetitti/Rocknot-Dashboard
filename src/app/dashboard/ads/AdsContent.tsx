@@ -101,7 +101,7 @@ export default function AdsContent() {
   const [adPlatformFilter, setAdPlatformFilter] = useState<'All' | CreativeRow['platform']>('All');
   const [showAllAds, setShowAllAds] = useState(false);
   const [reconcile, setReconcile] = useState<ReconcileResult | null>(null);
-  const [cac, setCac] = useState<{ newCustomers: number; returningCustomers: number; totalAdSpend: number } | null>(null);
+  const [cac, setCac] = useState<{ newCustomers: number; returningCustomers: number; totalAdSpend: number; creditApplied?: number } | null>(null);
 
   useEffect(() => {
     setStatus('loading');
@@ -136,12 +136,15 @@ export default function AdsContent() {
     if (hadCreativesCache) setCreativesLoading(false);
 
     // Customer counts (for CAC) come from the overview endpoint, same timeframe.
-    cachedJson<{ metrics?: { newCustomers?: number; returningCustomers?: number; totalAdSpend?: number } }>(
+    cachedJson<{ metrics?: { newCustomers?: number; returningCustomers?: number; totalAdSpend?: number; netAdSpend?: number; adCreditApplied?: number } }>(
       `/api/windsor?${adsParams}`,
       overviewData => {
         const m = overviewData?.metrics;
+        // CAC runs on NET spend (gross minus platform credits) — a promo
+        // credit isn't real acquisition cost, and counting it inflated CAC
+        // ~8% whenever a Snap credit was active. Same basis as MER.
         setCac(m && m.newCustomers !== undefined
-          ? { newCustomers: m.newCustomers ?? 0, returningCustomers: m.returningCustomers ?? 0, totalAdSpend: m.totalAdSpend ?? 0 }
+          ? { newCustomers: m.newCustomers ?? 0, returningCustomers: m.returningCustomers ?? 0, totalAdSpend: (m.netAdSpend ?? m.totalAdSpend) ?? 0, creditApplied: m.adCreditApplied ?? 0 }
           : null);
       },
       () => setCac(null)
@@ -286,7 +289,7 @@ export default function AdsContent() {
               <MetricCard
                 title="New Customer CAC"
                 value={cac.newCustomers ? formatCurrency(cac.totalAdSpend / cac.newCustomers) : '—'}
-                subtitle={`Ad spend ÷ ${cac.newCustomers} new customers · target $${TARGET_CAC}`}
+                subtitle={`${cac.creditApplied ? 'Net ad spend (credits deducted)' : 'Ad spend'} ÷ ${cac.newCustomers} new customers · target $${TARGET_CAC}`}
                 accentColor="#c7d2fe"
                 valueColor={cac.newCustomers
                   ? (cac.totalAdSpend / cac.newCustomers > TARGET_CAC ? '#ef4444' : '#22c55e')
