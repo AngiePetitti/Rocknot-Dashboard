@@ -6,11 +6,17 @@
 //   SNAP_CLIENT_ID / SNAP_CLIENT_SECRET — OAuth app from Snapchat Business Manager
 //   SNAP_REFRESH_TOKEN — long-lived token from the one-time /api/debug/snap-oauth flow
 //   SNAP_AD_ACCOUNT_ID — the ad account UUID (e.g. cd018406-4f67-...)
+//   SNAP_SWIPE_WINDOW / SNAP_VIEW_WINDOW (optional) — attribution windows,
+//     e.g. 7_DAY / 1_DAY. Set these to the SAME values Snap Ads Manager's
+//     attribution settings use so dashboard revenue equals the Ads Manager
+//     column exactly. Defaults match Snap's defaults (28_DAY / 1_DAY).
 
 const CLIENT_ID = (process.env.SNAP_CLIENT_ID || '').trim();
 const CLIENT_SECRET = (process.env.SNAP_CLIENT_SECRET || '').trim();
 const REFRESH_TOKEN = (process.env.SNAP_REFRESH_TOKEN || '').trim();
 const AD_ACCOUNT_ID = (process.env.SNAP_AD_ACCOUNT_ID || '').trim();
+const SWIPE_WINDOW = (process.env.SNAP_SWIPE_WINDOW || '28_DAY').trim();
+const VIEW_WINDOW = (process.env.SNAP_VIEW_WINDOW || '1_DAY').trim();
 
 export function snapLiveConfigured(): boolean {
   return Boolean(CLIENT_ID && CLIENT_SECRET && REFRESH_TOKEN && AD_ACCOUNT_ID);
@@ -102,6 +108,8 @@ export async function fetchSnapDaily(since: string, until: string): Promise<Snap
       const qs = new URLSearchParams({
         granularity: 'DAY',
         fields: 'spend,conversion_purchases_value',
+        swipe_up_attribution_window: SWIPE_WINDOW,
+        view_attribution_window: VIEW_WINDOW,
         start_time: `${chunkStart}T00:00:00.000${offset}`,
         end_time: `${addDays(chunkEnd, 1)}T00:00:00.000${offset}`,
       });
@@ -143,6 +151,8 @@ export async function fetchSnapToday(): Promise<SnapToday | null> {
     const qs = new URLSearchParams({
       granularity: 'DAY',
       fields: 'spend,conversion_purchases,conversion_purchases_value',
+      swipe_up_attribution_window: SWIPE_WINDOW,
+      view_attribution_window: VIEW_WINDOW,
       start_time: start,
       end_time: end,
     });
