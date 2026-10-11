@@ -80,7 +80,7 @@ function buildPlatform(
 // Each platform is queried independently so a missing column in one table
 // never crashes another platform's data. New Windsor columns (e.g. impressions
 // added to facebook_ads) are picked up automatically once they exist.
-export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<{ platforms: PlatformData[]; dailySpend: DaySpend[] }> {
+export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<{ platforms: PlatformData[]; dailySpend: DaySpend[]; snapVerified?: boolean }> {
   const ds = getDataset();
   const params = { date_from: dateFrom, date_to: dateTo };
   const gsrc = await googleSource();
