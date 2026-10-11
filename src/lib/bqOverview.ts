@@ -247,7 +247,7 @@ export async function fetchShopifyCustomerSplit(from: string, to: string): Promi
   if (!SHOPIFY_TOKEN) return null;
   // ShopifyQL does not support GROUP BY customer_type. Instead, use the
   // built-in returning_customers dimension alongside total customers.
-  const ql = `FROM sales SHOW net_sales, customers, returning_customers ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
+  const ql = `FROM sales SHOW net_sales, customers, returning_customers, new_customers ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
   const q = { tableData: await runShopifyQLRaw(ql, { timeoutMs: 12000 }) };
   const cols: { name: string }[] = q?.tableData?.columns || [];
   const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
@@ -262,7 +262,11 @@ export async function fetchShopifyCustomerSplit(from: string, to: string): Promi
   const r = rows[0];
   const totalCustomers = Math.round(parseFloat(cell(r, 'customers') || '0'));
   const returningCustomers = Math.round(parseFloat(cell(r, 'returning_customers') || '0'));
-  const newCustomers = Math.max(0, totalCustomers - returningCustomers);
+  // Shopify's native new_customers metric is the authoritative count —
+  // deriving it as customers − returning undercounted (Shopify handles
+  // same-period first-then-repeat buyers differently), overstating CAC.
+  const nativeNew = Math.round(parseFloat(cell(r, 'new_customers') || '0'));
+  const newCustomers = nativeNew > 0 ? nativeNew : Math.max(0, totalCustomers - returningCustomers);
   // Net sales (after discounts and returns) so the two segments add up to the
   // net figure on the MER card rather than exceeding total sales.
   const totalRevenue = parseFloat(cell(r, 'net_sales') || '0');
