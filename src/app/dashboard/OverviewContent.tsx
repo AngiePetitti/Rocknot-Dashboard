@@ -890,17 +890,17 @@ export default function OverviewContent() {
               </>)}
               <MetricCard
                 title="New Customer CAC"
-                value={metrics.newCustomers ? formatCurrency(metrics.totalAdSpend / metrics.newCustomers) : '—'}
-                subtitle={`Ad spend ÷ new customers · target $${TARGET_CAC}`}
+                value={metrics.newCustomers ? formatCurrency((metrics.netAdSpend ?? metrics.totalAdSpend) / metrics.newCustomers) : '—'}
+                subtitle={`${metrics.adCreditApplied ? 'Net ad spend (credits deducted)' : 'Ad spend'} ÷ new customers · target $${TARGET_CAC}`}
                 accentColor="#c7d2fe"
                 valueColor={metrics.newCustomers
-                  ? (metrics.totalAdSpend / metrics.newCustomers > TARGET_CAC ? '#ef4444' : '#22c55e')
+                  ? ((metrics.netAdSpend ?? metrics.totalAdSpend) / metrics.newCustomers > TARGET_CAC ? '#ef4444' : '#22c55e')
                   : undefined}
               />
               <MetricCard
                 title="Blended CAC"
                 value={(metrics.newCustomers ?? 0) + (metrics.returningCustomers ?? 0) > 0
-                  ? formatCurrency(metrics.totalAdSpend / ((metrics.newCustomers ?? 0) + (metrics.returningCustomers ?? 0)))
+                  ? formatCurrency((metrics.netAdSpend ?? metrics.totalAdSpend) / ((metrics.newCustomers ?? 0) + (metrics.returningCustomers ?? 0)))
                   : '—'}
                 subtitle="Ad spend ÷ all buyers"
                 accentColor="#bbf7d0"
