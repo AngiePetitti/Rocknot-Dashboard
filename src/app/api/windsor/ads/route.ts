@@ -259,8 +259,9 @@ export async function GET(request: NextRequest) {
   const useLiveToday = tfRaw === 'today';
   if (isBigQueryConfigured() && !debug && !useLiveToday) {
     try {
-      const { platforms, dailySpend } = await getAdsOverview(params.date_from, params.date_to);
-      return NextResponse.json({ source: 'bigquery_live', platforms, dailySpend }, { headers: cacheHeaders(false) });
+      const result = await getAdsOverview(params.date_from, params.date_to);
+      const { platforms, dailySpend } = result;
+      return NextResponse.json({ source: 'bigquery_live', platforms, dailySpend, snapVerified: result.snapVerified !== false }, { headers: cacheHeaders(false) });
     } catch {
       // fall through to Windsor REST
     }
@@ -363,7 +364,8 @@ export async function GET(request: NextRequest) {
 
     const dailySpend = buildDailySpend(metaDaily, googleDaily, tiktokDaily, snapDaily, pinterestDaily);
 
-    return NextResponse.json({ source: 'windsor_live', platforms, dailySpend }, { headers: cacheHeaders(tfRaw === 'today') });
+    const { snapLiveConfigured } = await import('@/src/lib/snapLive');
+    return NextResponse.json({ source: 'windsor_live', platforms, dailySpend, snapVerified: snapLiveConfigured() }, { headers: cacheHeaders(tfRaw === 'today') });
   } catch (err) {
     return NextResponse.json({ source: 'error', error: String(err), platforms: [], dailySpend: [] });
   }

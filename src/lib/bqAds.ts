@@ -239,12 +239,19 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
   const patchPromise = dateTo >= patchFromEarly
     ? (async () => {
         const { fetchMetaDaily } = await import('@/src/lib/metaLive');
-        const { fetchSnapDaily } = await import('@/src/lib/snapLive');
+        const { fetchSnapDaily, snapLiveConfigured } = await import('@/src/lib/snapLive');
         const { fetchTiktokDaily, fetchSnapDailyFromWindsor, fetchGoogleDailyFromWindsor, fetchPinterestDailyLive } = await import('@/src/lib/tiktokLive');
         const none = Promise.resolve(null);
+        // Snap-direct (SNAP_* creds) is authoritative over the whole range —
+        // the synced snapchat_ads revenue has mismatched Ads Manager.
+        const snapPromise: Promise<{ days: { date: string; spend: number; revenue: number }[]; authoritative: boolean } | null> =
+          !hasPlatform('snapchat') ? Promise.resolve(null)
+          : snapLiveConfigured()
+            ? fetchSnapDaily(dateFrom, dateTo).then(r => (r ? { days: r, authoritative: true } : null)).catch(() => null)
+            : fetchSnapDailyFromWindsor(patchFromEarly, dateTo).then(r => (r ? { days: r, authoritative: false } : null)).catch(() => null);
         return Promise.all([
           fetchMetaDaily(patchFromEarly, dateTo).catch(() => null),
-          hasPlatform('snapchat') ? fetchSnapDaily(patchFromEarly, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFromEarly, dateTo)).catch(() => null) : none,
+          snapPromise,
           hasPlatform('tiktok') ? fetchTiktokDaily(patchFromEarly, dateTo).catch(() => null) : none,
           fetchGoogleDailyFromWindsor(patchFromEarly, dateTo).catch(() => null),
           hasPlatform('pinterest') ? fetchPinterestDailyLive(patchFromEarly, dateTo).catch(() => null) : none,
@@ -360,16 +367,35 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
         }
       }
     }
-    for (const day of snapPatch ?? []) {
-      if (!inRange(day.date)) continue;
-      ensureDate(day.date);
-      const b = byDate[day.date];
-      if (day.spend > b.snapchat) {
-        const delta = day.spend - b.snapchat;
-        b.snapchat = Math.round(day.spend);
-        if (snapPlatform) {
-          snapPlatform.spend = Math.round((snapPlatform.spend + delta) * 100) / 100;
-          snapPlatform.roas = snapPlatform.spend > 0 ? Math.round((snapPlatform.revenue / snapPlatform.spend) * 100) / 100 : 0;
+    if (snapPatch?.authoritative) {
+      // Snap Marketing API (same numbers as Ads Manager): replace the synced
+      // spend AND revenue for the whole range instead of nudging recent days.
+      let totalSpend = 0, totalRevenue = 0;
+      for (const k of Object.keys(byDate)) byDate[k].snapchat = 0;
+      for (const day of snapPatch.days) {
+        if (!inRange(day.date)) continue;
+        ensureDate(day.date);
+        byDate[day.date].snapchat = Math.round(day.spend);
+        totalSpend += day.spend;
+        totalRevenue += day.revenue;
+      }
+      if (snapPlatform) {
+        snapPlatform.spend = Math.round(totalSpend * 100) / 100;
+        snapPlatform.revenue = Math.round(totalRevenue * 100) / 100;
+        snapPlatform.roas = snapPlatform.spend > 0 ? Math.round((snapPlatform.revenue / snapPlatform.spend) * 100) / 100 : 0;
+      }
+    } else {
+      for (const day of snapPatch?.days ?? []) {
+        if (!inRange(day.date)) continue;
+        ensureDate(day.date);
+        const b = byDate[day.date];
+        if (day.spend > b.snapchat) {
+          const delta = day.spend - b.snapchat;
+          b.snapchat = Math.round(day.spend);
+          if (snapPlatform) {
+            snapPlatform.spend = Math.round((snapPlatform.spend + delta) * 100) / 100;
+            snapPlatform.roas = snapPlatform.spend > 0 ? Math.round((snapPlatform.revenue / snapPlatform.spend) * 100) / 100 : 0;
+          }
         }
       }
     }
@@ -434,5 +460,6 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, v]) => ({ date, ...v }));
 
-  return { platforms, dailySpend };
+  const { snapLiveConfigured } = await import('@/src/lib/snapLive');
+  return { platforms, dailySpend, snapVerified: !hasPlatform('snapchat') || snapLiveConfigured() };
 }

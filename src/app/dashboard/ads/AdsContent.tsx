@@ -92,6 +92,7 @@ export default function AdsContent() {
   const dateTo = searchParams.get('date_to') || '';
 
   const [platforms, setPlatforms] = useState<PlatformData[]>([]);
+  const [snapVerified, setSnapVerified] = useState(true);
   const [dailySpend, setDailySpend] = useState<DaySpend[]>([]);
   const [creatives, setCreatives] = useState<CreativeRow[]>([]);
   const [creativesLoading, setCreativesLoading] = useState(true);
@@ -112,11 +113,12 @@ export default function AdsContent() {
     // platform numbers are in — the slower creative analysis fills in after.
     // Previously-loaded views render instantly from the session cache and
     // refresh in the background.
-    cachedJson<{ platforms?: PlatformData[]; dailySpend?: DaySpend[] }>(
+    cachedJson<{ platforms?: PlatformData[]; dailySpend?: DaySpend[]; snapVerified?: boolean }>(
       `/api/windsor/ads?${adsParams}`,
       adsData => {
         setPlatforms(adsData.platforms || []);
         setDailySpend(adsData.dailySpend || []);
+        setSnapVerified(adsData.snapVerified !== false);
         setStatus('live');
       },
       () => setStatus('error')
@@ -311,6 +313,11 @@ export default function AdsContent() {
                   <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
                   <span className="font-bold text-gray-800 text-sm">{p.platform}</span>
                 </div>
+                {p.platform === 'Snapchat' && !snapVerified && (
+                  <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mb-2">
+                    ⚠ Revenue/ROAS unverified — synced via Windsor and known to run high vs Snap Ads Manager. Verify in Ads Manager before budget moves, or connect the Snap API (SNAP_* keys) to make this number match Ads Manager exactly.
+                  </p>
+                )}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                   <div>
                     <p className="text-gray-400 uppercase font-semibold mb-0.5">Spend</p>

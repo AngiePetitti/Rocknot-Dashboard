@@ -434,12 +434,21 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const patchPromise = dateTo >= patchFrom
     ? (async () => {
         const { fetchMetaDaily } = await import('@/src/lib/metaLive');
-        const { fetchSnapDaily } = await import('@/src/lib/snapLive');
+        const { fetchSnapDaily, snapLiveConfigured } = await import('@/src/lib/snapLive');
         const { fetchTiktokDaily, fetchSnapDailyFromWindsor, fetchGoogleDailyFromWindsor, fetchPinterestDailyLive } = await import('@/src/lib/tiktokLive');
         const none = Promise.resolve(null);
+        // Snap-direct (SNAP_* creds) is authoritative and covers the WHOLE
+        // requested range, not just the recent patch window — the synced
+        // snapchat_ads revenue has mismatched Ads Manager, so when the real
+        // source is available it replaces the copy outright.
+        const snapPromise: Promise<{ days: { date: string; spend: number; revenue: number }[]; authoritative: boolean } | null> =
+          !hasPlatform('snapchat') ? Promise.resolve(null)
+          : snapLiveConfigured()
+            ? fetchSnapDaily(dateFrom, dateTo).then(r => (r ? { days: r, authoritative: true } : null)).catch(() => null)
+            : fetchSnapDailyFromWindsor(patchFrom, dateTo).then(r => (r ? { days: r, authoritative: false } : null)).catch(() => null);
         return Promise.all([
           fetchMetaDaily(patchFrom, dateTo).catch(() => null),
-          hasPlatform('snapchat') ? fetchSnapDaily(patchFrom, dateTo).then(r => r ?? fetchSnapDailyFromWindsor(patchFrom, dateTo)).catch(() => null) : none,
+          snapPromise,
           hasPlatform('tiktok') ? fetchTiktokDaily(patchFrom, dateTo).catch(() => null) : none,
           fetchGoogleDailyFromWindsor(patchFrom, dateTo).catch(() => null),
           hasPlatform('pinterest') ? fetchPinterestDailyLive(patchFrom, dateTo).catch(() => null) : none,
@@ -553,10 +562,17 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       }
     }
     if (snapPatch) {
-      for (const day of snapPatch) {
-        const existing = snapByDate[day.date];
-        if (!existing || day.spend >= existing.spend) {
-          snapByDate[day.date] = { spend: day.spend, revenue: day.revenue || existing?.revenue || 0 };
+      if (snapPatch.authoritative) {
+        // Snap Marketing API — same numbers as Ads Manager. Replace the
+        // synced copy for every day it covers (zero-spend days included).
+        for (const k of Object.keys(snapByDate)) if (k >= dateFrom && k <= dateTo) delete snapByDate[k];
+        for (const day of snapPatch.days) snapByDate[day.date] = { spend: day.spend, revenue: day.revenue };
+      } else {
+        for (const day of snapPatch.days) {
+          const existing = snapByDate[day.date];
+          if (!existing || day.spend >= existing.spend) {
+            snapByDate[day.date] = { spend: day.spend, revenue: day.revenue || existing?.revenue || 0 };
+          }
         }
       }
     }
