@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildCallouts } from '@/src/lib/callouts';
-import { cachedJson } from '@/src/lib/clientCache';
+import { cachedJson, primeCache } from '@/src/lib/clientCache';
 import type { MarketingEvent } from '@/src/app/api/calendar/route';
 import { Timeframe, PlatformSpend, DailyRevenue } from '@/src/lib/mockData';
 import { formatCurrency, formatROAS, TIMEFRAME_LABELS } from '@/src/lib/utils';
@@ -551,9 +551,14 @@ export default function OverviewContent() {
             if (dateTo) p.set('date_to', dateTo);
             if (compareOn || tfRaw !== 'today') p.set('compare', 'true');
             if (compareOn && compareTo !== 'prior') p.set('compare_to', compareTo);
-            fetch(`/api/windsor?${p}`)
+            // Bypass every cache layer (browser HTTP + CDN) and write the
+            // fresh result back into the session cache, so one tap of
+            // Refresh is enough — previously the stale cached copy could
+            // resurface and it took two refreshes to see current numbers.
+            fetch(`/api/windsor?${p}`, { cache: 'no-store' })
               .then(r => r.json())
               .then(data => {
+                if (data?.source === 'windsor_live' || data?.source === 'bigquery_live') primeCache(`/api/windsor?${p}`, data);
                 const source = data.source || 'unknown';
                 if (source !== 'windsor_live' && source !== 'bigquery_live') {
                   setMetrics(EMPTY_METRICS);

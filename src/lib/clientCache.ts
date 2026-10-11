@@ -67,3 +67,12 @@ export function cachedJson<T>(
 
   return fresh;
 }
+
+// Write a fresh response into the cache directly — used by manual Refresh
+// buttons so their result becomes the copy every other consumer sees,
+// instead of an older session entry resurfacing after an explicit refresh.
+export function primeCache(url: string, data: unknown): void {
+  const e = { t: Date.now(), data };
+  memory.set(url, e);
+  writeSession(url, e);
+}
