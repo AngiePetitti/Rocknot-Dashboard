@@ -122,6 +122,7 @@ export default function OverviewContent() {
   const [lineSplit, setLineSplit] = useState<{ lines: LineRow[]; shopifyError?: string; unmatchedProductTypes?: string[] } | null>(null);
   const [revenueSource, setRevenueSource] = useState<'shopify' | 'none' | null>(null);
   const [adsError, setAdsError] = useState<string | null>(null);
+  const [apiErrorDetail, setApiErrorDetail] = useState<string | null>(null);
   const [shopifyLiveError, setShopifyLiveError] = useState<string | null>(null);
   const [shopifySource, setShopifySource] = useState<'shopifyql' | 'shopifyql_totals' | 'bigquery' | null>(null);
   const [health, setHealth] = useState<null | {
@@ -335,6 +336,7 @@ export default function OverviewContent() {
         if (activeReqKey.current !== reqKey) return; // stale response — a newer timeframe is active
         const source = data.source || 'unknown';
         if (source !== 'windsor_live' && source !== 'bigquery_live') {
+          setApiErrorDetail(typeof data.error === 'string' && data.error ? String(data.error).slice(0, 300) : null);
           setMetrics(EMPTY_METRICS);
           setRevenueData([]);
           setLivePlatformSpend(null);
@@ -598,7 +600,9 @@ export default function OverviewContent() {
       {liveSource === 'error' && (
         <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-red-700">
           <span>⚠️</span>
-          <span>Overview data is unavailable — BigQuery query failed or hasn&apos;t synced yet.</span>
+          <span>
+            Overview data is unavailable{apiErrorDetail ? <> — the server said: <b>{apiErrorDetail}</b></> : ' — BigQuery query failed or hasn\u2019t synced yet.'} Tap Refresh to retry; if a custom range keeps failing, note the exact dates \u2014 shorter ranges usually work while it\u2019s investigated.
+          </span>
         </div>
       )}
 
