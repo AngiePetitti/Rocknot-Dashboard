@@ -16,7 +16,7 @@ export interface BfcmPlan {
   /** Early-access / VIP start, if any. */
   earlyAccessFrom?: string;
   /** Last year's actual sale dates for the baseline — set by hand, or confirmed from the detected revenue lift. */
-  lastYear?: { from: string; to: string; source: 'manual' | 'detected' };
+  lastYear?: { from: string; to: string; source: 'manual' | 'detected'; earlyAccess?: { from: string; to: string } };
   /** The plan in the team's words: offer structure, audiences, cadence. */
   summary: string;
   offers: string;
@@ -74,6 +74,7 @@ export function defaultPlan(year = bfcmYear()): BfcmPlan {
     summary: '', offers: '',
     goals: { revenue: 0, adSpend: 0 },
     collections: [...(getClient().bfcm?.collections || [])], checklist: defaultChecklist(year), notes: '',
+    ...(getClient().bfcm?.lastYear && year === bfcmYear() ? { lastYear: { ...getClient().bfcm!.lastYear!, source: 'manual' as const } } : {}),
   };
 }
 
@@ -87,7 +88,7 @@ export async function loadBfcmPlan(year = bfcmYear()): Promise<BfcmPlan> {
     const p = JSON.parse(raw) as Partial<BfcmPlan>;
     const d = defaultPlan(year);
     // Profile-seeded collection links show until an admin has saved their own list.
-    return { ...d, ...p, goals: { ...d.goals, ...(p.goals || {}) }, window: { ...d.window, ...(p.window || {}) }, collections: p.collections?.some(c => c.url) ? p.collections : d.collections, checklist: p.checklist?.length ? p.checklist : d.checklist };
+    return { ...d, ...p, goals: { ...d.goals, ...(p.goals || {}) }, window: { ...d.window, ...(p.window || {}) }, collections: p.collections?.some(c => c.url) ? p.collections : d.collections, checklist: p.checklist?.length ? p.checklist : d.checklist, lastYear: p.lastYear?.from ? p.lastYear : d.lastYear };
   } catch { return defaultPlan(year); }
 }
 
@@ -110,7 +111,7 @@ export function bfcmPlanText(plan: BfcmPlan, today: string): string {
   const phase = bfcmPhase(plan, today);
   const days = Math.round((Date.parse(plan.window.from) - Date.parse(today)) / 86400000);
   const open = plan.checklist.filter(c => !c.done);
-  return `${plan.name} — sale window ${plan.window.from} → ${plan.window.to}${plan.earlyAccessFrom ? ` (early access from ${plan.earlyAccessFrom})` : ''} · status: ${phase === 'before' ? `${days} days to go` : phase}.${plan.lastYear ? ` Last year's sale ran ${plan.lastYear.from} → ${plan.lastYear.to} (${plan.lastYear.source}); that is the "vs last year" baseline.` : ''}
+  return `${plan.name} — sale window ${plan.window.from} → ${plan.window.to}${plan.earlyAccessFrom ? ` (early access from ${plan.earlyAccessFrom})` : ''} · status: ${phase === 'before' ? `${days} days to go` : phase}.${plan.lastYear ? ` Last year's sale ran ${plan.lastYear.from} → ${plan.lastYear.to} (${plan.lastYear.source})${plan.lastYear.earlyAccess ? `, with gated VIP early access ${plan.lastYear.earlyAccess.from} → ${plan.lastYear.earlyAccess.to}` : ''}; the public window is the "vs last year" baseline.` : ''}
 Goals: revenue ${$(plan.goals.revenue)} · ad spend ${$(plan.goals.adSpend)}${plan.goals.adSpend > 0 ? ` · implied MER ${(plan.goals.revenue / plan.goals.adSpend).toFixed(1)}x` : ''}${plan.goals.orders ? ` · orders ${plan.goals.orders}` : ''}${plan.goals.emailRevenue ? ` · email/SMS revenue ${$(plan.goals.emailRevenue)}` : ''}.
 Plan: ${plan.summary || '(not written yet)'}
 Offers: ${plan.offers || '(not set)'}
