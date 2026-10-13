@@ -15,6 +15,8 @@ export interface BfcmPlan {
   window: { from: string; to: string };
   /** Early-access / VIP start, if any. */
   earlyAccessFrom?: string;
+  /** Last year's actual sale dates for the baseline — set by hand, or confirmed from the detected revenue lift. */
+  lastYear?: { from: string; to: string; source: 'manual' | 'detected' };
   /** The plan in the team's words: offer structure, audiences, cadence. */
   summary: string;
   offers: string;
@@ -107,11 +109,42 @@ export function bfcmPlanText(plan: BfcmPlan, today: string): string {
   const phase = bfcmPhase(plan, today);
   const days = Math.round((Date.parse(plan.window.from) - Date.parse(today)) / 86400000);
   const open = plan.checklist.filter(c => !c.done);
-  return `${plan.name} — sale window ${plan.window.from} → ${plan.window.to}${plan.earlyAccessFrom ? ` (early access from ${plan.earlyAccessFrom})` : ''} · status: ${phase === 'before' ? `${days} days to go` : phase}.
+  return `${plan.name} — sale window ${plan.window.from} → ${plan.window.to}${plan.earlyAccessFrom ? ` (early access from ${plan.earlyAccessFrom})` : ''} · status: ${phase === 'before' ? `${days} days to go` : phase}.${plan.lastYear ? ` Last year's sale ran ${plan.lastYear.from} → ${plan.lastYear.to} (${plan.lastYear.source}); that is the "vs last year" baseline.` : ''}
 Goals: revenue ${$(plan.goals.revenue)} · ad spend ${$(plan.goals.adSpend)}${plan.goals.adSpend > 0 ? ` · implied MER ${(plan.goals.revenue / plan.goals.adSpend).toFixed(1)}x` : ''}${plan.goals.orders ? ` · orders ${plan.goals.orders}` : ''}${plan.goals.emailRevenue ? ` · email/SMS revenue ${$(plan.goals.emailRevenue)}` : ''}.
 Plan: ${plan.summary || '(not written yet)'}
 Offers: ${plan.offers || '(not set)'}
 Collections: ${plan.collections.map(c => `${c.label} ${c.url}`).join(' · ') || 'none linked yet'}
 Checklist: ${plan.checklist.length - open.length}/${plan.checklist.length} done.${open.length ? ` Open: ${open.map(c => `${c.text}${c.owner ? ` (${c.owner})` : ''}${c.due ? ` due ${c.due}` : ''}`).join('; ')}` : ''}
 ${plan.notes ? `Notes: ${plan.notes}` : ''}`;
+}
+
+/**
+ * Find last year's sale from the revenue itself: the longest run of days in
+ * mid-Nov → mid-Dec whose revenue sits well above the pre-sale baseline
+ * (median of late Oct → mid Nov), extended to neighbouring days that are
+ * still clearly elevated. Returns null when no run stands out.
+ */
+export function detectSaleWindow(days: Array<{ date: string; revenue: number }>, year: number): { from: string; to: string; lift: number; baseline: number } | null {
+  const sorted = [...days].filter(d => d.date.startsWith(String(year))).sort((a, b) => a.date.localeCompare(b.date));
+  const base = sorted.filter(d => d.date >= `${year}-10-20` && d.date <= `${year}-11-15`).map(d => d.revenue).sort((a, b) => a - b);
+  if (base.length < 10) return null;
+  const median = base[Math.floor(base.length / 2)];
+  if (median <= 0) return null;
+  const cand = sorted.filter(d => d.date >= `${year}-11-16` && d.date <= `${year}-12-12`);
+  const hot = (r: number) => r >= median * 1.6; const warm = (r: number) => r >= median * 1.3;
+  let best: { s: number; e: number } | null = null; let i = 0;
+  while (i < cand.length) {
+    if (!hot(cand[i].revenue)) { i++; continue; }
+    let j = i;
+    while (j + 1 < cand.length && (hot(cand[j + 1].revenue) || (warm(cand[j + 1].revenue) && j + 2 < cand.length && hot(cand[j + 2].revenue)))) j++;
+    if (!best || j - i > best.e - best.s) best = { s: i, e: j };
+    i = j + 1;
+  }
+  if (!best) return null;
+  let { s, e } = best;
+  while (s > 0 && warm(cand[s - 1].revenue)) s--;
+  while (e + 1 < cand.length && warm(cand[e + 1].revenue)) e++;
+  const run = cand.slice(s, e + 1);
+  const avg = run.reduce((t, d) => t + d.revenue, 0) / run.length;
+  return { from: run[0].date, to: run[run.length - 1].date, lift: Math.round((avg / median) * 10) / 10, baseline: Math.round(median) };
 }
