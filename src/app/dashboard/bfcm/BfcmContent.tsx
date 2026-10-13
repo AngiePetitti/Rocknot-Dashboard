@@ -14,7 +14,8 @@ interface Creative { id: string; name: string; platform: string; thumbnailUrl: s
 interface Campaign { id: string; name: string; channel: 'email' | 'sms'; sendTime: string | null; recipients?: number; openRate?: number; clickRate?: number; revenue?: number }
 interface Perf {
   year: number; phase: 'before' | 'early_access' | 'live' | 'after'; previewLastYear: boolean;
-  window: { from: string; to: string }; priorYearWindow: { from: string; to: string };
+  window: { from: string; to: string }; priorYearWindow: { from: string; to: string; source: 'manual' | 'detected' | 'default' };
+  detectedLastYear: { from: string; to: string; lift: number; baseline: number } | null;
   store: Store | null; priorYear: Store | null;
   daily: Array<{ date: string; revenue: number; netSales?: number; orders: number; adSpend: number }>;
   platforms: Array<{ platform: string; spend: number; revenue: number; roas: number; conversions: number; costPerConversion: number; color: string }>;
@@ -53,7 +54,7 @@ export default function BfcmContent() {
     fetch(`/api/bfcm/performance?year=${plan.year}${showLastYear ? '&window=last_year' : ''}`, { cache: 'no-store' })
       .then(r => r.json()).then(d => { if (d?.error) setPerfErr(String(d.error)); else setPerf(d); })
       .catch(e => setPerfErr(String(e)));
-  }, [plan?.year, plan?.window.from, plan?.window.to, plan?.earlyAccessFrom, showLastYear]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [plan?.year, plan?.window.from, plan?.window.to, plan?.earlyAccessFrom, plan?.lastYear?.from, plan?.lastYear?.to, showLastYear]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const daysToGo = plan ? Math.round((Date.parse(plan.window.from) - Date.parse(today)) / 86400000) : 0;
   const phase: Perf['phase'] = !plan ? 'before' : today > plan.window.to ? 'after' : today >= plan.window.from ? 'live' : plan.earlyAccessFrom && today >= plan.earlyAccessFrom ? 'early_access' : 'before';
@@ -118,6 +119,18 @@ export default function BfcmContent() {
                 <p className="text-sm text-gray-700 mt-1">
                   <b>{phaseLabel}</b> · sale {plan.window.from} → {plan.window.to}{plan.earlyAccessFrom ? ` · early access from ${plan.earlyAccessFrom}` : ''}
                 </p>
+                {perf && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Baseline: last year&apos;s sale <b>{perf.priorYearWindow.from} → {perf.priorYearWindow.to}</b>
+                    {perf.priorYearWindow.source === 'manual' ? ' · set by hand'
+                      : perf.priorYearWindow.source === 'detected' ? ` · detected from revenue (${perf.detectedLastYear?.lift}× a normal day) — confirm or correct it` 
+                      : ' · this year\'s dates shifted back; no sale lift detected last year — set the real dates'}
+                    {isAdmin && perf.priorYearWindow.source === 'detected' && perf.detectedLastYear && (
+                      <button onClick={() => savePlan({ ...plan, lastYear: { from: perf.detectedLastYear!.from, to: perf.detectedLastYear!.to, source: 'manual' } })} className="ml-2 text-xs font-semibold text-violet-600 hover:text-violet-800">Confirm these dates</button>
+                    )}
+                    {isAdmin && perf.priorYearWindow.source !== 'detected' && <button onClick={() => { setDraft(JSON.parse(JSON.stringify(plan))); setEditing(true); }} className="ml-2 text-xs font-semibold text-violet-600 hover:text-violet-800">Set dates</button>}
+                  </p>
+                )}
               </div>
               {isAdmin && !editing && <button onClick={() => { setDraft(JSON.parse(JSON.stringify(plan))); setEditing(true); }} className="text-xs font-semibold text-violet-600 hover:text-violet-800">✏️ Edit plan</button>}
               {isAdmin && editing && d && (
@@ -135,6 +148,11 @@ export default function BfcmContent() {
                   <label className="text-xs text-gray-500">Early access<input type="date" value={d.earlyAccessFrom || ''} onChange={e => setDraft({ ...d, earlyAccessFrom: e.target.value || undefined })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
                   <label className="text-xs text-gray-500">Sale starts<input type="date" value={d.window.from} onChange={e => setDraft({ ...d, window: { ...d.window, from: e.target.value } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
                   <label className="text-xs text-gray-500">Sale ends<input type="date" value={d.window.to} onChange={e => setDraft({ ...d, window: { ...d.window, to: e.target.value } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
+                </div>
+                <div className="grid grid-cols-2 gap-2 md:col-span-2 sm:w-2/3">
+                  <label className="text-xs text-gray-500">Last year&apos;s sale started<input type="date" value={d.lastYear?.from || ''} onChange={e => setDraft({ ...d, lastYear: { from: e.target.value, to: d.lastYear?.to || e.target.value, source: 'manual' } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
+                  <label className="text-xs text-gray-500">Last year&apos;s sale ended<input type="date" value={d.lastYear?.to || ''} onChange={e => setDraft({ ...d, lastYear: { from: d.lastYear?.from || e.target.value, to: e.target.value, source: 'manual' } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
+                  <p className="text-[11px] text-gray-400 col-span-2">The &quot;vs last year&quot; baseline uses these exact dates. Leave blank to use the dates the dashboard detects from last year&apos;s revenue lift.</p>
                 </div>
                 <label className="text-xs text-gray-500 md:col-span-2">The plan (audiences, cadence, what we are doing differently this year)<textarea value={d.summary} onChange={e => setDraft({ ...d, summary: e.target.value })} rows={4} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></label>
                 <label className="text-xs text-gray-500 md:col-span-2">Offers (sitewide %, tiers, gift with purchase, codes, exclusions)<textarea value={d.offers} onChange={e => setDraft({ ...d, offers: e.target.value })} rows={3} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></label>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { bfcmYear, loadBfcmPlan, bfcmPhase } from '@/src/lib/bfcm';
-import { getOverview } from '@/src/lib/bqOverview';
+import { bfcmYear, loadBfcmPlan, bfcmPhase, detectSaleWindow } from '@/src/lib/bfcm';
+import { getOverview, fetchShopifyDaily } from '@/src/lib/bqOverview';
 import { getAdsOverview } from '@/src/lib/bqAds';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { makeFetcher } from '@/src/lib/analystTools';
@@ -20,10 +20,17 @@ export async function GET(req: NextRequest) {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const phase = bfcmPhase(plan, today);
   const previewLastYear = sp.get('window') === 'last_year' || phase === 'before';
-  const from = previewLastYear ? shiftMonths(plan.earlyAccessFrom && plan.earlyAccessFrom < plan.window.from ? plan.earlyAccessFrom : plan.window.from, 12) : (plan.earlyAccessFrom && plan.earlyAccessFrom < plan.window.from ? plan.earlyAccessFrom : plan.window.from);
-  const toRaw = previewLastYear ? shiftMonths(plan.window.to, 12) : plan.window.to;
+  const thisFrom = plan.earlyAccessFrom && plan.earlyAccessFrom < plan.window.from ? plan.earlyAccessFrom : plan.window.from;
+  // Last year's baseline is last year's ACTUAL sale (set on the plan or
+  // detected from the revenue lift), not this year's dates shifted back —
+  // brands run sales of different lengths from one year to the next.
+  const daily = await fetchShopifyDaily(`${year - 1}-10-20`, `${year - 1}-12-12`).catch(() => []);
+  const detected = detectSaleWindow(daily.map(d => ({ date: d.date, revenue: d.totalSales || d.netSales || 0 })), year - 1);
+  const ly = plan.lastYear || (detected ? { from: detected.from, to: detected.to, source: 'detected' as const } : { from: shiftMonths(thisFrom, 12), to: shiftMonths(plan.window.to, 12), source: 'default' as const });
+  const from = previewLastYear ? ly.from : thisFrom;
+  const toRaw = previewLastYear ? ly.to : plan.window.to;
   const to = toRaw > today ? today : toRaw;
-  const pyFrom = shiftMonths(from, 12); const pyTo = shiftMonths(to, 12);
+  const pyFrom = ly.from; const pyTo = ly.to;
   const get = makeFetcher(req.nextUrl.origin, req.headers.get('cookie') || '');
   const q = `tf=custom&date_from=${from}&date_to=${to}`;
   const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -54,7 +61,7 @@ export async function GET(req: NextRequest) {
   const email = recent.filter(c => c.channel === 'email').sort((a, b) => (b.revenue || 0) - (a.revenue || 0)).slice(0, 10);
   const sms = recent.filter(c => c.channel === 'sms').sort((a, b) => (b.revenue || 0) - (a.revenue || 0)).slice(0, 10);
   return NextResponse.json({
-    year, phase, previewLastYear, window: { from, to }, priorYearWindow: { from: pyFrom, to: pyTo },
+    year, phase, previewLastYear, window: { from, to }, priorYearWindow: { from: pyFrom, to: pyTo, source: ly.source }, detectedLastYear: detected,
     store: store(m), priorYear: store(pm),
     daily: ov?.revenueData || [],
     platforms: ads?.platforms || [],
