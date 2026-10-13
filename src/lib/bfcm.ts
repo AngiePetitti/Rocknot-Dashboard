@@ -73,7 +73,7 @@ export function defaultPlan(year = bfcmYear()): BfcmPlan {
     earlyAccessFrom: addDays(blackFriday(year), -3),
     summary: '', offers: '',
     goals: { revenue: 0, adSpend: 0 },
-    collections: [], checklist: defaultChecklist(year), notes: '',
+    collections: [...(getClient().bfcm?.collections || [])], checklist: defaultChecklist(year), notes: '',
   };
 }
 
@@ -86,7 +86,8 @@ export async function loadBfcmPlan(year = bfcmYear()): Promise<BfcmPlan> {
     if (!raw) return defaultPlan(year);
     const p = JSON.parse(raw) as Partial<BfcmPlan>;
     const d = defaultPlan(year);
-    return { ...d, ...p, goals: { ...d.goals, ...(p.goals || {}) }, window: { ...d.window, ...(p.window || {}) }, collections: p.collections || [], checklist: p.checklist?.length ? p.checklist : d.checklist };
+    // Profile-seeded collection links show until an admin has saved their own list.
+    return { ...d, ...p, goals: { ...d.goals, ...(p.goals || {}) }, window: { ...d.window, ...(p.window || {}) }, collections: p.collections?.some(c => c.url) ? p.collections : d.collections, checklist: p.checklist?.length ? p.checklist : d.checklist };
   } catch { return defaultPlan(year); }
 }
 
