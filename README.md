@@ -1,7 +1,7 @@
 # A6 Dashboard
 
 Area 6 Marketing's eCommerce analytics dashboard, deployed separately for each
-client (currently Rocknot and Kailee P). A Next.js 14 app for DTC Shopify brands: live revenue and ad
+client (currently Rocknot, Kailee P and Skimpies). A Next.js 14 app for DTC Shopify brands: live revenue and ad
 spend (Overview), per-platform ad performance, creative analysis with
 AI-written production briefs, top products, customer intel, inventory and
 restock alerts, returns, Klaviyo retention planning, attribution, a marketing
@@ -21,10 +21,11 @@ profile from env vars.
 |-----------|----------|--------------------------------|-----------------|-------|
 | Rocknot   | `rocknot`| Meta, Google, TikTok, Snapchat | `rocknot-bags` (hand-audited bag/strap rules) | original deployment |
 | Kailee P  | `kaileep`| Meta, Google, Pinterest        | `standard` (one row per Shopify variant) | bridal shoes, kaileep.com |
+| Skimpies  | `skimpies`| Meta, Google (provisional)    | `standard` | scaffolded Oct 2026 — accounts not connected yet |
 
 How the active client is chosen, in order:
 
-1. `CLIENT` env var (`rocknot` or `kaileep`)
+1. `CLIENT` env var (`rocknot`, `kaileep` or `skimpies`)
 2. `BQ_DATASET` env var, when it is named after a known client
 3. otherwise `kaileep`
 
@@ -57,7 +58,7 @@ Core (every client):
 
 | Variable | Purpose |
 |---|---|
-| `CLIENT` | `rocknot` or `kaileep` — selects the profile |
+| `CLIENT` | `rocknot`, `kaileep` or `skimpies` — selects the profile |
 | `NEXTAUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google sign-in; auth is enforced only once all three exist |
 | `AUTH_ADMINS`, `AUTH_MEMBERS` | comma-separated emails; env admins are permanent |
 | `CALENDAR_SHEET_ID`, `PRIVATE_SHEET_ID` | Google Sheets used as the app's small data store (calendar, tasks, goals, users, briefs) |
@@ -103,6 +104,28 @@ Rocknot-only: `SNAP_CLIENT_ID`, `SNAP_CLIENT_SECRET`, `SNAP_REFRESH_TOKEN`,
    Analysis tab so briefs and retention copy follow the real brand.
 6. **Goals** — enter the annual net-sales target on the Goals tab (the tab
    asks for it until one is saved).
+
+## Onboarding Skimpies
+
+`src/lib/client.ts` has a `skimpies` profile with placeholders. Every Windsor
+account is `null`, so nothing is read from the shared agency workspace until
+the account ids are filled in. Follow the Kailee P steps above with these
+values:
+
+1. **Profile** — fill in `siteDomain`, `shopify.defaultDomain`,
+   `ads.platforms` (provisionally Meta + Google), `ads.metaAccountIdDefault`,
+   every `windsor.accounts` id, `brand` (description, founder, AOV, content
+   angles), `goals` and `finance.grossMarginPct`. Add `public/skimpies-logo.png`
+   and set `logo` (until then the sidebar shows an "S" mark).
+2. **BigQuery** — dataset `skimpies` plus Windsor tasks for `shopify_orders`,
+   `shopify_customers` and one per ad platform.
+3. **Vercel** — new project with `CLIENT=skimpies`, `BQ_DATASET=skimpies`, the
+   Skimpies Shopify domain/token, Meta account id/token and their own
+   `CALENDAR_SHEET_ID` / `PRIVATE_SHEET_ID`. `SHOPIFY_STORE_DOMAIN` is required
+   until the profile has a default domain.
+4. **Brand brief** — the default in `src/lib/brandBrief.ts` is a placeholder;
+   replace it on the AI Insights page and upload the brand guide on Creative
+   Analysis.
 
 The Rocknot deployment needs no changes; `BQ_DATASET=rocknot` resolves to the
 Rocknot profile automatically.

@@ -9,7 +9,7 @@
 // client with env vars only.
 //
 // Selecting the client (checked in this order):
-//   1. CLIENT env var            — "rocknot" | "kaileep"
+//   1. CLIENT env var            — "rocknot" | "kaileep" | "skimpies"
 //   2. BQ_DATASET env var        — a dataset named after a known client
 //   3. default                   — "kaileep"
 //
@@ -17,7 +17,7 @@
 // src/components/ClientProvider.tsx (the root layout hands the profile down).
 // Keep profiles JSON-serialisable: they cross the server → browser boundary.
 
-export type ClientId = 'rocknot' | 'kaileep';
+export type ClientId = 'rocknot' | 'kaileep' | 'skimpies';
 
 // Every ad platform the dashboard knows how to read. A client lists the ones
 // it actually runs; queries and UI for the rest are skipped.
@@ -379,10 +379,70 @@ const KAILEEP: ClientProfile = {
   seedsEnabled: false,
 };
 
-export const CLIENTS: Record<ClientId, ClientProfile> = { rocknot: ROCKNOT, kaileep: KAILEEP };
+// Skimpies — new client (Oct 2026). Profile scaffolded ahead of onboarding:
+// every account id is unset, so REST calls for those sources are skipped
+// rather than reading another client's data from the shared Windsor
+// workspace. Fill each blank in as the account details arrive (see the
+// README's onboarding checklist).
+const SKIMPIES: ClientProfile = {
+  id: 'skimpies',
+  name: 'Skimpies',
+  wordmark: 'SKIMPIES',
+  initial: 'S',
+  logo: '', // drop a file at public/skimpies-logo.png and set this to '/skimpies-logo.png'
+  theme: { accentFrom: '#fda4af', accentTo: '#fdba74', loginMark: '#fb7185', icon: { from: '#fb7185', to: '#f97316' } },
+  siteDomain: '', // storefront domain — set once confirmed
+  dashboardUrl: 'https://skimpies-dashboard.vercel.app',
+  storagePrefix: 'skimpies',
+  legalEntity: 'Skimpies',
+  brand: {
+    // Placeholder until the brand brief lands; the AI Insights page's brand
+    // brief (KV) overrides the prompt defaults without a code change.
+    description: 'Skimpies is a DTC eCommerce brand selling on Shopify.',
+    founder: null,
+    aov: null,
+    contentAngles: 'product styling, customer reviews and UGC, behind-the-scenes',
+  },
+  shopify: { defaultDomain: '' }, // SHOPIFY_STORE_DOMAIN env required until set
+  ads: {
+    platforms: ['meta', 'google'],
+    metaAccountNameMatch: 'skimpies',
+    metaAccountNameMode: 'contains',
+    metaAccountIdDefault: '', // META_AD_ACCOUNT_ID env until set
+  },
+  finance: { qbAccountMatch: 'skimpies', grossMarginPct: null, expensesSheet: null },
+  revenue: { includeReturnFees: false },
+  windsor: {
+    accounts: {
+      // null = not connected yet: the REST call is skipped. Set the ids from
+      // Skimpies' Windsor → BigQuery tasks (select_accounts=) as they're added,
+      // or override per source with WINDSOR_ACCOUNT_<SOURCE> env vars.
+      facebook: null,
+      shopify: null,
+      google_ads: null,
+      tiktok: null,
+      snapchat: null,
+      pinterest: null,
+      quickbooks: null,
+      pinterest_organic: null,
+      instagram: null,
+      google_analytics: null,
+    },
+  },
+  // No targets agreed yet — the Goals tab asks for the annual target; the
+  // MER/ROAS/CAC bars start from agency defaults until the plan lands.
+  goals: { defaultAnnualTarget: 0, targetMer: 3, targetRoas: 3, targetCac: 50 },
+  inventory: { mode: 'standard' },
+  creatives: { founderTrack: null, driveFolders: [] },
+  alerts: { fromName: 'Skimpies Dashboard' },
+  analyst: { name: 'Cleo' },
+  seedsEnabled: false,
+};
+
+export const CLIENTS: Record<ClientId, ClientProfile> = { rocknot: ROCKNOT, kaileep: KAILEEP, skimpies: SKIMPIES };
 
 function isClientId(v: string): v is ClientId {
-  return v === 'rocknot' || v === 'kaileep';
+  return v === 'rocknot' || v === 'kaileep' || v === 'skimpies';
 }
 
 let warnedUnset = false;
@@ -401,6 +461,7 @@ export function getClientId(): ClientId {
     || (metaId && metaId === ROCKNOT.ads.metaAccountIdDefault) || Boolean((process.env.SNAP_AD_ACCOUNT_ID || '').trim());
   if (looksRocknot) return 'rocknot';
   if (ds.includes('kailee') || shop.includes('kailee')) return 'kaileep';
+  if (ds.includes('skimpies') || shop.includes('skimpies')) return 'skimpies';
 
   if (!warnedUnset && typeof process !== 'undefined' && process.env.NODE_ENV === 'production') {
     warnedUnset = true;
