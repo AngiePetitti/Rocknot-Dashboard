@@ -16,6 +16,7 @@ interface Perf {
   year: number; phase: 'before' | 'early_access' | 'live' | 'after'; previewLastYear: boolean;
   window: { from: string; to: string }; priorYearWindow: { from: string; to: string; source: 'manual' | 'detected' | 'default' };
   detectedLastYear: { from: string; to: string; lift: number; baseline: number } | null;
+  priorYearEarlyAccess: ({ window: { from: string; to: string } } & Store) | null;
   store: Store | null; priorYear: Store | null;
   daily: Array<{ date: string; revenue: number; netSales?: number; orders: number; adSpend: number }>;
   platforms: Array<{ platform: string; spend: number; revenue: number; roas: number; conversions: number; costPerConversion: number; color: string }>;
@@ -121,7 +122,7 @@ export default function BfcmContent() {
                 </p>
                 {perf && (
                   <p className="text-xs text-gray-500 mt-1">
-                    Baseline: last year&apos;s sale <b>{perf.priorYearWindow.from} → {perf.priorYearWindow.to}</b>
+                    Baseline: last year&apos;s public sale <b>{perf.priorYearWindow.from} → {perf.priorYearWindow.to}</b>{plan.lastYear?.earlyAccess ? ` (VIP early access ${plan.lastYear.earlyAccess.from} → ${plan.lastYear.earlyAccess.to})` : ''}
                     {perf.priorYearWindow.source === 'manual' ? ' · set by hand'
                       : perf.priorYearWindow.source === 'detected' ? ` · detected from revenue (${perf.detectedLastYear?.lift}× a normal day) — confirm or correct it` 
                       : ' · this year\'s dates shifted back; no sale lift detected last year — set the real dates'}
@@ -152,7 +153,9 @@ export default function BfcmContent() {
                 <div className="grid grid-cols-2 gap-2 md:col-span-2 sm:w-2/3">
                   <label className="text-xs text-gray-500">Last year&apos;s sale started<input type="date" value={d.lastYear?.from || ''} onChange={e => setDraft({ ...d, lastYear: { from: e.target.value, to: d.lastYear?.to || e.target.value, source: 'manual' } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
                   <label className="text-xs text-gray-500">Last year&apos;s sale ended<input type="date" value={d.lastYear?.to || ''} onChange={e => setDraft({ ...d, lastYear: { from: d.lastYear?.from || e.target.value, to: e.target.value, source: 'manual' } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
-                  <p className="text-[11px] text-gray-400 col-span-2">The &quot;vs last year&quot; baseline uses these exact dates. Leave blank to use the dates the dashboard detects from last year&apos;s revenue lift.</p>
+                  <label className="text-xs text-gray-500">Last year&apos;s early access started<input type="date" value={d.lastYear?.earlyAccess?.from || ''} onChange={e => setDraft({ ...d, lastYear: { from: d.lastYear?.from || '', to: d.lastYear?.to || '', source: 'manual', earlyAccess: e.target.value ? { from: e.target.value, to: d.lastYear?.earlyAccess?.to || e.target.value } : undefined } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
+                  <label className="text-xs text-gray-500">Last year&apos;s early access ended<input type="date" value={d.lastYear?.earlyAccess?.to || ''} onChange={e => setDraft({ ...d, lastYear: { from: d.lastYear?.from || '', to: d.lastYear?.to || '', source: 'manual', earlyAccess: e.target.value ? { from: d.lastYear?.earlyAccess?.from || e.target.value, to: e.target.value } : undefined } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
+                  <p className="text-[11px] text-gray-400 col-span-2">The &quot;vs last year&quot; baseline uses the public sale dates; early access is reported separately. Leave the sale dates blank to use what the dashboard detects from last year&apos;s revenue lift.</p>
                 </div>
                 <label className="text-xs text-gray-500 md:col-span-2">The plan (audiences, cadence, what we are doing differently this year)<textarea value={d.summary} onChange={e => setDraft({ ...d, summary: e.target.value })} rows={4} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></label>
                 <label className="text-xs text-gray-500 md:col-span-2">Offers (sitewide %, tiers, gift with purchase, codes, exclusions)<textarea value={d.offers} onChange={e => setDraft({ ...d, offers: e.target.value })} rows={3} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></label>
@@ -253,8 +256,12 @@ export default function BfcmContent() {
                 <MetricCard title="AOV" value={$(st.aov)} accentColor="#f9a8d4" subtitle={`${n(st.newCustomers)} new · ${n(st.returningCustomers)} returning customers${st.cvr ? ` · CVR ${st.cvr.toFixed(1)}%` : ''}`} comparison={py ? { current: st.aov, prior: py.aov, label: 'vs last year' } : undefined} />
               </div>
               {py && (
-                <p className="text-[11px] text-gray-400 mb-4">Last year&apos;s same dates ({perf.priorYearWindow.from} → {perf.priorYearWindow.to}): revenue {$(py.revenue)} · orders {n(py.orders)} · ad spend {$(py.spend)} · MER {py.mer.toFixed(2)}x · new customers {n(py.newCustomers)}</p>
+                <p className="text-[11px] text-gray-400 mb-1">Last year&apos;s public sale ({perf.priorYearWindow.from} → {perf.priorYearWindow.to}): revenue {$(py.revenue)} · orders {n(py.orders)} · ad spend {$(py.spend)} · MER {py.mer.toFixed(2)}x · new customers {n(py.newCustomers)}</p>
               )}
+              {perf.priorYearEarlyAccess && (
+                <p className="text-[11px] text-gray-400 mb-4">Last year&apos;s VIP early access ({perf.priorYearEarlyAccess.window.from} → {perf.priorYearEarlyAccess.window.to}, gated): revenue {$(perf.priorYearEarlyAccess.revenue)} · orders {n(perf.priorYearEarlyAccess.orders)} · ad spend {$(perf.priorYearEarlyAccess.spend)} · MER {perf.priorYearEarlyAccess.mer.toFixed(2)}x</p>
+              )}
+              {py && !perf.priorYearEarlyAccess && <div className="mb-3" />}
 
               {/* Daily */}
               {perf.daily.length > 1 && (

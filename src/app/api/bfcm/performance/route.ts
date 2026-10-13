@@ -34,9 +34,11 @@ export async function GET(req: NextRequest) {
   const get = makeFetcher(req.nextUrl.origin, req.headers.get('cookie') || '');
   const q = `tf=custom&date_from=${from}&date_to=${to}`;
   const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
-  const [ov, pyOv, ads, creatives, products, retention] = await Promise.all([
+  const ea = plan.lastYear?.earlyAccess;
+  const [ov, pyOv, eaOv, ads, creatives, products, retention] = await Promise.all([
     isBigQueryConfigured() ? getOverview(from, to).catch(() => null) : Promise.resolve(null),
     isBigQueryConfigured() ? getOverview(pyFrom, pyTo).catch(() => null) : Promise.resolve(null),
+    isBigQueryConfigured() && ea ? getOverview(ea.from, ea.to).catch(() => null) : Promise.resolve(null),
     isBigQueryConfigured() ? getAdsOverview(from, to).catch(() => null) : Promise.resolve(null),
     get(`/api/windsor/creatives?${q}`).catch(() => null),
     get(`/api/windsor/products?${q}`).catch(() => null),
@@ -63,6 +65,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     year, phase, previewLastYear, window: { from, to }, priorYearWindow: { from: pyFrom, to: pyTo, source: ly.source }, detectedLastYear: detected,
     store: store(m), priorYear: store(pm),
+    priorYearEarlyAccess: ea && eaOv ? { window: ea, ...store(eaOv.metrics) } : null,
     daily: ov?.revenueData || [],
     platforms: ads?.platforms || [],
     creatives: { best, worst, total: crs.length, error: creatives?.error || null },
