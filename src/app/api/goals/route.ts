@@ -8,8 +8,8 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   if (!isChatStoreConfigured()) return NextResponse.json({ configured: false, goals: [] });
   try {
-    const [goals, targetRaw] = await Promise.all([getGoals(), getKV('annual_target').catch(() => null)]);
-    return NextResponse.json({ configured: true, goals, target: targetRaw ? Number(targetRaw) || null : null });
+    const [goals, targetRaw, inclRaw] = await Promise.all([getGoals(), getKV('annual_target').catch(() => null), getKV('goals_include_marketplaces').catch(() => null)]);
+    return NextResponse.json({ configured: true, goals, target: targetRaw ? Number(targetRaw) || null : null, includeMarketplaces: inclRaw === 'true' });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 500 });
   }
@@ -23,7 +23,7 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Only admins can edit goals' }, { status: 403 });
     }
   }
-  let body: { goals?: MonthGoal[]; target?: number };
+  let body: { goals?: MonthGoal[]; target?: number; includeMarketplaces?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -41,6 +41,9 @@ export async function PUT(req: NextRequest) {
     await saveGoals(goals);
     if (typeof body.target === 'number' && body.target > 0) {
       await setKV('annual_target', String(Math.round(body.target))).catch(() => {});
+    }
+    if (typeof body.includeMarketplaces === 'boolean') {
+      await setKV('goals_include_marketplaces', body.includeMarketplaces ? 'true' : 'false').catch(() => {});
     }
     return NextResponse.json({ ok: true, goals });
   } catch (err) {

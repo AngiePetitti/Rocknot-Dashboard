@@ -54,9 +54,26 @@ export default function GoalsContent() {
   const [goals, setGoals] = useState<Record<string, MonthGoal>>({});
   const [target, setTarget] = useState<number>(client.goals.defaultAnnualTarget);
   const [targetTouched, setTargetTouched] = useState(false);
-  const [actuals, setActuals] = useState<Record<string, MonthActual>>({});
+  // Online-store actuals from the Overview API (marketplaces such as Nordstrom
+  // are excluded there), plus the marketplaces' own monthly net sales so the
+  // Goals tab can count them when the "count Nordstrom" setting is on.
+  const [storeActuals, setActuals] = useState<Record<string, MonthActual>>({});
+  const [mktMonths, setMktMonths] = useState<Record<string, { netSales: number; totalSales: number }>>({});
+  const [mktLastYear, setMktLastYear] = useState<Record<string, { netSales: number; totalSales: number }>>({});
+  const [mktLabels, setMktLabels] = useState<string[]>([]);
+  const [includeMkt, setIncludeMkt] = useState(false);
+  const withMkt = (base: Record<string, MonthActual>, mkt: Record<string, { netSales: number }>): Record<string, MonthActual> => {
+    if (!includeMkt) return base;
+    const out: Record<string, MonthActual> = { ...base };
+    for (const [k, v] of Object.entries(mkt)) out[k] = { revenue: (out[k]?.revenue || 0) + v.netSales, adSpend: out[k]?.adSpend || 0 };
+    return out;
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const actuals = useMemo(() => withMkt(storeActuals, mktMonths), [storeActuals, mktMonths, includeMkt]);
   const [actualsError, setActualsError] = useState<string | null>(null);
-  const [lastYear, setLastYear] = useState<Record<string, MonthActual>>({});
+  const [storeLastYear, setLastYear] = useState<Record<string, MonthActual>>({});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const lastYear = useMemo(() => withMkt(storeLastYear, mktLastYear), [storeLastYear, mktLastYear, includeMkt]);
   const [aov, setAov] = useState<number>(0);
   const [stockRetail, setStockRetail] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -79,6 +96,7 @@ export default function GoalsContent() {
           setGoals(map);
           // The explicitly saved annual target wins; fall back to the sum of
           // the saved monthly plan.
+          if (typeof d.includeMarketplaces === 'boolean') setIncludeMkt(d.includeMarketplaces);
           if (typeof d.target === 'number' && d.target > 0) {
             setTarget(d.target); setTargetTouched(true);
           } else {
@@ -138,6 +156,11 @@ export default function GoalsContent() {
       .then(r => r.json())
       .then(d => { if (d?.notes) setMonthNotes(d.notes); })
       .catch(() => {});
+    // Marketplace (Nordstrom) months for this year and last, for the "count Nordstrom" setting.
+    fetch(`/api/goals/marketplaces?year=${year}`, { cache: 'no-store' }).then(r => r.json())
+      .then(d => { if (d?.months) setMktMonths(d.months); if (Array.isArray(d?.labels)) setMktLabels(d.labels); }).catch(() => {});
+    fetch(`/api/goals/marketplaces?year=${year - 1}`, { cache: 'no-store' }).then(r => r.json())
+      .then(d => { if (d?.months) setMktLastYear(d.months); }).catch(() => {});
     cachedJson<{ source?: string; finance?: { totalRetailValue?: number } }>(
       '/api/windsor/inventory',
       d => { if (d.source === 'shopify_live') setStockRetail(d.finance?.totalRetailValue ?? null); }
@@ -162,7 +185,7 @@ export default function GoalsContent() {
 
   // ── Auto-plan: distribute what's left of the annual target across the
   //    remaining months, weighted by last year's seasonality ──
-  function autoPlan(interactive = false) {
+  function autoPlan(interactive = false, editedKey?: string) {
     const completed = months.filter((_, i) => i + 1 < curMonth);
     const done = completed.reduce((s, k) => s + (actuals[k]?.revenue || 0), 0);
     const remainingMonths = months.filter((_, i) => i + 1 >= curMonth);
@@ -184,10 +207,20 @@ export default function GoalsContent() {
     // tapping Auto-plan used to do literally nothing. Now it asks, then
     // replans the whole remainder.
     if (!openMonths.length) {
-      if (!interactive) return; // silent auto-rebalance after an edit — never override pins
-      if (!confirm('Every remaining month is pinned from hand edits. Replan ALL remaining months from the annual target (your current numbers will be replaced)?')) return;
-      openMonths = remainingMonths;
-      pinnedMonths = [];
+      if (!interactive) {
+        // Silent rebalance after a hand edit: the months AFTER the edited one
+        // absorb the change even if they were pinned earlier, so changing
+        // October always re-plans November and December. Months before and
+        // including the edited one keep their numbers.
+        if (!editedKey) return;
+        openMonths = remainingMonths.filter(k => k > editedKey);
+        pinnedMonths = remainingMonths.filter(k => k <= editedKey);
+        if (!openMonths.length) return;
+      } else {
+        if (!confirm('Every remaining month is pinned from hand edits. Replan ALL remaining months from the annual target (your current numbers will be replaced)?')) return;
+        openMonths = remainingMonths;
+        pinnedMonths = [];
+      }
     }
     const pinnedSum = pinnedMonths.reduce((s, k) => s + (goals[k]?.revenueGoal || 0), 0);
     const remaining = Math.max(0, target - done - pinnedSum);
@@ -226,15 +259,16 @@ export default function GoalsContent() {
     setDirty(true);
     // Editing a month's revenue goal re-balances the other (unpinned) months
     // automatically once typing settles — no need to tap Auto-plan.
-    if (field === 'revenueGoal') setRebalancePending(p => p + 1);
+    if (field === 'revenueGoal') { setRebalanceKey(k); setRebalancePending(p => p + 1); }
   }
 
   const [rebalancePending, setRebalancePending] = useState(0);
+  const [rebalanceKey, setRebalanceKey] = useState<string | undefined>(undefined);
   useEffect(() => {
     if (!rebalancePending) return;
     const t = setTimeout(() => {
       setRebalancePending(0);
-      autoPlan();
+      autoPlan(false, rebalanceKey);
     }, 1200);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -419,7 +453,7 @@ export default function GoalsContent() {
               <div>
                 <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Banked so far</p>
                 <p className="text-2xl font-bold text-gray-800">{formatCurrency(ytdActual, true)}</p>
-                <p className="text-xs text-gray-400">{pctBanked.toFixed(0)}% of target · net sales incl. this month</p>
+                <p className="text-xs text-gray-400">{pctBanked.toFixed(0)}% of target · net sales incl. this month{includeMkt && mktLabels.length ? ` · incl. ${mktLabels.join(', ')}` : ''}</p>
               </div>
               <div>
                 <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">True forecast · year-end</p>
@@ -446,6 +480,28 @@ export default function GoalsContent() {
             <p className="text-[11px] text-gray-400 mt-1.5">
               <span className="text-violet-600 font-semibold">■ banked</span> · <span className="text-violet-300 font-semibold">■ projected</span> · bar = % of {formatCurrency(target, true)}
             </p>
+            {/* What "banked" counts, so it can be reconciled to Shopify's own reports. */}
+            {(() => {
+              const storeYtd = months.filter((_, i) => i + 1 <= curMonth).reduce((s, k) => s + (storeActuals[k]?.revenue || 0), 0);
+              const mktYtd = months.filter((_, i) => i + 1 <= curMonth).reduce((s, k) => s + (mktMonths[k]?.netSales || 0), 0);
+              const mktTotalYtd = months.filter((_, i) => i + 1 <= curMonth).reduce((s, k) => s + (mktMonths[k]?.totalSales || 0), 0);
+              return (
+                <div className="mt-3 pt-3 border-t border-gray-100 text-[11px] text-gray-500 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                  <span>Online store net sales <b className="text-gray-700">{formatCurrency(storeYtd, true)}</b></span>
+                  {mktLabels.length > 0 && <span>{mktLabels.join(' + ')} net sales <b className="text-gray-700">{formatCurrency(mktYtd, true)}</b>{mktTotalYtd > mktYtd ? ` (total sales ${formatCurrency(mktTotalYtd, true)})` : ''}</span>}
+                  <span>Net sales = after discounts and returns, before taxes and shipping, so it reads below Shopify&apos;s &quot;Total sales&quot;.</span>
+                  {mktLabels.length > 0 && isAdmin && (
+                    <label className="inline-flex items-center gap-1.5 cursor-pointer select-none ml-auto">
+                      <input type="checkbox" checked={includeMkt} onChange={e => {
+                        const v = e.target.checked; setIncludeMkt(v);
+                        fetch('/api/goals', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ goals: Object.values(goals), includeMarketplaces: v }) }).catch(() => {});
+                      }} className="rounded border-gray-300" />
+                      <span className="font-semibold text-gray-600">Count {mktLabels.join(' + ')} toward the target</span>
+                    </label>
+                  )}
+                </div>
+              );
+            })()}
           </Card>
         );
       })()}
