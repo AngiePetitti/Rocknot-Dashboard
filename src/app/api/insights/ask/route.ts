@@ -27,10 +27,27 @@ function parseImage(img: ChatImage): { media_type: ImageMediaType; data: string 
 }
 function toParam(mm: ChatMessage): Anthropic.MessageParam {
   const imgs = (mm.images || []).slice(0, 4).map(parseImage).filter((x): x is NonNullable<typeof x> => x !== null);
-  if (mm.role !== 'user' || !imgs.length) return { role: mm.role, content: mm.content };
+  // A message whose only content was an image that cannot be sent (too large,
+  // unsupported type, or dropped from the saved copy) must still carry text:
+  // the API rejects an empty user message and the whole chat stops working.
+  if (mm.role !== 'user' || !imgs.length) return { role: mm.role, content: mm.content.trim() || (mm.role === 'user' ? '(an image was attached here; it is no longer available)' : '(no reply)') };
   const blocks: Anthropic.ContentBlockParam[] = imgs.map(i => ({ type: 'image', source: { type: 'base64', media_type: i.media_type, data: i.data } }));
   blocks.push({ type: 'text', text: mm.content.trim() || 'What should I do based on this?' });
   return { role: 'user', content: blocks };
+}
+
+// Consecutive messages from the same role (e.g. two user turns after an
+// assistant reply was lost) are merged, which the API requires.
+function mergeTurns(list: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+  const out: Anthropic.MessageParam[] = [];
+  for (const m of list) {
+    const prev = out[out.length - 1];
+    if (prev && prev.role === m.role) {
+      const toBlocks = (c: Anthropic.MessageParam['content']): Anthropic.ContentBlockParam[] => (typeof c === 'string' ? [{ type: 'text', text: c }] : [...c]);
+      prev.content = [...toBlocks(prev.content), ...toBlocks(m.content)];
+    } else out.push({ role: m.role, content: m.content });
+  }
+  return out;
 }
 
 // Chat-only tool: lets Cleo kick off the shareable-report builder when the
@@ -114,7 +131,7 @@ Standing instructions: when the operator gives a rule or correction earlier in t
 If the operator asks for a report / PDF / shareable document, call create_report with a precise focus, then confirm in one sentence that the report is being built (it opens in a new tab and lands in their Saved reports) — don't rewrite the analysis in the chat.`;
 
   try {
-    let messages: Anthropic.MessageParam[] = history.map(toParam);
+    let messages: Anthropic.MessageParam[] = mergeTurns(history.map(toParam));
     let answer = '';
     let reportFocus: string | null = null;
 
@@ -224,7 +241,7 @@ If the operator asks for a report / PDF / shareable document, call create_report
     let saved = false;
     if (email && isChatStoreConfigured()) {
       try {
-        const asked: StoredChatMsg[] = history.map(mm => ({ role: mm.role, content: mm.content }));
+        const asked: StoredChatMsg[] = history.map(mm => ({ role: mm.role, content: mm.content.trim() || (mm.images?.length ? '(image attached)' : mm.content) }));
         const current = await getChat(email).catch(() => []);
         const lastQ = asked[asked.length - 1];
         const alreadyHasQ = current.length && current[current.length - 1].role === 'user' && current[current.length - 1].content === lastQ.content;
