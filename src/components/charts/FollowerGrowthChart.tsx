@@ -28,7 +28,6 @@ export default function FollowerGrowthChart({ platforms }: { platforms: GrowthSe
     });
   }, [platforms]);
   if (!data.length) return <p className="text-xs text-gray-400">No dated follower rows in this window.</p>;
-  const tickInterval = Math.max(0, Math.floor(data.length / 8) - 1);
 
   const TooltipBox = ({ active, payload, label }: { active?: boolean; payload?: Array<{ payload: Record<string, string | number | null> }>; label?: string }) => {
     if (!active || !payload?.length) return null;
@@ -54,7 +53,7 @@ export default function FollowerGrowthChart({ platforms }: { platforms: GrowthSe
     <ResponsiveContainer width="100%" height={240}>
       <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-        <XAxis dataKey="short" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} interval={tickInterval} />
+        <XAxis dataKey="short" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={28} />
         <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={46} allowDecimals={false} tickFormatter={v => signed(v)} />
         <ReferenceLine y={0} stroke="#cbd5e1" />
         <Tooltip content={<TooltipBox />} cursor={{ stroke: '#cbd5e1', strokeWidth: 1 }} />
