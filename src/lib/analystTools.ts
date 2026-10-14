@@ -596,7 +596,7 @@ AUDIENCE (account level — followers are as of the last day of the range; profi
 ${audLine('Instagram')}
 ${audLine('Pinterest')}
 
-PINTEREST ORGANIC PINS (Pinterest's own counts):
+${(() => { const pdd = d.pinterestDaily as { status: string; basis?: string; totals: { impressions: number; engagements: number; saves: number; pinClicks: number; outboundClicks: number; engagementRate: number; pinsCreated: number; pinsCreatedPerDay: number }; days: Array<{ date: string; impressions: number; engagements: number; pinsCreated: number }> } | undefined; if (!pdd || pdd.status !== 'ok') return ''; const t = pdd.totals; return `PINTEREST BY DAY (table${pdd.basis === 'lifetime_diff' ? ', day-over-day change in lifetime counts' : ''}): impressions ${Math.round(t.impressions).toLocaleString()} · engagements ${Math.round(t.engagements).toLocaleString()} (${t.saves} saves, ${t.pinClicks} pin clicks, ${t.outboundClicks} outbound) · engagement rate ${(t.engagementRate * 100).toFixed(2)}% · pins created ${t.pinsCreated} (${t.pinsCreatedPerDay}/day, incl. pins Pinterest auto-generates from the site)\nDaily (date,impressions,engagements,pinsCreated): ${pdd.days.map(x => `${x.date},${Math.round(x.impressions)},${Math.round(x.engagements)},${x.pinsCreated}`).join(' ')}\n\n`; })()}PINTEREST ORGANIC PINS (Pinterest's own counts):
 ${postLines('Pinterest', pin, ['impressions', 'saves', 'pinClicks', 'outboundClicks'])}
 
 INSTAGRAM POSTS & REELS (Instagram's own counts):

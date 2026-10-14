@@ -63,6 +63,18 @@ export interface OrganicData {
   audience: Record<OrganicPlatform, Audience>;
   /** The window the audience series covers (at least 30 days ending on range.to). */
   audienceRange?: { from: string; to: string };
+  /** Pinterest by day from the BigQuery table: impressions, engagements, pins created. */
+  pinterestDaily?: PinterestDaily;
+}
+
+export interface PinterestDayPoint { date: string; impressions: number; saves: number; pinClicks: number; outboundClicks: number; engagements: number; pinsCreated: number }
+export interface PinterestDaily {
+  status: 'ok' | 'not_available' | 'error';
+  error?: string;
+  /** 'daily' = the table holds per-day counts; 'lifetime_diff' = it holds running totals and the days are the day-over-day change. */
+  basis?: 'daily' | 'lifetime_diff';
+  days: PinterestDayPoint[];
+  totals: { impressions: number; saves: number; pinClicks: number; outboundClicks: number; engagements: number; engagementRate: number; pinsCreated: number; pinsCreatedPerDay: number; activePins: number };
 }
 
 /** One day of account-level audience data (for the follower growth chart). */
@@ -810,6 +822,60 @@ function guarded<T>(p: Promise<T>, fallback: (err: string) => T, ceilingMs: numb
     new Promise<T>(resolve => setTimeout(() => resolve(fallback(`took longer than ${Math.round(ceilingMs / 1000)}s`)), ceilingMs)),
   ]);
 }
+/**
+ * Pinterest day by day from the pinterest_organic table: impressions and
+ * engagements (saves + pin clicks + outbound clicks) per day, and how many
+ * pins were created each day (Pinterest's own auto-generated product pins
+ * included — the question Astrid asked). Metric columns may be per-day
+ * counts or running lifetime totals depending on the connector; a probe on
+ * the pins decides, and lifetime tables are differenced day over day.
+ */
+export async function fetchPinterestDaily(from: string, to: string): Promise<PinterestDaily> {
+  const empty = { impressions: 0, saves: 0, pinClicks: 0, outboundClicks: 0, engagements: 0, engagementRate: 0, pinsCreated: 0, pinsCreatedPerDay: 0, activePins: 0 };
+  if (!isBigQueryConfigured() || !(await tableExists('pinterest_organic'))) return { status: 'not_available', days: [], totals: empty };
+  try {
+    const ds = getDataset();
+    const cols = await runQuery<{ column_name: string }>(`SELECT column_name FROM \`${ds}.INFORMATION_SCHEMA.COLUMNS\` WHERE table_name = 'pinterest_organic'`);
+    const have = new Set(cols.map(c => c.column_name));
+    const pick = (k: string) => PIN_TABLE_ALTS[k].find(c => have.has(c)) || null;
+    const id = pick('pin_id'); const impr = pick('impressions'); const save = pick('saves'); const click = pick('pinClicks'); const out = pick('outboundClicks'); const created = pick('pin_created_at');
+    if (!id || !have.has('date')) return { status: 'not_available', days: [], totals: empty, error: 'table has no pin id column yet' };
+    const f = (c: string | null) => (c ? `SUM(SAFE_CAST(${c} AS FLOAT64))` : '0');
+    const dayBefore = new Date(Date.parse(from) - 86400000).toISOString().slice(0, 10);
+    const [rows, probe, createdRows] = await Promise.all([
+      runQuery<Record<string, unknown>>(`SELECT CAST(DATE(date) AS STRING) AS d, ${f(impr)} AS impressions, ${f(save)} AS saves, ${f(click)} AS pin_clicks, ${f(out)} AS outbound, COUNT(DISTINCT ${id}) AS pins
+        FROM \`${ds}.pinterest_organic\` WHERE DATE(date) BETWEEN @from AND @to AND ${id} IS NOT NULL GROUP BY d ORDER BY d`, { from: dayBefore, to }),
+      impr ? runQuery<{ lifetime_like: number | string; total: number | string }>(`SELECT COUNTIF(n <= 1) AS lifetime_like, COUNT(*) AS total FROM (
+        SELECT ${id} AS pid, COUNT(DISTINCT SAFE_CAST(${impr} AS FLOAT64)) AS n FROM \`${ds}.pinterest_organic\`
+        WHERE DATE(date) BETWEEN @from AND @to AND ${id} IS NOT NULL AND SAFE_CAST(${impr} AS FLOAT64) > 0 GROUP BY pid HAVING COUNT(DISTINCT DATE(date)) > 2)`, { from: dayBefore, to }) : Promise.resolve([{ lifetime_like: 0, total: 0 }]),
+      created ? runQuery<{ d: string; pins: number | string }>(`SELECT SUBSTR(CAST(${created} AS STRING), 1, 10) AS d, COUNT(DISTINCT ${id}) AS pins FROM \`${ds}.pinterest_organic\`
+        WHERE SUBSTR(CAST(${created} AS STRING), 1, 10) BETWEEN @from AND @to AND ${id} IS NOT NULL GROUP BY d ORDER BY d`, { from, to }) : Promise.resolve([]),
+    ]);
+    const lifetimeLike = num(probe[0]?.lifetime_like), total = num(probe[0]?.total);
+    const basis: 'daily' | 'lifetime_diff' = total >= 20 && lifetimeLike / total > 0.7 ? 'lifetime_diff' : 'daily';
+    const createdBy = new Map(createdRows.map(r => [String(r.d), num(r.pins)]));
+    const raw = rows.map(r => ({ date: String(r.d), impressions: num(r.impressions), saves: num(r.saves), pinClicks: num(r.pin_clicks), outboundClicks: num(r.outbound), pins: num(r.pins) }));
+    const days: PinterestDayPoint[] = [];
+    for (let i = 0; i < raw.length; i++) {
+      const r = raw[i]; if (r.date < from) continue;
+      const prev = basis === 'lifetime_diff' ? raw[i - 1] : null;
+      const v = (k: 'impressions' | 'saves' | 'pinClicks' | 'outboundClicks') => (prev && prev.date === new Date(Date.parse(r.date) - 86400000).toISOString().slice(0, 10) ? Math.max(0, r[k] - prev[k]) : basis === 'lifetime_diff' ? 0 : r[k]);
+      const pt = { date: r.date, impressions: v('impressions'), saves: v('saves'), pinClicks: v('pinClicks'), outboundClicks: v('outboundClicks'), engagements: 0, pinsCreated: createdBy.get(r.date) || 0 };
+      pt.engagements = pt.saves + pt.pinClicks + pt.outboundClicks;
+      days.push(pt);
+    }
+    // Pins created on days the metrics table has no row for (e.g. today) still count.
+    createdBy.forEach((pins, d) => { if (!days.some(x => x.date === d)) days.push({ date: d, impressions: 0, saves: 0, pinClicks: 0, outboundClicks: 0, engagements: 0, pinsCreated: pins }); });
+    days.sort((a, b) => a.date.localeCompare(b.date));
+    const t = days.reduce((acc, d) => ({ impressions: acc.impressions + d.impressions, saves: acc.saves + d.saves, pinClicks: acc.pinClicks + d.pinClicks, outboundClicks: acc.outboundClicks + d.outboundClicks, engagements: acc.engagements + d.engagements, pinsCreated: acc.pinsCreated + d.pinsCreated }), { impressions: 0, saves: 0, pinClicks: 0, outboundClicks: 0, engagements: 0, pinsCreated: 0 });
+    const nDays = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1);
+    const activePins = Math.max(0, ...raw.filter(r => r.date >= from).map(r => r.pins));
+    return { status: 'ok', basis, days, totals: { ...t, engagementRate: t.impressions > 0 ? t.engagements / t.impressions : 0, pinsCreatedPerDay: Math.round((t.pinsCreated / nDays) * 10) / 10, activePins } };
+  } catch (e) {
+    return { status: 'error', error: e instanceof Error ? e.message : String(e), days: [], totals: empty };
+  }
+}
+
 export async function fetchOrganic(from: string, to: string): Promise<OrganicData> {
   const errBlock = <T,>(err: string): SourceBlock<T> => ({ status: 'error', error: err, items: [], totals: {} });
   const errAud = (err: string): Audience => ({ status: 'error', error: err, ...EMPTY_AUD() });
@@ -817,13 +883,14 @@ export async function fetchOrganic(from: string, to: string): Promise<OrganicDat
   // last day, so a 7-day view still shows a month of movement.
   const spanDays = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
   const audFrom = spanDays < 30 ? new Date(Date.parse(to) - 29 * 86400000).toISOString().slice(0, 10) : from;
-  const [pinterest, instagram, blog, socialTraffic, pinAudience, igAudience] = await Promise.all([
+  const [pinterest, instagram, blog, socialTraffic, pinAudience, igAudience, pinterestDaily] = await Promise.all([
     guarded(fetchPinterestOrganic(from, to), errBlock<OrganicPost>, 70000),
     guarded(fetchInstagramOrganic(from, to), errBlock<OrganicPost>, 45000),
     guarded(fetchBlogPerformance(from, to), errBlock<BlogPost>, 45000),
     guarded(fetchSocialTraffic(from, to), () => ({ Pinterest: { sessions: 0, cartAdds: 0, completed: 0 }, Instagram: { sessions: 0, cartAdds: 0, completed: 0 } }), 30000),
     guarded(fetchPinterestAudience(audFrom, to), errAud, 40000),
     guarded(fetchAudience('instagram', INSTAGRAM_ACCOUNT_FIELDSETS, audFrom, to), errAud, 30000),
+    guarded(fetchPinterestDaily(from, to), (err): PinterestDaily => ({ status: 'error', error: err, days: [], totals: { impressions: 0, saves: 0, pinClicks: 0, outboundClicks: 0, engagements: 0, engagementRate: 0, pinsCreated: 0, pinsCreatedPerDay: 0, activePins: 0 } }), 40000),
   ]);
   // Our own daily record fills days the feeds no longer serve, and today's count is saved for the future.
   const audience: Record<OrganicPlatform, Audience> = { Pinterest: pinAudience, Instagram: igAudience };
@@ -842,7 +909,7 @@ export async function fetchOrganic(from: string, to: string): Promise<OrganicDat
     });
     void recordFollowerSnapshots(audience);
   } catch { /* best-effort */ }
-  return { range: { from, to }, audienceRange: { from: audFrom, to }, pinterest, instagram, blog, socialTraffic, audience };
+  return { range: { from, to }, audienceRange: { from: audFrom, to }, pinterest, instagram, blog, socialTraffic, audience, pinterestDaily };
 }
 
 /** Whether a source is wired for this client (for the tab's setup hints). */

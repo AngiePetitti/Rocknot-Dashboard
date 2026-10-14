@@ -11,6 +11,7 @@ import MetricCard from '@/src/components/ui/MetricCard';
 import { useClient } from '@/src/components/ClientProvider';
 import type { OrganicData, OrganicPost, BlogPost, SourceBlock, Audience } from '@/src/lib/organic';
 import FollowerGrowthChart from '@/src/components/charts/FollowerGrowthChart';
+import PinterestDailyChart, { type PinMetric } from '@/src/components/charts/PinterestDailyChart';
 import { timeframeRange, priorRangeFor, parseCompareMode } from '@/src/lib/timeframes';
 import type { Timeframe } from '@/src/lib/mockData';
 
@@ -211,6 +212,7 @@ export default function OrganicContent() {
   const compareMode = parseCompareMode(searchParams.get('compare_to'));
   const compareLabel = compareOn ? `vs ${compareMode === 'prior' ? 'prior period' : compareMode === 'month' ? 'last month' : 'last year'}` : undefined;
   const [showAllBlog, setShowAllBlog] = useState(false);
+  const [pinMetric, setPinMetric] = useState<PinMetric>('impressions');
   type BlogSort = 'publishedAt' | 'sessions' | 'cartAdds' | 'completed' | 'cvr' | 'bounce';
   const [blogSort, setBlogSort] = useState<{ key: BlogSort; dir: 'asc' | 'desc' }>({ key: 'sessions', dir: 'desc' });
   const toggleBlogSort = (key: BlogSort) => setBlogSort(s => (s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' }));
@@ -299,6 +301,48 @@ export default function OrganicContent() {
               value={n((traffic?.Pinterest.sessions || 0) + (traffic?.Instagram.sessions || 0))}
               subtitle={`Pinterest ${n(traffic?.Pinterest.sessions)} (${n(traffic?.Pinterest.completed)} orders) · Instagram ${n(traffic?.Instagram.sessions)} (${n(traffic?.Instagram.completed)} orders) · unpaid taps to ${client.siteDomain}`} />
           </div>
+
+          {/* ── Pinterest performance by day: impressions, engagements, pins created ── */}
+          {data.pinterestDaily && data.pinterestDaily.status !== 'not_available' && (() => {
+            const pd = data.pinterestDaily;
+            const t = pd.totals;
+            const pct = (v: number) => `${(v * 100).toFixed(2)}%`;
+            return (
+              <Card className="mb-6">
+                <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+                  <h3 className="text-sm font-bold text-gray-800">Pinterest Performance</h3>
+                  <p className="text-[11px] text-gray-400">Day by day over {rangeLabel.toLowerCase()} · from the Pinterest Organic table{pd.basis === 'lifetime_diff' ? ' · daily change in lifetime counts' : ''}</p>
+                </div>
+                {pd.status === 'error' ? <p className="text-xs text-red-600">{pd.error}</p> : (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                      {([
+                        ['Impressions', n(t.impressions), `${n(t.activePins)} pins with activity`],
+                        ['Engagements', n(t.engagements), `${n(t.saves)} saves · ${n(t.pinClicks)} pin clicks · ${n(t.outboundClicks)} outbound`],
+                        ['Engagement rate', pct(t.engagementRate), 'engagements ÷ impressions'],
+                        ['Pins created', n(t.pinsCreated), `${t.pinsCreatedPerDay} per day · includes pins Pinterest generates from the site`],
+                      ] as const).map(([label, value, sub]) => (
+                        <div key={label} className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
+                          <p className="text-[10px] uppercase tracking-wider text-gray-400">{label}</p>
+                          <p className="text-xl font-bold text-gray-800 tabular-nums">{value}</p>
+                          <p className="text-[11px] text-gray-400 mt-0.5">{sub}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <span className="text-xs text-gray-400">Chart</span>
+                      {(['impressions', 'engagements', 'pinsCreated'] as const).map(m => (
+                        <button key={m} onClick={() => setPinMetric(m)} className={`px-3 py-1 rounded-full text-xs font-semibold ${pinMetric === m ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                          {m === 'impressions' ? 'Impressions' : m === 'engagements' ? 'Engagements' : 'Pins created'}
+                        </button>
+                      ))}
+                    </div>
+                    {pd.days.length ? <PinterestDailyChart days={pd.days} metric={pinMetric} /> : <p className="text-xs text-gray-400">No daily rows for this period yet.</p>}
+                  </>
+                )}
+              </Card>
+            );
+          })()}
 
           {/* ── Follower growth: how each audience is moving day by day ── */}
           {data.audience && (() => {
