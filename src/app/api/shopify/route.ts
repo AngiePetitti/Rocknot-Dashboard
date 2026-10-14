@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getRevenueForTimeframe, getMetricsForTimeframe, shopifyLast30Days } from '@/src/lib/mockData';
 import { Timeframe } from '@/src/lib/mockData';
 import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
+import { shopifyConfigured } from '@/src/lib/shopifyAuth';
 
-const TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const DOMAIN = shopifyDomain();
 
 const SINCE_MAP: Record<Timeframe, string> = {
@@ -38,7 +38,7 @@ async function runShopifyQL(query: string) {
 export async function GET(request: NextRequest) {
   const tf = (request.nextUrl.searchParams.get('tf') || '30d') as Timeframe;
 
-  if (!TOKEN) {
+  if (!shopifyConfigured()) {
     const metrics = getMetricsForTimeframe(tf);
     const revenueData = getRevenueForTimeframe(tf);
     return NextResponse.json({ source: 'mock', timeframe: tf, metrics, revenueData });

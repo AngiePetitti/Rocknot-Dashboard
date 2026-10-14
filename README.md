@@ -64,8 +64,9 @@ Core (every client):
 | `CALENDAR_SHEET_ID`, `PRIVATE_SHEET_ID` | Google Sheets used as the app's small data store (calendar, tasks, goals, users, briefs) |
 | `GCP_PROJECT_ID`, `GCP_SERVICE_ACCOUNT_KEY`, `BQ_DATASET` | BigQuery data layer — see `SETUP_BIGQUERY.md` |
 | `WINDSOR_API_KEY` | Windsor REST fallback + live per-platform overlays |
-| `SHOPIFY_STORE_DOMAIN`, `SHOPIFY_ACCESS_TOKEN` | live ShopifyQL revenue, inventory, products, returns |
-| `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` | only for the one-time `/api/shopify/auth` token flow |
+| `SHOPIFY_STORE_DOMAIN` | the store's `.myshopify.com` domain |
+| `SHOPIFY_ACCESS_TOKEN` | a permanent Admin API token (legacy custom apps, or the one-time `/api/shopify/auth` flow) |
+| `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` | a Dev Dashboard app (every app created since Jan 2026): with no `SHOPIFY_ACCESS_TOKEN`, the dashboard trades these for a 24-hour token and renews it itself (`src/lib/shopifyAuth.ts`) |
 | `META_AD_ACCOUNT_ID`, `META_ACCESS_TOKEN` | live Meta spend + creative media; the account id also filters Windsor's multi-client feed |
 | `META_ACCOUNT_NAME` | optional override of the profile's Meta account-name filter |
 | `PINTEREST_APP_ID`, `PINTEREST_APP_SECRET` | Pinterest Ads API — exact Ads Manager numbers on the profile's conversion settings; connect once via `/api/debug/pinterest-oauth` (`PINTEREST_ACCESS_TOKEN` overrides for a quick test) |
@@ -120,7 +121,9 @@ values:
 2. **BigQuery** — dataset `skimpies` plus Windsor tasks for `shopify_orders`,
    `shopify_customers` and one per ad platform.
 3. **Vercel** — new project with `CLIENT=skimpies`, `BQ_DATASET=skimpies`, the
-   Skimpies Shopify domain/token, Meta account id/token and their own
+   Skimpies Shopify domain plus `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`
+   from a Dev Dashboard app created in Skimpies' own Shopify organization
+   (the client credentials grant only works for the store's own apps), Meta account id/token and their own
    `CALENDAR_SHEET_ID` / `PRIVATE_SHEET_ID`. `SHOPIFY_STORE_DOMAIN` is required
    until the profile has a default domain.
 4. **Brand brief** — the default in `src/lib/brandBrief.ts` is a placeholder;

@@ -12,7 +12,7 @@ export const maxDuration = 60;
 //   /api/traffic?tf=custom&date_from=…&date_to=…&compare=true
 export async function GET(request: NextRequest) {
   if (!trafficConfigured()) {
-    return NextResponse.json({ source: 'error', error: 'Shopify not connected — SHOPIFY_ACCESS_TOKEN is missing on this deployment.' });
+    return NextResponse.json({ source: 'error', error: 'Shopify not connected — set SHOPIFY_ACCESS_TOKEN, or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET, on this deployment.' });
   }
   const sp = request.nextUrl.searchParams;
   const tf = (sp.get('tf') || '30d') as Timeframe | 'custom';

@@ -4,10 +4,10 @@ import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
 import { isBigQueryConfigured, tableExists } from '@/src/lib/bigquery';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
+import { shopifyConfigured, shopifyToken } from '@/src/lib/shopifyAuth';
 
 export const dynamic = 'force-dynamic';
 
-const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 const DOMAIN = shopifyDomain();
 
 export interface ProductSales {
@@ -93,7 +93,7 @@ async function fetchTodayLineItems(from: string): Promise<{
     }`;
     const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN! },
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await shopifyToken()! },
       body: JSON.stringify({ query }),
       next: { revalidate: 0 },
     });
@@ -150,7 +150,7 @@ export async function GET(request: NextRequest) {
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
 
-  if (!TOKEN) {
+  if (!shopifyConfigured()) {
     return NextResponse.json({ source: 'error', error: 'Shopify access token not configured', products: [], totalRevenue: 0, totalUnits: 0 });
   }
 

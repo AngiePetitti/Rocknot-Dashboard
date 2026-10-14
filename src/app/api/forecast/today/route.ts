@@ -1,10 +1,10 @@
 import { runShopifyQLRaw } from '@/src/lib/shopifyql';
 import { NextResponse } from 'next/server';
 import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
+import { shopifyConfigured, shopifyToken } from '@/src/lib/shopifyAuth';
 
 export const dynamic = 'force-dynamic';
 
-const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 const DOMAIN = shopifyDomain();
 
 // End-of-day sales forecast for the live Today view. Learns the store's
@@ -37,7 +37,7 @@ async function shopTimezone(): Promise<string> {
   try {
     const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await shopifyToken() },
       body: JSON.stringify({ query: '{ shop { ianaTimezone } }' }),
       next: { revalidate: 86400 },
     });
@@ -49,7 +49,7 @@ async function shopTimezone(): Promise<string> {
 }
 
 export async function GET() {
-  if (!TOKEN) return NextResponse.json({ error: 'Shopify not configured' }, { status: 500 });
+  if (!shopifyConfigured()) return NextResponse.json({ error: 'Shopify not configured' }, { status: 500 });
   try {
     const tz = await shopTimezone();
     const today = new Date().toLocaleDateString('en-CA', { timeZone: tz });

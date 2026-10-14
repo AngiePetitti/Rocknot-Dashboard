@@ -7,6 +7,7 @@ import { getClient, shopifyDomain, windsorParams, windsorAccount } from '@/src/l
 import { shopifyql, shopifyConfigured } from '@/src/lib/shopifyql';
 import { isPaidMedium } from '@/src/lib/traffic';
 import { runQuery, isBigQueryConfigured, tableExists, getDataset } from '@/src/lib/bigquery';
+import { shopifyToken } from '@/src/lib/shopifyAuth';
 
 export type OrganicPlatform = 'Pinterest' | 'Instagram';
 
@@ -476,12 +477,11 @@ type ArticleNode = { title: string; handle: string; publishedAt: string | null; 
  * scope on the token). Returns Shopify's errors too, for the debug endpoint.
  */
 export async function fetchArticlesRaw(): Promise<{ nodes: ArticleNode[]; errors: string[]; status: number | null }> {
-  const token = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
-  if (!token || !shopifyDomain()) return { nodes: [], errors: ['Shopify not configured'], status: null };
+  if (!shopifyConfigured()) return { nodes: [], errors: ['Shopify not configured'], status: null };
   const run = async (query: string) => {
     const res = await fetch(`https://${shopifyDomain()}/admin/api/2026-04/graphql.json`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await shopifyToken() },
       body: JSON.stringify({ query }),
       next: { revalidate: 1800 },
       signal: AbortSignal.timeout(15000),

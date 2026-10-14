@@ -4,6 +4,7 @@
 // here (Cleo once invented an "Eden 2-in-1 Clutch" with finishes and a
 // strap that aren't real products).
 import { shopifyDomain } from '@/src/lib/client';
+import { shopifyConfigured, shopifyToken } from '@/src/lib/shopifyAuth';
 
 export interface CatalogProduct {
   title: string;
@@ -18,13 +19,12 @@ export interface CatalogProduct {
   description: string;
 }
 
-const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 
 let cache: { at: number; items: CatalogProduct[] } | null = null;
 const CACHE_MS = 10 * 60 * 1000;
 
 export async function fetchCatalog(): Promise<CatalogProduct[]> {
-  if (!TOKEN) return [];
+  if (!shopifyConfigured()) return [];
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.items;
 
   const items: CatalogProduct[] = [];
@@ -49,7 +49,7 @@ export async function fetchCatalog(): Promise<CatalogProduct[]> {
     const run = async () => {
       const res = await fetch(`https://${shopifyDomain()}/admin/api/2026-04/graphql.json`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
+        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await shopifyToken() },
         body: JSON.stringify({ query: buildQuery() }),
         cache: 'no-store',
       });
