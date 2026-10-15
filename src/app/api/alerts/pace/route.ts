@@ -76,11 +76,12 @@ export async function GET(req: NextRequest) {
   // MER check only once real money is in play for the day. This is the
   // throttle-spend signal, so it names where today's money is going.
   if (spend > 300 && mer < merGoal * 0.8) {
-    const plat: Array<[string, number]> = [
+    const platAll: Array<[string, number]> = [
       ['Meta', todayM.metaSpend ?? 0], ['Google', todayM.googleSpend ?? 0],
       ['TikTok', todayM.tiktokSpend ?? 0], ['Snap', todayM.snapchatSpend ?? 0],
       ['Pinterest', todayM.pinterestSpend ?? 0],
-    ].filter(([, v]) => v > 0).sort((a, b) => (b[1] as number) - (a[1] as number)) as Array<[string, number]>;
+    ];
+    const plat = platAll.filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
     const mix = plat.map(([n, v]) => `${n} ${fmt(v)}`).join(' · ');
     alerts.push({
       key: 'mer',
