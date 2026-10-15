@@ -47,6 +47,8 @@ export default function CustomersContent() {
   const [customerMetrics, setCustomerMetrics] = useState<CustomerMetrics>(EMPTY_METRICS);
   const [cohortData, setCohortData] = useState<CohortData[]>([]);
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
+  const [dataNote, setDataNote] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [payback, setPayback] = useState<{ month: string; size: number; cac: number | null; revPerCustomer: number[]; ltvToDate: number }[]>([]);
   const [paybackError, setPaybackError] = useState<string | null>(null);
 
@@ -85,13 +87,16 @@ export default function CustomersContent() {
     cachedJson<Record<string, unknown> & { source?: string }>(
       `/api/windsor/customers?${params}`,
       (data: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
-        if (data.source === 'bigquery_live' && data.customerMetrics) {
+        if ((data.source === 'bigquery_live' || data.source === 'direct_live') && data.customerMetrics) {
           setCustomerMetrics(data.customerMetrics);
           setCohortData(data.cohortData || []);
+          setDataNote((data.note as string) || null);
           setStatus('ok');
         } else {
           setCustomerMetrics(EMPTY_METRICS);
           setCohortData([]);
+          setDataNote(null);
+          setErrorDetail((data.error as string) || null);
           setStatus('error');
         }
       },
@@ -123,7 +128,14 @@ export default function CustomersContent() {
       {status === 'error' && (
         <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-red-700">
           <span>⚠️</span>
-          <span>Customer data is unavailable — BigQuery query failed or hasn&apos;t synced yet.</span>
+          <span>Customer data is unavailable — {errorDetail || <>BigQuery query failed or hasn&apos;t synced yet.</>}</span>
+        </div>
+      )}
+
+      {status === 'ok' && dataNote && (
+        <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-4 text-xs text-blue-700">
+          <span>ℹ️</span>
+          <span>{dataNote}</span>
         </div>
       )}
 

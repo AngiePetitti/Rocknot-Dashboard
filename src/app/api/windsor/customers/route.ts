@@ -1,11 +1,12 @@
 import { runShopifyQLRaw } from '@/src/lib/shopifyql';
 import { NextRequest, NextResponse } from 'next/server';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
+import { fetchDirectCustomerMetrics } from '@/src/lib/shopifyCustomers';
 import { getCustomerMetrics, getCohortData } from '@/src/lib/bqCustomers';
 import { CustomerMetrics } from '@/src/lib/mockData';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
-import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
+import { shopifyDomain, storeOnlyWhere, usesDirectData } from '@/src/lib/client';
 import { shopifyConfigured } from '@/src/lib/shopifyAuth';
 
 export const dynamic = 'force-dynamic';
@@ -80,6 +81,34 @@ export async function GET(request: NextRequest) {
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
   const { from, to } = rangeForTf(tfRaw, dateFrom, dateTo);
+
+  // Direct-data clients have no Windsor order table: read orders and lifetime
+  // customer figures straight from Shopify.
+  if (usesDirectData()) {
+    try {
+      const [direct, shopify] = await Promise.all([
+        fetchDirectCustomerMetrics(from, to),
+        fetchShopifyCustomers(from, to).catch(() => null),
+      ]);
+      const totalCustomers = shopify?.customers ?? direct.activeCustomers;
+      const repeatCustomers = shopify?.returningCustomers ?? 0;
+      const { ordersRead, partial, ...metrics } = direct;
+      const customerMetrics: CustomerMetrics = {
+        ...metrics,
+        repeatPurchaserRate: shopify?.returningRate ?? (totalCustomers > 0 ? Math.round((repeatCustomers / totalCustomers) * 1000) / 10 : 0),
+        totalCustomers,
+        repeatCustomers,
+      };
+      const notes = ['Cohort retention needs the full order history and appears once the Shopify app has the read_all_orders scope.'];
+      if (partial) notes.unshift(`Shopify returns only the last 60 days of orders to this app, so order values and tiers here cover ${ordersRead.toLocaleString()} orders from that window.`);
+      return NextResponse.json(
+        { source: 'direct_live', customerMetrics, cohortData: [], note: notes.join(' ') },
+        { headers: cacheHeaders() },
+      );
+    } catch (e) {
+      return NextResponse.json({ source: 'error', error: e instanceof Error ? e.message : String(e), customerMetrics: null, cohortData: null });
+    }
+  }
 
   if (!isBigQueryConfigured()) {
     return NextResponse.json({ source: 'error', error: 'BigQuery not configured', customerMetrics: null, cohortData: null });
