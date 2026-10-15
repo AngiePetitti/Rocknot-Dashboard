@@ -400,7 +400,12 @@ export default function OverviewContent() {
   // FULL total hides being ahead day-for-day when last month finished strong.
   const [sameDaysSnap, setSameDaysSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
 
+  // The forecast loads after the headline numbers: its three requests used to
+  // start at the same moment and compete with them for Shopify's rate limit.
+  const forecastStarted = useRef(false);
   useEffect(() => {
+    if (liveSource === 'loading' || forecastStarted.current) return;
+    forecastStarted.current = true;
     // Forecast pace must come from COMPLETE days only — MTD now includes
     // today's partial data (matching Shopify), so fetch 1st→yesterday
     // explicitly for the projection.
@@ -409,7 +414,7 @@ export default function OverviewContent() {
       const first = `${ty}-${String(tm).padStart(2, '0')}-01`;
       const yest = new Date(Date.UTC(ty, tm - 1, td - 1)).toISOString().slice(0, 10);
       cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
-        `/api/windsor?tf=custom&date_from=${first}&date_to=${yest}`,
+        `/api/windsor?tf=custom&date_from=${first}&date_to=${yest}&lite=1`,
         d => {
           if (isLiveOverviewSource(d.source) && d.metrics) {
             setMtdSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
@@ -422,7 +427,7 @@ export default function OverviewContent() {
       const prevM = prevLast.getMonth() + 1;
       const prevTo = Math.min(td - 1, prevLast.getDate());
       cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
-        `/api/windsor?tf=custom&date_from=${prevY}-${String(prevM).padStart(2, '0')}-01&date_to=${prevY}-${String(prevM).padStart(2, '0')}-${String(prevTo).padStart(2, '0')}`,
+        `/api/windsor?tf=custom&date_from=${prevY}-${String(prevM).padStart(2, '0')}-01&date_to=${prevY}-${String(prevM).padStart(2, '0')}-${String(prevTo).padStart(2, '0')}&lite=1`,
         d => {
           if (isLiveOverviewSource(d.source) && d.metrics) {
             setSameDaysSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
@@ -431,14 +436,14 @@ export default function OverviewContent() {
       );
     }
     cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
-      '/api/windsor?tf=last_month',
+      '/api/windsor?tf=last_month&lite=1',
       d => {
         if (isLiveOverviewSource(d.source) && d.metrics) {
           setLastMonthSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
         }
       }
     );
-  }, []);
+  }, [liveSource]);
 
   const forecast = useMemo(() => {
     if (!mtdSnap) return null;

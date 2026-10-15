@@ -98,28 +98,20 @@ const SHOPIFY_DOMAIN = shopifyDomain();
 
 export async function fetchShopifyDaily(from: string, to: string): Promise<ShopifyDay[]> {
   if (!shopifyConfigured()) return [];
-  // Shopify throttles GraphQL hard, and one page load fires several ShopifyQL
-  // queries (overview + prior compare + returns + customer split). Retry with
-  // backoff instead of letting one THROTTLED response zero out revenue.
-  // Two attempts max with a short pause — deep retry stacks made the live
-  // view hang for a minute when Shopify was down.
-  // Three attempts with a growing pause: this is THE number the dashboard is
-  // judged on, and the fallback (Windsor order rows) is close but not Shopify.
+  // Rate limits are already retried with backoff inside runShopifyQLRaw, so
+  // this loop only handles a rejected return_fees column (drop it and ask
+  // again). Retrying throttles here too stacked the two retry schedules and
+  // could hold the live Overview for a minute or more.
   let withFees = includeReturnFees();
-  let lastErr: unknown = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (;;) {
     try {
       return await fetchShopifyDailyOnce(from, to, withFees);
     } catch (e) {
-      lastErr = e;
-      // If Shopify rejects the return_fees column (parse error), drop it rather
-      // than lose revenue entirely; otherwise pause and retry.
       const parseErr = withFees && /return_fees/i.test(String(e instanceof Error ? e.message : e));
-      if (parseErr) withFees = false;
-      else await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+      if (!parseErr) throw e;
+      withFees = false;
     }
   }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean): Promise<ShopifyDay[]> {
