@@ -192,10 +192,6 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const tfRaw = searchParams.get('tf') || '30d';
 
-  if (!WINDSOR_API_KEY) {
-    return NextResponse.json({ source: 'mock', platforms: [], dailySpend: [] });
-  }
-
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const yesterdayStr = addDays(todayStr, -1);
 
@@ -250,6 +246,33 @@ export async function GET(request: NextRequest) {
   }
 
   const debug = searchParams.get('debug') === 'true';
+
+  // No Windsor on this deployment: platform numbers straight from each
+  // platform's own API (Meta today; others as their direct connections land).
+  if (!WINDSOR_API_KEY) {
+    const platforms: PlatformData[] = [];
+    const dailySpend: DaySpend[] = [];
+    let metaError: string | null = null;
+    if (hasPlatform('meta')) {
+      const metaMod = await import('@/src/lib/metaLive');
+      const days = await metaMod.fetchMetaInsights(params.date_from, params.date_to, { level: 'account', daily: true });
+      if (days) {
+        const t = days.reduce((a, d) => ({ spend: a.spend + d.spend, revenue: a.revenue + d.revenue, impressions: a.impressions + d.impressions, clicks: a.clicks + d.clicks, purchases: a.purchases + d.purchases }),
+          { spend: 0, revenue: 0, impressions: 0, clicks: 0, purchases: 0 });
+        const r2 = (n: number) => Math.round(n * 100) / 100;
+        if (t.spend > 0) platforms.push({
+          platform: 'Meta', spend: r2(t.spend), revenue: r2(t.revenue), roas: t.spend > 0 ? r2(t.revenue / t.spend) : 0,
+          impressions: t.impressions, clicks: t.clicks, ctr: t.impressions > 0 ? r2((t.clicks / t.impressions) * 100) : 0,
+          conversions: Math.round(t.purchases), costPerConversion: t.purchases > 0 ? r2(t.spend / t.purchases) : 0,
+          color: '#818cf8', attribution: 'Meta account default attribution',
+        });
+        for (const d of days) dailySpend.push({ date: d.date, meta: r2(d.spend), google: 0, tiktok: 0, snapchat: 0, pinterest: 0 });
+      } else {
+        metaError = metaMod.lastMetaInsightsError || (process.env.META_ACCESS_TOKEN ? null : 'META_ACCESS_TOKEN is not set');
+      }
+    }
+    return NextResponse.json({ source: 'direct_live', platforms, dailySpend, snapVerified: true, ...(metaError ? { metaError } : {}) }, { headers: cacheHeaders(tfRaw === 'today') });
+  }
 
   // Prefer BigQuery; if it fails (e.g. a column not yet synced by Windsor)
   // fall through to the Windsor REST API below. Only the explicit "today" tab
