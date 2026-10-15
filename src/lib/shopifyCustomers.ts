@@ -69,33 +69,87 @@ async function hasAllOrdersScope(): Promise<boolean> {
   }
 }
 
-const MAX_PAGES = 60; // 6,000 orders per request — ~2 months for a store this size
+const GRAPHQL_URL = () => `https://${shopifyDomain()}/admin/api/2026-04/graphql.json`;
+
+async function adminGql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
+  const res = await fetch(GRAPHQL_URL(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await shopifyToken() },
+    body: JSON.stringify({ query, variables }),
+    cache: 'no-store',
+    signal: AbortSignal.timeout(20000),
+  });
+  const json = await res.json() as { data?: T; errors?: Array<{ message?: string }> | string };
+  if (json.errors || !json.data) {
+    const msg = Array.isArray(json.errors) ? json.errors.map(e => e.message).join('; ') : String(json.errors || `HTTP ${res.status}`);
+    throw new Error(`Shopify query failed: ${msg}`);
+  }
+  return json.data;
+}
+
+// Up to this many orders are read page by page (fast, no waiting). Larger
+// ranges use a bulk operation: Shopify packages every matching order into one
+// file, with no cap.
+const PAGED_LIMIT = 2500;
+const MAX_PAGES = 60;
+
+async function pagedOrders(q: string): Promise<{ orders: OrderNode[]; hitCap: boolean }> {
+  const orders: OrderNode[] = [];
+  let after: string | null = null;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const data: { orders: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: OrderNode[] } } =
+      await adminGql(QUERY, { q, after });
+    orders.push(...data.orders.nodes);
+    if (!data.orders.pageInfo.hasNextPage) return { orders, hitCap: false };
+    after = data.orders.pageInfo.endCursor;
+  }
+  return { orders, hitCap: true };
+}
+
+const BULK_FIELDS = `createdAt
+      totalPriceSet { shopMoney { amount } }
+      currentTotalPriceSet { shopMoney { amount } }
+      customerJourneySummary { customerOrderIndex }
+      customer { id numberOfOrders amountSpent { amount } }`;
+
+// Shopify usually finishes a bulk export of a few thousand orders in seconds;
+// stay well inside the route's time limit.
+const BULK_WAIT_MS = 45000;
+
+async function bulkOrders(q: string): Promise<OrderNode[]> {
+  const inner = `{ orders(query: ${JSON.stringify(q)}) { edges { node { ${BULK_FIELDS} } } } }`;
+  const started: { bulkOperationRunQuery: { bulkOperation: { id: string } | null; userErrors: Array<{ message: string }> } } =
+    await adminGql(`mutation Run($q: String!) { bulkOperationRunQuery(query: $q, groupObjects: false) { bulkOperation { id } userErrors { message } } }`, { q: inner });
+  const op = started.bulkOperationRunQuery;
+  if (!op.bulkOperation) throw new Error(`Shopify bulk export refused: ${op.userErrors.map(e => e.message).join('; ') || 'unknown reason'}`);
+
+  const deadline = Date.now() + BULK_WAIT_MS;
+  for (;;) {
+    await new Promise(r => setTimeout(r, 1500));
+    const polled: { node: { status: string; errorCode: string | null; url: string | null } | null } =
+      await adminGql(`query Poll($id: ID!) { node(id: $id) { ... on BulkOperation { status errorCode url } } }`, { id: op.bulkOperation.id });
+    const n = polled.node;
+    if (n?.status === 'COMPLETED') {
+      if (!n.url) return []; // no matching orders
+      const text = await (await fetch(n.url, { cache: 'no-store', signal: AbortSignal.timeout(20000) })).text();
+      return text.split('\n').filter(Boolean).map(line => JSON.parse(line) as OrderNode);
+    }
+    if (n && ['FAILED', 'CANCELED', 'EXPIRED'].includes(n.status)) throw new Error(`Shopify bulk export ${n.status.toLowerCase()}${n.errorCode ? ` (${n.errorCode})` : ''}`);
+    if (Date.now() > deadline) throw new Error('Shopify is still preparing the order export for this range — reload the page in a minute.');
+  }
+}
 
 export async function fetchDirectCustomerMetrics(from: string, to: string): Promise<DirectCustomerMetrics> {
   const allOrdersScope = hasAllOrdersScope();
-  const orders: OrderNode[] = [];
-  let after: string | null = null;
+  const q = `created_at:>=${from} created_at:<=${to}T23:59:59`;
+  const counted: { ordersCount: { count: number } | null } = await adminGql(`query Count($q: String!) { ordersCount(query: $q, limit: null) { count } }`, { q });
+  const expected = counted.ordersCount?.count ?? 0;
+  let orders: OrderNode[];
   let hitCap = false;
-  for (let page = 0; ; page++) {
-    if (page >= MAX_PAGES) { hitCap = true; break; }
-    const res: Response = await fetch(`https://${shopifyDomain()}/admin/api/2026-04/graphql.json`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await shopifyToken() },
-      body: JSON.stringify({ query: QUERY, variables: { q: `created_at:>=${from} created_at:<=${to}T23:59:59`, after } }),
-      cache: 'no-store',
-      signal: AbortSignal.timeout(20000),
-    });
-    const json = await res.json() as {
-      data?: { orders?: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: OrderNode[] } };
-      errors?: Array<{ message?: string }> | string;
-    };
-    if (json.errors || !json.data?.orders) {
-      const msg = Array.isArray(json.errors) ? json.errors.map(e => e.message).join('; ') : String(json.errors || `HTTP ${res.status}`);
-      throw new Error(`Shopify orders query failed: ${msg}`);
-    }
-    orders.push(...json.data.orders.nodes);
-    if (!json.data.orders.pageInfo.hasNextPage) break;
-    after = json.data.orders.pageInfo.endCursor;
+  if (expected > PAGED_LIMIT) {
+    orders = await bulkOrders(q);
+  } else {
+    ({ orders, hitCap } = await pagedOrders(q));
   }
 
   const num = (s: string | undefined) => parseFloat(s || '0') || 0;

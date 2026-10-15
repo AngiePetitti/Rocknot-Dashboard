@@ -2,6 +2,14 @@ import { runShopifyQLRaw } from '@/src/lib/shopifyql';
 import { NextRequest, NextResponse } from 'next/server';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { fetchDirectCustomerMetrics } from '@/src/lib/shopifyCustomers';
+import { unstable_cache } from 'next/cache';
+
+// Long ranges run a Shopify bulk export (up to ~45 s), so allow the time and
+// keep each range's result: an hour for finished ranges, 10 minutes when the
+// range includes today.
+export const maxDuration = 60;
+const cachedDirectMetrics = (from: string, to: string, includesToday: boolean) =>
+  unstable_cache(() => fetchDirectCustomerMetrics(from, to), ['direct-customer-metrics', from, to], { revalidate: includesToday ? 600 : 3600 })();
 import { getCustomerMetrics, getCohortData } from '@/src/lib/bqCustomers';
 import { CustomerMetrics } from '@/src/lib/mockData';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
@@ -87,7 +95,7 @@ export async function GET(request: NextRequest) {
   if (usesDirectData()) {
     try {
       const [direct, shopify] = await Promise.all([
-        fetchDirectCustomerMetrics(from, to),
+        cachedDirectMetrics(from, to, to >= new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })),
         fetchShopifyCustomers(from, to).catch(() => null),
       ]);
       const totalCustomers = shopify?.customers ?? direct.activeCustomers;
