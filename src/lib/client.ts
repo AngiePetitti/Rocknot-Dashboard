@@ -409,7 +409,7 @@ const SKIMPIES: ClientProfile = {
   wordmark: 'SKIMPIES',
   initial: 'S',
   logo: '', // drop a file at public/skimpies-logo.png and set this to '/skimpies-logo.png'
-  theme: { accentFrom: '#fda4af', accentTo: '#fdba74', loginMark: '#fb7185', icon: { from: '#fb7185', to: '#f97316' } },
+  theme: { accentFrom: '#60a5fa', accentTo: '#2563eb', loginMark: '#3b82f6', icon: { from: '#3b82f6', to: '#1d4ed8' } },
   siteDomain: '', // storefront domain — set once confirmed
   dashboardUrl: 'https://skimpies-dashboard.vercel.app',
   storagePrefix: 'skimpies',
