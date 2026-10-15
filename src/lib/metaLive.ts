@@ -1,5 +1,6 @@
 // Today's Meta numbers straight from the Graph API — the same source Ads
 // Manager reads — bypassing Windsor's refresh lag for the live view.
+import { metaAccountId } from '@/src/lib/client';
 
 export interface MetaToday {
   spend: number;
@@ -15,7 +16,7 @@ export interface MetaDay { date: string; spend: number; revenue: number }
 // spend until Windsor's next daily sync completes.
 export async function fetchMetaDaily(since: string, until: string): Promise<MetaDay[] | null> {
   const token = (process.env.META_ACCESS_TOKEN || '').trim();
-  const accountId = (process.env.META_AD_ACCOUNT_ID || '').trim().replace('act_', '');
+  const accountId = metaAccountId();
   if (!token || !accountId) return null;
   try {
     const fields = 'spend,action_values';
@@ -40,7 +41,7 @@ export async function fetchMetaDaily(since: string, until: string): Promise<Meta
 
 export async function fetchMetaToday(): Promise<MetaToday | null> {
   const token = (process.env.META_ACCESS_TOKEN || '').trim();
-  const accountId = (process.env.META_AD_ACCOUNT_ID || '').trim().replace('act_', '');
+  const accountId = metaAccountId();
   if (!token || !accountId) return null;
 
   try {
@@ -199,7 +200,7 @@ async function fillCatalogThumbnails(ids: string[], token: string, media: Record
       }
     }
     // Image hashes resolve to URLs through the ad account's image library.
-    const accountId = (process.env.META_AD_ACCOUNT_ID || '').trim().replace('act_', '');
+    const accountId = metaAccountId();
     if (hashToAds.size === 0 || !accountId) return;
     const hashes = Array.from(hashToAds.keys());
     const url = `https://graph.facebook.com/v19.0/act_${accountId}/adimages?hashes=${encodeURIComponent(JSON.stringify(hashes))}&fields=hash,url,permalink_url&access_token=${token}`;
@@ -216,5 +217,61 @@ async function fillCatalogThumbnails(ids: string[], token: string, media: Record
     }
   } catch {
     /* best effort — cards fall back to the ad-preview embed */
+  }
+}
+
+
+// ── Direct Meta reporting (clients with no Windsor key) ─────────────────────
+// Insights straight from the Graph API for any date range, at account level
+// (optionally one row per day) or ad level. Purchases and purchase value use
+// omni_purchase, falling back to purchase — the same pick as the live view.
+export interface MetaInsightRow {
+  date: string;            // date_start ('' when not split by day)
+  adId: string; adName: string; adsetName: string; campaignName: string; accountId: string;
+  spend: number; impressions: number; clicks: number; purchases: number; revenue: number;
+}
+
+export let lastMetaInsightsError: string | null = null;
+
+export async function fetchMetaInsights(since: string, until: string, opts: { level: 'account' | 'ad'; daily?: boolean }): Promise<MetaInsightRow[] | null> {
+  const token = (process.env.META_ACCESS_TOKEN || '').trim();
+  const accountId = metaAccountId();
+  if (!token || !accountId) return null;
+  const fields = ['spend', 'impressions', 'clicks', 'actions', 'action_values',
+    ...(opts.level === 'ad' ? ['ad_id', 'ad_name', 'adset_name', 'campaign_name', 'account_id'] : [])].join(',');
+  const qs = new URLSearchParams({
+    fields, level: opts.level, limit: '500', access_token: token,
+    time_range: JSON.stringify({ since, until }),
+    ...(opts.daily ? { time_increment: '1' } : {}),
+  });
+  type Action = { action_type: string; value: string };
+  const pick = (arr: Action[] | undefined) =>
+    arr?.find(a => a.action_type === 'omni_purchase')?.value ?? arr?.find(a => a.action_type === 'purchase')?.value;
+  const out: MetaInsightRow[] = [];
+  let url: string | null = `https://graph.facebook.com/v19.0/act_${accountId}/insights?${qs}`;
+  try {
+    for (let page = 0; url && page < 20; page++) {
+      const res: Response = await fetch(url, { next: { revalidate: 300 }, signal: AbortSignal.timeout(20000) });
+      const json = await res.json() as { data?: Array<Record<string, unknown>>; paging?: { next?: string }; error?: { message?: string } };
+      if (json.error) { lastMetaInsightsError = String(json.error.message || 'Meta API error'); return null; }
+      for (const d of json.data ?? []) {
+        out.push({
+          date: String(d.date_start || ''),
+          adId: String(d.ad_id || ''), adName: String(d.ad_name || ''), adsetName: String(d.adset_name || ''),
+          campaignName: String(d.campaign_name || ''), accountId: String(d.account_id || accountId),
+          spend: parseFloat(String(d.spend || '0')),
+          impressions: parseInt(String(d.impressions || '0'), 10),
+          clicks: parseInt(String(d.clicks || '0'), 10),
+          purchases: parseFloat(pick(d.actions as Action[] | undefined) || '0'),
+          revenue: parseFloat(pick(d.action_values as Action[] | undefined) || '0'),
+        });
+      }
+      url = json.paging?.next ?? null;
+    }
+    lastMetaInsightsError = null;
+    return out;
+  } catch (e) {
+    lastMetaInsightsError = e instanceof Error ? e.message : String(e);
+    return null;
   }
 }
