@@ -13,6 +13,9 @@ export function generateMetadata(): Metadata {
   return {
     title: `${c.name} Dashboard`,
     description: `A6 Dashboard · ${c.name} eCommerce analytics`,
+    // The version tag changes whenever the letter or colours change, so a
+    // theme edit shows up in the browser tab immediately.
+    icons: { icon: [{ url: `/brand-icon?v=${encodeURIComponent(`${c.initial}${c.theme.icon.from}${c.theme.icon.to}`.replace(/#/g, ''))}`, type: 'image/svg+xml' }] },
   };
 }
 
