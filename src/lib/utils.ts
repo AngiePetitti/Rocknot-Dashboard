@@ -75,3 +75,11 @@ export function getStockStatus(daysRemaining: number): 'critical' | 'warning' | 
   if (daysRemaining <= 14) return 'warning';
   return 'ok';
 }
+
+/**
+ * Sources /api/windsor returns when it has real numbers: Windsor REST,
+ * BigQuery, or (clients with no Windsor key) Shopify + ad platforms directly.
+ */
+export function isLiveOverviewSource(source: unknown): boolean {
+  return source === 'windsor_live' || source === 'bigquery_live' || source === 'direct_live';
+}

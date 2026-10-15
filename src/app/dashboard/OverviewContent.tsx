@@ -8,7 +8,7 @@ import { buildCallouts } from '@/src/lib/callouts';
 import { cachedJson, primeCache } from '@/src/lib/clientCache';
 import type { MarketingEvent } from '@/src/app/api/calendar/route';
 import { Timeframe, PlatformSpend, DailyRevenue } from '@/src/lib/mockData';
-import { formatCurrency, formatROAS, TIMEFRAME_LABELS } from '@/src/lib/utils';
+import { formatCurrency, formatROAS, TIMEFRAME_LABELS, isLiveOverviewSource } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import MetricCard from '@/src/components/ui/MetricCard';
 import Card from '@/src/components/ui/Card';
@@ -335,7 +335,7 @@ export default function OverviewContent() {
       data => {
         if (activeReqKey.current !== reqKey) return; // stale response — a newer timeframe is active
         const source = data.source || 'unknown';
-        if (source !== 'windsor_live' && source !== 'bigquery_live') {
+        if (!isLiveOverviewSource(source)) {
           setApiErrorDetail(typeof data.error === 'string' && data.error ? String(data.error).slice(0, 300) : null);
           setMetrics(EMPTY_METRICS);
           setRevenueData([]);
@@ -411,7 +411,7 @@ export default function OverviewContent() {
       cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
         `/api/windsor?tf=custom&date_from=${first}&date_to=${yest}`,
         d => {
-          if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
+          if (isLiveOverviewSource(d.source) && d.metrics) {
             setMtdSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
           }
         }
@@ -424,7 +424,7 @@ export default function OverviewContent() {
       cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
         `/api/windsor?tf=custom&date_from=${prevY}-${String(prevM).padStart(2, '0')}-01&date_to=${prevY}-${String(prevM).padStart(2, '0')}-${String(prevTo).padStart(2, '0')}`,
         d => {
-          if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
+          if (isLiveOverviewSource(d.source) && d.metrics) {
             setSameDaysSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
           }
         }
@@ -433,7 +433,7 @@ export default function OverviewContent() {
     cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
       '/api/windsor?tf=last_month',
       d => {
-        if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
+        if (isLiveOverviewSource(d.source) && d.metrics) {
           setLastMonthSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
         }
       }
@@ -475,7 +475,7 @@ export default function OverviewContent() {
 
   const merColor = metrics.mer >= MER_GOAL ? '#22c55e' : '#ef4444';
   const merLabel = metrics.mer >= MER_GOAL ? '✓ Above Goal' : '✗ Below Goal';
-  const isLive = liveSource === 'windsor_live' || liveSource === 'bigquery_live';
+  const isLive = isLiveOverviewSource(liveSource);
 
   return (
     <div>
@@ -542,7 +542,7 @@ export default function OverviewContent() {
           {liveSource === 'loading'
             ? 'Loading Windsor data...'
             : isLive
-            ? `Live · Windsor.ai · Updated ${lastUpdated}`
+            ? `Live · ${liveSource === 'direct_live' ? 'Shopify + ad platforms direct' : 'Windsor.ai'} · Updated ${lastUpdated}`
             : `Data unavailable · ${lastUpdated}`}
         </span>
         <button
@@ -564,9 +564,9 @@ export default function OverviewContent() {
             fetch(`/api/windsor?${p}`, { cache: 'no-store' })
               .then(r => r.json())
               .then(data => {
-                if (data?.source === 'windsor_live' || data?.source === 'bigquery_live') primeCache(`/api/windsor?${p}`, data);
+                if (isLiveOverviewSource(data?.source)) primeCache(`/api/windsor?${p}`, data);
                 const source = data.source || 'unknown';
-                if (source !== 'windsor_live' && source !== 'bigquery_live') {
+                if (!isLiveOverviewSource(source)) {
                   setMetrics(EMPTY_METRICS);
                   setRevenueData([]);
                   setLivePlatformSpend(null);

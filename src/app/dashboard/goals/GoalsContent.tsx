@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { cachedJson } from '@/src/lib/clientCache';
-import { formatCurrency } from '@/src/lib/utils';
+import { formatCurrency, isLiveOverviewSource } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import { useClient } from '@/src/components/ClientProvider';
@@ -149,7 +149,7 @@ export default function GoalsContent() {
     cachedJson<{ source?: string; revenueData?: { date: string; revenue: number; netSales?: number; adSpend: number }[] }>(
       `/api/windsor?tf=custom&date_from=${year - 1}-01-01&date_to=${year - 1}-12-31`,
       d => {
-        if (d.source === 'windsor_live' || d.source === 'bigquery_live') setLastYear(byMonth(d.revenueData || []));
+        if (isLiveOverviewSource(d.source)) setLastYear(byMonth(d.revenueData || []));
       }
     );
     fetch('/api/notes/months', { cache: 'no-store' })
