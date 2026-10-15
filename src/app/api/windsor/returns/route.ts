@@ -3,10 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
+import { shopifyConfigured } from '@/src/lib/shopifyAuth';
 
 export const dynamic = 'force-dynamic';
 
-const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 const DOMAIN = shopifyDomain();
 
 export interface ReturnedProduct {
@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
 
-  if (!TOKEN) {
+  if (!shopifyConfigured()) {
     return NextResponse.json({ source: 'error', error: 'Shopify token not configured' });
   }
 

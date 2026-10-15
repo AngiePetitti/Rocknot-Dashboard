@@ -11,7 +11,7 @@ export const maxDuration = 60;
 // One marketplace channel (e.g. /api/channel/nordstrom?tf=30d&compare=true).
 export async function GET(request: NextRequest, { params }: { params: { key: string } }) {
   if (!marketplaceByKey(params.key)) return NextResponse.json({ source: 'error', error: 'No such channel on this dashboard.' }, { status: 404 });
-  if (!channelConfigured()) return NextResponse.json({ source: 'error', error: 'Shopify not connected — SHOPIFY_ACCESS_TOKEN is missing on this deployment.' });
+  if (!channelConfigured()) return NextResponse.json({ source: 'error', error: 'Shopify not connected — set SHOPIFY_ACCESS_TOKEN, or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET, on this deployment.' });
   const sp = request.nextUrl.searchParams;
   const tf = (sp.get('tf') || '30d') as Timeframe | 'custom';
   const { from, to } = timeframeRange(tf, sp.get('date_from'), sp.get('date_to'));

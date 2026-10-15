@@ -6,10 +6,10 @@ import { CustomerMetrics } from '@/src/lib/mockData';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
+import { shopifyConfigured } from '@/src/lib/shopifyAuth';
 
 export const dynamic = 'force-dynamic';
 
-const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 const SHOPIFY_DOMAIN = shopifyDomain();
 
 function addDays(dateStr: string, days: number): string {
@@ -53,7 +53,7 @@ interface ShopifyCustomerTotals {
 // Returning-customer rate straight from Shopify so the headline matches
 // Shopify's own Customers report for the selected timeframe exactly.
 async function fetchShopifyCustomers(from: string, to: string): Promise<ShopifyCustomerTotals | null> {
-  if (!SHOPIFY_TOKEN) return null;
+  if (!shopifyConfigured()) return null;
   const ql = `FROM sales SHOW customers, returning_customers, returning_customer_rate ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
   const q = { tableData: await runShopifyQLRaw(ql, { timeoutMs: 12000 }) };
   const cols: { name: string }[] = q?.tableData?.columns || [];

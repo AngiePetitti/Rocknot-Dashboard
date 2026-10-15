@@ -37,6 +37,13 @@ VOICE: Romantic, warm, reassuring, elegant — big-day language is welcome here.
 
 HARD RULES:
 - Copy should speak to the bride and her big day; comfort + beauty is the core promise.`,
+  // Placeholder — replace from the AI Insights page once Skimpies' brand guide is in.
+  skimpies: `WHO WE ARE: Skimpies is a DTC eCommerce brand selling on Shopify. (Brand brief not filled in yet — edit it on the AI Insights page.)
+
+HARD RULES:
+- When unsure what a product is or who it's for, check the catalog and top-products data or ask — never guess.
+- Never put prices in customer-facing copy unless the operator explicitly asks.
+- Never invent a campaign premise or scarcity claim ("restock", "last chance", "sold out") unless the operator said it or the data shows it.`,
 };
 
 export function defaultBrief(): string {

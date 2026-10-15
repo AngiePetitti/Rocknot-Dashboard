@@ -12,8 +12,8 @@
 import { unstable_cache } from 'next/cache';
 import { shopifyDomain } from '@/src/lib/client';
 import { todayPst } from '@/src/lib/timeframes';
+import { shopifyConfigured, shopifyToken } from '@/src/lib/shopifyAuth';
 
-const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 
 export interface ShopifyQLResult {
   columns: { name: string; dataType?: string }[];
@@ -21,9 +21,7 @@ export interface ShopifyQLResult {
 }
 export type Row = Record<string, string>;
 
-export function shopifyConfigured(): boolean {
-  return Boolean(TOKEN && shopifyDomain());
-}
+export { shopifyConfigured };
 
 function isRateLimited(msg: string): boolean {
   return /rate limit|throttl|too many requests/i.test(msg);
@@ -32,7 +30,7 @@ function isRateLimited(msg: string): boolean {
 async function runOnce(ql: string, timeoutMs: number): Promise<ShopifyQLResult> {
   const res = await fetch(`https://${shopifyDomain()}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await shopifyToken() },
     body: JSON.stringify({
       query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) { tableData { rows columns { name dataType } } parseErrors } }`,
     }),
@@ -78,7 +76,7 @@ const inflight = new Map<string, Promise<ShopifyQLResult>>();
 
 /** Raw table result, cached + de-duplicated + rate-limit aware. */
 export async function runShopifyQLRaw(ql: string, opts: { timeoutMs?: number; ttlSeconds?: number } = {}): Promise<ShopifyQLResult> {
-  if (!TOKEN) throw new Error('SHOPIFY_ACCESS_TOKEN not set');
+  if (!shopifyConfigured()) throw new Error('Shopify not configured — set SHOPIFY_ACCESS_TOKEN, or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET');
   const key = `${shopifyDomain()}|${ql}`;
   const existing = inflight.get(key);
   if (existing) return existing;

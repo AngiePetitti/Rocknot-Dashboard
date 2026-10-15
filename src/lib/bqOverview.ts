@@ -4,6 +4,7 @@ import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees, storeOnl
 import { fetchHumanConversion } from '@/src/lib/traffic';
 import { fetchMarketplaceTotals, MarketplaceTotals } from '@/src/lib/channel';
 import { runShopifyQLRaw } from '@/src/lib/shopifyql';
+import { shopifyConfigured, shopifyToken } from '@/src/lib/shopifyAuth';
 
 export interface OverviewResult {
   adsError?: string;
@@ -93,11 +94,10 @@ export interface ShopifyDay {
 
 // Trim env values: Vercel copy-paste often leaves a trailing newline, which
 // corrupts the auth header (401) and the request host.
-const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 const SHOPIFY_DOMAIN = shopifyDomain();
 
 export async function fetchShopifyDaily(from: string, to: string): Promise<ShopifyDay[]> {
-  if (!SHOPIFY_TOKEN) return [];
+  if (!shopifyConfigured()) return [];
   // Shopify throttles GraphQL hard, and one page load fires several ShopifyQL
   // queries (overview + prior compare + returns + customer split). Retry with
   // backoff instead of letting one THROTTLED response zero out revenue.
@@ -160,7 +160,7 @@ async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean
 // fails: the chart then comes from the Windsor rows, but every headline number
 // (net sales incl. return fees, total sales, orders, AOV) is still Shopify's.
 export async function fetchShopifyTotals(from: string, to: string): Promise<ShopifyDay | null> {
-  if (!SHOPIFY_TOKEN) return null;
+  if (!shopifyConfigured()) return null;
   let withFees = includeReturnFees();
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -201,12 +201,12 @@ export async function fetchShopifyTotals(from: string, to: string): Promise<Shop
 // Website conversion rate from ShopifyQL sessions — the same number Shopify's
 // own reports show: converting sessions ÷ total sessions, as a percentage.
 export async function fetchShopifyConversion(from: string, to: string): Promise<number | null> {
-  if (!SHOPIFY_TOKEN) return null;
+  if (!shopifyConfigured()) return null;
   const ql = `FROM sessions SHOW sessions, sessions_that_completed_checkout SINCE ${from} UNTIL ${to}`;
   try {
     const res = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await shopifyToken() },
       body: JSON.stringify({
         query: `{ shopifyqlQuery(query: ${JSON.stringify(ql)}) {
           tableData { rows columns { name } } parseErrors
@@ -244,7 +244,7 @@ export interface ShopifyCustomerSplit {
 }
 
 export async function fetchShopifyCustomerSplit(from: string, to: string): Promise<ShopifyCustomerSplit | null> {
-  if (!SHOPIFY_TOKEN) return null;
+  if (!shopifyConfigured()) return null;
   // ShopifyQL does not support GROUP BY customer_type. Instead, use the
   // built-in returning_customers dimension alongside total customers.
   const ql = `FROM sales SHOW net_sales, customers, returning_customers, new_customers ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
