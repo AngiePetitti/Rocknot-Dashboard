@@ -27,8 +27,8 @@ export interface DirectCustomerMetrics {
   secondOrderNet: number;
   thirdPlusOrderNet: number;
   ordersRead: number;
-  /** True when Shopify could not return every order in the range (60-day limit or page cap). */
-  partial: boolean;
+  /** Why the range is incomplete: the 6,000-order cap, the 60-day limit (no read_all_orders), or null when complete. */
+  partial: 'cap' | 'sixty-days' | null;
 }
 
 interface OrderNode {
@@ -40,7 +40,7 @@ interface OrderNode {
 }
 
 const QUERY = `query Orders($q: String!, $after: String) {
-  orders(first: 100, after: $after, query: $q, sortKey: CREATED_AT) {
+  orders(first: 100, after: $after, query: $q, sortKey: CREATED_AT, reverse: true) {
     pageInfo { hasNextPage endCursor }
     nodes {
       createdAt
@@ -130,6 +130,6 @@ export async function fetchDirectCustomerMetrics(from: string, to: string): Prom
     oneOrderCount: one.length, twoOrderCount: two.length, threePlusCount: three.length,
     ltvOneOrder: avg(one.map(c => c.spent)), ltvTwoOrders: avg(two.map(c => c.spent)), ltvThreePlus: avg(three.map(c => c.spent)),
     ordersRead: orders.length,
-    partial: hitCap || (from < sixtyDaysAgo && !(await allOrdersScope)),
+    partial: hitCap ? 'cap' : (from < sixtyDaysAgo && !(await allOrdersScope)) ? 'sixty-days' : null,
   };
 }
