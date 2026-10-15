@@ -15,6 +15,7 @@ export const maxDuration = 300;
 interface Metrics {
   totalRevenue: number; netSales?: number; totalAdSpend: number; netAdSpend?: number;
   mer?: number; totalOrders: number;
+  metaSpend?: number; googleSpend?: number; tiktokSpend?: number; snapchatSpend?: number; pinterestSpend?: number;
 }
 
 const fmt = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
@@ -72,22 +73,34 @@ export async function GET(req: NextRequest) {
       text: `🔴 *${client.name}: revenue pacing ${pace.toFixed(0)}% of normal* — ${fmt(todayNet)} net by ${hourPT}:00 PT vs ${fmt(expectedByNow)} expected (trailing-7-day rhythm, avg day ${fmt(avgDaily)}).`,
     });
   }
-  // MER check only once real money is in play for the day.
+  // MER check only once real money is in play for the day. This is the
+  // throttle-spend signal, so it names where today's money is going.
   if (spend > 300 && mer < merGoal * 0.8) {
+    const plat: Array<[string, number]> = [
+      ['Meta', todayM.metaSpend ?? 0], ['Google', todayM.googleSpend ?? 0],
+      ['TikTok', todayM.tiktokSpend ?? 0], ['Snap', todayM.snapchatSpend ?? 0],
+      ['Pinterest', todayM.pinterestSpend ?? 0],
+    ].filter(([, v]) => v > 0).sort((a, b) => (b[1] as number) - (a[1] as number)) as Array<[string, number]>;
+    const mix = plat.map(([n, v]) => `${n} ${fmt(v)}`).join(' · ');
     alerts.push({
       key: 'mer',
-      text: `🟠 *${client.name}: MER ${mer.toFixed(2)}x — well below the ${merGoal}x goal* with ${fmt(spend)} net spend so far today (${fmt(todayNet)} net sales). Worth a look at which platform is running away.`,
+      text: `🟠 *${client.name}: MER ${mer.toFixed(2)}x — below the throttle line (goal ${merGoal}x)* with ${fmt(spend)} net spend vs ${fmt(todayNet)} net sales so far today.${mix ? `\nSpend mix: ${mix}.` : ''} If this holds another check-in, pull the top spender back toward yesterday's level.`,
     });
   }
 
   if (!alerts.length) return NextResponse.json({ ok: true, healthy: true, pace: Math.round(pace), mer: Number(mer.toFixed(2)) });
 
-  // One alert per condition per day — pacing recovers and dips; don't spam.
+  // Cooldowns: revenue pacing alerts once per day (it dips and recovers);
+  // the MER/throttle alert may repeat after 5 quiet hours if still breached,
+  // so a morning warning that went unhandled resurfaces in the afternoon.
   const sent: string[] = [];
   for (const a of alerts) {
     const kvKey = `pace_alert_${today}_${a.key}`;
     const already = await getKV(kvKey).catch(() => null);
-    if (already && !req.nextUrl.searchParams.get('test')) continue;
+    const cooldownOk = a.key === 'mer' && already
+      ? Date.now() - Date.parse(already) > 5 * 3600 * 1000
+      : !already;
+    if (!cooldownOk && !req.nextUrl.searchParams.get('test')) continue;
     const res = await fetch(webhook, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

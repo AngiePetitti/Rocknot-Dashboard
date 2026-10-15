@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/alerts/brief",
-      "schedule": "30 14 * * *"
+      "schedule": "0 12 * * *"
     },
     {
       "path": "/api/alerts/pace",
