@@ -100,7 +100,8 @@ export async function GET(request: NextRequest) {
         repeatCustomers,
       };
       const notes = ['Cohort retention is not yet calculated for stores connected directly to Shopify.'];
-      if (partial) notes.unshift(`Order values and tiers cover the ${ordersRead.toLocaleString()} orders Shopify returned for this range — orders older than 60 days need the app's read_all_orders permission, and very long ranges stop at 6,000 orders.`);
+      if (partial === 'cap') notes.unshift(`This range has more orders than the page reads at once, so order values and tiers cover its most recent ${ordersRead.toLocaleString()} orders. Shorter ranges (up to about two months) are complete.`);
+      if (partial === 'sixty-days') notes.unshift(`Order values and tiers cover the last 60 days only (${ordersRead.toLocaleString()} orders): the Shopify app does not have the read_all_orders permission.`);
       return NextResponse.json(
         { source: 'direct_live', customerMetrics, cohortData: [], note: notes.join(' ') },
         { headers: cacheHeaders() },
