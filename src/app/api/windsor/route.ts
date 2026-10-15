@@ -23,7 +23,7 @@ import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { fetchMetaToday, fetchMetaDaily } from '@/src/lib/metaLive';
 import { fetchSnapToday } from '@/src/lib/snapLive';
-import { metaAccountNameMatch, hasPlatform, windsorParams } from '@/src/lib/client';
+import { metaAccountNameMatch, hasPlatform, windsorParams, usesDirectData } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -539,8 +539,8 @@ export async function GET(request: NextRequest) {
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const yesterdayStr = addDays(todayStr, -1);
 
-  if (!WINDSOR_API_KEY) {
-    // No Windsor on this deployment: build the Overview from Shopify + Meta directly.
+  if (usesDirectData()) {
+    // No Windsor for this client's sales/ads: build the Overview from Shopify + Meta directly.
     try {
       const cur = isCustom && dateFrom && dateTo ? { date_from: dateFrom, date_to: dateTo } : buildCurrentParams(tf, todayStr, yesterdayStr);
       const current = await directPeriod(cur.date_from, cur.date_to);
