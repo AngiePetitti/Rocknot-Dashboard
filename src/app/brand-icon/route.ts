@@ -4,12 +4,13 @@ import { getClient } from '@/src/lib/client';
 // icon gradient — the same look as the original static R. Served as SVG so
 // the browser renders true bold Arial (the PNG renderer has no bold font).
 // Rendered at request time because CLIENT is a runtime env var.
+// A plain route (not app/icon) so the root layout can link it with a ?v= tag
+// built from the colours: browsers cache favicons hard, and a stable URL kept
+// showing the old colours for an hour after a theme change.
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export const size = { width: 64, height: 64 };
-export const contentType = 'image/svg+xml';
 
-export default function Icon() {
+export function GET() {
   const c = getClient();
   const letter = (c.initial || c.name.charAt(0) || 'A').toUpperCase();
   const { from, to } = c.theme.icon;
