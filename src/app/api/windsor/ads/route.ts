@@ -5,7 +5,7 @@ import { fetchMetaToday } from '@/src/lib/metaLive';
 import { fetchSnapToday } from '@/src/lib/snapLive';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
-import { keepClientMetaRows, hasPlatform, PLATFORMS, windsorParams } from '@/src/lib/client';
+import { keepClientMetaRows, hasPlatform, PLATFORMS, windsorParams, usesDirectData } from '@/src/lib/client';
 import { pinterestWindsorNote } from '@/src/lib/tiktokLive';
 
 export const dynamic = 'force-dynamic';
@@ -247,9 +247,9 @@ export async function GET(request: NextRequest) {
 
   const debug = searchParams.get('debug') === 'true';
 
-  // No Windsor on this deployment: platform numbers straight from each
+  // No Windsor for this client's ads: platform numbers straight from each
   // platform's own API (Meta today; others as their direct connections land).
-  if (!WINDSOR_API_KEY) {
+  if (usesDirectData()) {
     const platforms: PlatformData[] = [];
     const dailySpend: DaySpend[] = [];
     let metaError: string | null = null;

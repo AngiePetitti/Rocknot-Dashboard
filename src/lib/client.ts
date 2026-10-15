@@ -225,6 +225,12 @@ export interface ClientProfile {
   };
   /** Rocknot's one-time data seed routes (reorders, calendar) only make sense for Rocknot. */
   seedsEnabled: boolean;
+  /**
+   * Sales and ad numbers (Overview, Ad Performance, Creative Analysis) come
+   * straight from Shopify and each ad platform's API instead of Windsor —
+   * even when WINDSOR_API_KEY is set for other sources such as Instagram.
+   */
+  directData?: boolean;
 }
 
 const ROCKNOT: ClientProfile = {
@@ -450,6 +456,8 @@ const SKIMPIES: ClientProfile = {
   alerts: { fromName: 'Skimpies Dashboard' },
   analyst: { name: 'Cleo' },
   seedsEnabled: false,
+  // Shopify and Meta are connected directly; Windsor only serves Instagram.
+  directData: true,
 };
 
 export const CLIENTS: Record<ClientId, ClientProfile> = { rocknot: ROCKNOT, kaileep: KAILEEP, skimpies: SKIMPIES };
@@ -491,6 +499,15 @@ export function getClient(): ClientProfile {
 
 export function clientPlatforms(profile: ClientProfile = getClient()): PlatformDef[] {
   return profile.ads.platforms.map(k => PLATFORMS[k]);
+}
+
+/**
+ * Whether sales and ad numbers come straight from Shopify and the ad platforms
+ * (no Windsor): set on the profile, or implied when the deployment has no
+ * Windsor key at all.
+ */
+export function usesDirectData(profile: ClientProfile = getClient()): boolean {
+  return Boolean(profile.directData) || !(process.env.WINDSOR_API_KEY || '').trim();
 }
 
 export function hasPlatform(key: PlatformKey, profile: ClientProfile = getClient()): boolean {

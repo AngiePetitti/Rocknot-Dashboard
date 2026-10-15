@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
-import { keepClientMetaRows, metaAccountId, hasPlatform, windsorParams } from '@/src/lib/client';
+import { keepClientMetaRows, metaAccountId, hasPlatform, windsorParams, usesDirectData } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -283,9 +283,9 @@ export async function GET(request: NextRequest) {
 
   const params = buildDateParams(tfRaw, searchParams.get('date_from') || '', searchParams.get('date_to') || '');
 
-  // No Windsor on this deployment: per-ad Meta numbers and media straight from
-  // the Graph API (other platforms join as their direct connections land).
-  if (!WINDSOR_API_KEY) {
+  // No Windsor for this client's ads: per-ad Meta numbers and media straight
+  // from the Graph API (other platforms join as their direct connections land).
+  if (usesDirectData()) {
     if (!hasPlatform('meta')) return NextResponse.json({ source: 'direct_live', creatives: [] });
     const metaMod = await import('@/src/lib/metaLive');
     const ads = await metaMod.fetchMetaInsights(params.date_from, params.date_to, { level: 'ad' });
