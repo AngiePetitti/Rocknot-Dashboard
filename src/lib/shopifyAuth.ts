@@ -34,9 +34,13 @@ async function fetchClientCredentialsToken(): Promise<string> {
     cache: 'no-store',
     signal: AbortSignal.timeout(10000),
   });
-  const json = await res.json().catch(() => null) as { access_token?: string; expires_in?: number; error?: string; error_description?: string } | null;
+  const text = await res.text().catch(() => '');
+  let json: { access_token?: string; expires_in?: number; error?: string; error_description?: string; errors?: unknown } | null = null;
+  try { json = JSON.parse(text); } catch { /* Shopify sometimes answers with HTML or plain text */ }
   if (!res.ok || !json?.access_token) {
-    const why = json?.error_description || json?.error || `HTTP ${res.status}`;
+    // Surface Shopify's own reason (e.g. invalid_client, app not installed) — a bare status code can't be acted on.
+    const detail = json?.error_description || json?.error || (json?.errors ? JSON.stringify(json.errors) : '') || text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+    const why = `HTTP ${res.status}${detail ? ` (${detail})` : ''}`;
     throw new Error(`Shopify token request failed: ${why} — check SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET and that the app is installed on ${shopifyDomain()}`);
   }
   const lifetimeMs = (json.expires_in ?? 86400) * 1000;
