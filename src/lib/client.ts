@@ -403,7 +403,7 @@ const SKIMPIES: ClientProfile = {
     aov: null,
     contentAngles: 'product styling, customer reviews and UGC, behind-the-scenes',
   },
-  shopify: { defaultDomain: '' }, // SHOPIFY_STORE_DOMAIN env required until set
+  shopify: { defaultDomain: '63674c.myshopify.com' }, // Dev Dashboard app "A6 Dashboard - Skimpies" (Oct 2026)
   ads: {
     platforms: ['meta', 'google'],
     metaAccountNameMatch: 'skimpies',

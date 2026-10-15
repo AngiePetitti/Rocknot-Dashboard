@@ -125,7 +125,7 @@ values:
    from a Dev Dashboard app created in Skimpies' own Shopify organization
    (the client credentials grant only works for the store's own apps), Meta account id/token and their own
    `CALENDAR_SHEET_ID` / `PRIVATE_SHEET_ID`. `SHOPIFY_STORE_DOMAIN` is required
-   until the profile has a default domain.
+   (optional now — the profile defaults to `63674c.myshopify.com`).
 4. **Brand brief** — the default in `src/lib/brandBrief.ts` is a placeholder;
    replace it on the AI Insights page and upload the brand guide on Creative
    Analysis.
