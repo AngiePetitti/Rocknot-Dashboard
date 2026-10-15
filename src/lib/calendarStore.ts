@@ -90,18 +90,25 @@ async function getToken(): Promise<string> {
 }
 
 async function sheetsFetch(path: string, init?: RequestInit): Promise<unknown> {
-  const token = await getToken();
-  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}${path}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init?.headers || {}) },
-    cache: 'no-store',
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
+  // Google's per-minute read quota trips during bursts (dashboard + crons
+  // share one service account). 429s are transient — retry with backoff
+  // instead of failing the whole calendar load.
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 1500));
+    const token = await getToken();
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}${path}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init?.headers || {}) },
+      cache: 'no-store',
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) return json;
     const msg = (json as { error?: { message?: string } })?.error?.message || `Sheets API error ${res.status}`;
-    throw new Error(msg);
+    lastErr = new Error(msg);
+    if (res.status !== 429 && !/quota exceeded/i.test(msg)) break;
   }
-  return json;
+  throw lastErr || new Error('Sheets API error');
 }
 
 function newId(): string {
