@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getClient } from '@/src/lib/client';
 import { getGoals } from '@/src/lib/chatStore';
+import { isLiveOverviewSource } from '@/src/lib/utils';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -23,7 +24,7 @@ async function getMetrics(origin: string, headers: HeadersInit, qs: string): Pro
   try {
     const r = await fetch(`${origin}/api/windsor?${qs}`, { cache: 'no-store', headers });
     const d = await r.json();
-    if ((d?.source === 'windsor_live' || d?.source === 'bigquery_live') && d.metrics) return d.metrics as Metrics;
+    if (isLiveOverviewSource(d?.source) && d.metrics) return d.metrics as Metrics;
     return null;
   } catch { return null; }
 }
