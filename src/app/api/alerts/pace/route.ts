@@ -75,7 +75,10 @@ export async function GET(req: NextRequest) {
   }
   // MER check only once real money is in play for the day. This is the
   // throttle-spend signal, so it names where today's money is going.
-  if (spend > 300 && mer < merGoal * 0.8) {
+  // Threshold is the GOAL itself (operator wants to intervene as soon as
+  // efficiency slips, not after it craters), and it re-alerts at EVERY
+  // check-in until MER is back above goal.
+  if (spend > 300 && mer < merGoal) {
     const platAll: Array<[string, number]> = [
       ['Meta', todayM.metaSpend ?? 0], ['Google', todayM.googleSpend ?? 0],
       ['TikTok', todayM.tiktokSpend ?? 0], ['Snap', todayM.snapchatSpend ?? 0],
@@ -85,22 +88,38 @@ export async function GET(req: NextRequest) {
     const mix = plat.map(([n, v]) => `${n} ${fmt(v)}`).join(' · ');
     alerts.push({
       key: 'mer',
-      text: `🟠 *${client.name}: MER ${mer.toFixed(2)}x — below the throttle line (goal ${merGoal}x)* with ${fmt(spend)} net spend vs ${fmt(todayNet)} net sales so far today.${mix ? `\nSpend mix: ${mix}.` : ''} If this holds another check-in, pull the top spender back toward yesterday's level.`,
+      text: `🟠 *${client.name}: MER ${mer.toFixed(2)}x — below the ${merGoal}x goal* with ${fmt(spend)} net spend vs ${fmt(todayNet)} net sales so far today.${mix ? `\nSpend mix: ${mix}.` : ''} This repeats every check-in until MER is back above goal.`,
     });
   }
 
-  if (!alerts.length) return NextResponse.json({ ok: true, healthy: true, pace: Math.round(pace), mer: Number(mer.toFixed(2)) });
+  if (!alerts.length) {
+    // If a MER breach was alerted earlier today and it has now recovered,
+    // say so once — the operator shouldn't have to wonder if silence means
+    // "fixed" or "broken watchdog".
+    const breachKey = `pace_alert_${today}_mer`;
+    const recoveredKey = `pace_alert_${today}_mer_recovered`;
+    const hadBreach = await getKV(breachKey).catch(() => null);
+    const saidRecovered = await getKV(recoveredKey).catch(() => null);
+    if (hadBreach && !saidRecovered && spend > 300) {
+      const res = await fetch(webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: `✅ *${client.name}: MER back above goal — ${mer.toFixed(2)}x* (${fmt(todayNet)} net sales vs ${fmt(spend)} net spend). Stabilized.` }),
+      });
+      if (res.ok) await setKV(recoveredKey, new Date().toISOString()).catch(() => {});
+    }
+    return NextResponse.json({ ok: true, healthy: true, pace: Math.round(pace), mer: Number(mer.toFixed(2)) });
+  }
 
   // Cooldowns: revenue pacing alerts once per day (it dips and recovers);
-  // the MER/throttle alert may repeat after 5 quiet hours if still breached,
-  // so a morning warning that went unhandled resurfaces in the afternoon.
+  // the MER alert has NO cooldown — it repeats at every scheduled check
+  // while breached, and a ✅ recovery note posts once MER is back above
+  // goal (so silence always means "no breach", never "gave up").
   const sent: string[] = [];
   for (const a of alerts) {
     const kvKey = `pace_alert_${today}_${a.key}`;
     const already = await getKV(kvKey).catch(() => null);
-    const cooldownOk = a.key === 'mer' && already
-      ? Date.now() - Date.parse(already) > 5 * 3600 * 1000
-      : !already;
+    const cooldownOk = a.key === 'mer' ? true : !already;
     if (!cooldownOk && !req.nextUrl.searchParams.get('test')) continue;
     const res = await fetch(webhook, {
       method: 'POST',
