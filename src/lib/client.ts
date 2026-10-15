@@ -274,7 +274,7 @@ const ROCKNOT: ClientProfile = {
       // Organic Content tab sources (Windsor "Pinterest Organic" / "Instagram
       // Insights" data sources). null = not connected: the tab says so.
       pinterest_organic: null,
-      instagram: null,
+      instagram: '17841450822497159', // Instagram Insights (Oct 2026)
       // Google Analytics 4 (Traffic tab → Google Analytics view). null = the
       // view is hidden and Cleo's get_site_analytics says not connected.
       google_analytics: null,
@@ -444,7 +444,7 @@ const SKIMPIES: ClientProfile = {
       pinterest: null,
       quickbooks: null,
       pinterest_organic: null,
-      instagram: null,
+      instagram: '17841454886028910', // Instagram Insights (Oct 2026) — the only Windsor source Skimpies uses
       google_analytics: null,
     },
   },
