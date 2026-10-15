@@ -9,7 +9,9 @@ export const dynamic = 'force-dynamic';
 // Admin-only. Enforced server-side (not just hidden in the nav) so the P&L data
 // that will live here can never be fetched by a non-admin.
 export default async function FinancialsPage() {
-  const session = await getServerSession(authOptions);
+  // Only ask NextAuth for a session when sign-in is configured: without
+  // NEXTAUTH_SECRET it throws in production and the whole page errors.
+  const session = authConfigured() ? await getServerSession(authOptions) : null;
   const isAdmin = !authConfigured() || session?.user?.role === 'admin';
 
   if (!isAdmin) {
