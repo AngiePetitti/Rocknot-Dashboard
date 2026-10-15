@@ -6,7 +6,8 @@
 //   • each customer's numberOfOrders and amountSpent are LIFETIME figures
 //     (tiers and lifetime value for everyone who bought in the period).
 // Shopify only returns orders from the last 60 days unless the app has the
-// read_all_orders scope, so older ranges come back partial — `partial` says so.
+// read_all_orders scope, so without it older ranges come back partial —
+// `partial` says so (the scope is checked on the installed app, not assumed).
 import { shopifyDomain } from '@/src/lib/client';
 import { shopifyToken } from '@/src/lib/shopifyAuth';
 
@@ -51,9 +52,27 @@ const QUERY = `query Orders($q: String!, $after: String) {
   }
 }`;
 
+// Whether the installed app holds read_all_orders (orders older than 60 days).
+async function hasAllOrdersScope(): Promise<boolean> {
+  try {
+    const res = await fetch(`https://${shopifyDomain()}/admin/api/2026-04/graphql.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await shopifyToken() },
+      body: JSON.stringify({ query: '{ currentAppInstallation { accessScopes { handle } } }' }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
+    });
+    const json = await res.json() as { data?: { currentAppInstallation?: { accessScopes?: Array<{ handle: string }> } } };
+    return Boolean(json.data?.currentAppInstallation?.accessScopes?.some(s => s.handle === 'read_all_orders'));
+  } catch {
+    return false;
+  }
+}
+
 const MAX_PAGES = 60; // 6,000 orders per request — ~2 months for a store this size
 
 export async function fetchDirectCustomerMetrics(from: string, to: string): Promise<DirectCustomerMetrics> {
+  const allOrdersScope = hasAllOrdersScope();
   const orders: OrderNode[] = [];
   let after: string | null = null;
   let hitCap = false;
@@ -111,6 +130,6 @@ export async function fetchDirectCustomerMetrics(from: string, to: string): Prom
     oneOrderCount: one.length, twoOrderCount: two.length, threePlusCount: three.length,
     ltvOneOrder: avg(one.map(c => c.spent)), ltvTwoOrders: avg(two.map(c => c.spent)), ltvThreePlus: avg(three.map(c => c.spent)),
     ordersRead: orders.length,
-    partial: hitCap || from < sixtyDaysAgo,
+    partial: hitCap || (from < sixtyDaysAgo && !(await allOrdersScope)),
   };
 }
