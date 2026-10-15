@@ -1,6 +1,21 @@
 {
   "crons": [
-    { "path": "/api/alerts/restock", "schedule": "0 15 * * 1" }
+    {
+      "path": "/api/alerts/restock",
+      "schedule": "0 15 * * 1"
+    },
+    {
+      "path": "/api/alerts/brief",
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/alerts/pace",
+      "schedule": "0 15,17,19,21,23 * * *"
+    },
+    {
+      "path": "/api/alerts/pace",
+      "schedule": "0 1 * * *"
+    }
   ],
   "git": {
     "deploymentEnabled": {

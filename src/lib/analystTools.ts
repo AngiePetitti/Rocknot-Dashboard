@@ -207,6 +207,11 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'get_bfcm',
+    description: "The Black Friday / Cyber Monday plan and live performance (BFCM tab): sale window, goals (revenue, ad spend), offers, collection links, the checklist with open items and owners — and, once the sale is on (or last year's same dates before then), the store's revenue / net sales / orders / AOV / ad spend / MER vs last year, platform results, best and worst creatives, top products, and the best email and SMS campaigns. Use for any BFCM / holiday sale question.",
+    input_schema: { type: 'object', properties: { year: { type: 'number', description: 'BFCM year (optional; defaults to the upcoming one)' } } },
+  },
+  {
     name: 'get_tasks',
     description: "The team's internal Kanban task board (Tasks tab): every task with status (todo/in_progress/done), assignee, due date and priority. Check before creating a task to avoid duplicates.",
     input_schema: { type: 'object', properties: {} },
@@ -591,7 +596,7 @@ AUDIENCE (account level — followers are as of the last day of the range; profi
 ${audLine('Instagram')}
 ${audLine('Pinterest')}
 
-PINTEREST ORGANIC PINS (Pinterest's own counts):
+${(() => { const pdd = d.pinterestDaily as { status: string; basis?: string; totals: { impressions: number; engagements: number; saves: number; pinClicks: number; outboundClicks: number; engagementRate: number; pinsCreated: number; pinsCreatedPerDay: number }; days: Array<{ date: string; impressions: number; engagements: number; pinsCreated: number }> } | undefined; if (!pdd || pdd.status !== 'ok') return ''; const t = pdd.totals; return `PINTEREST BY DAY (table${pdd.basis === 'lifetime_diff' ? ', day-over-day change in lifetime counts' : ''}): impressions ${Math.round(t.impressions).toLocaleString()} · engagements ${Math.round(t.engagements).toLocaleString()} (${t.saves} saves, ${t.pinClicks} pin clicks, ${t.outboundClicks} outbound) · engagement rate ${(t.engagementRate * 100).toFixed(2)}% · pins created ${t.pinsCreated} (${t.pinsCreatedPerDay}/day, incl. pins Pinterest auto-generates from the site)\nDaily (date,impressions,engagements,pinsCreated): ${pdd.days.map(x => `${x.date},${Math.round(x.impressions)},${Math.round(x.engagements)},${x.pinsCreated}`).join(' ')}\n\n`; })()}PINTEREST ORGANIC PINS (Pinterest's own counts):
 ${postLines('Pinterest', pin, ['impressions', 'saves', 'pinClicks', 'outboundClicks'])}
 
 INSTAGRAM POSTS & REELS (Instagram's own counts):
@@ -621,6 +626,36 @@ UNPAID SITE SESSIONS REFERRED BY: Pinterest ${st?.Pinterest?.sessions ?? 0} (${s
     return `Monthly plan (Goals tab) — planned total $${total.toLocaleString()}:\n${goals.sort((a, b) => a.month.localeCompare(b.month)).map(g =>
       `${g.month}: revenue goal $${g.revenueGoal.toLocaleString()} · ad budget $${g.adBudget.toLocaleString()}${g.pinned ? ' (pinned/manual)' : ''}`
     ).join('\n')}`;
+  }
+
+  if (name === 'get_bfcm') {
+    const { loadBfcmPlan, bfcmPlanText, bfcmYear } = await import('@/src/lib/bfcm');
+    const year = Number(input.year) || bfcmYear();
+    const plan = await loadBfcmPlan(year);
+    const perf = await get(`/api/bfcm/performance?year=${year}`).catch(() => null);
+    const $ = (v: unknown) => `$${Math.round(Number(v) || 0).toLocaleString()}`;
+    let perfText = 'Performance: unavailable.';
+    if (perf && !perf.error) {
+      type S = { revenue: number; netSales: number; orders: number; aov: number; spend: number; mer: number; newCustomers: number } | null;
+      const st = perf.store as S; const py = perf.priorYear as S;
+      const w = perf.window as { from: string; to: string };
+      const line = (s: S) => s ? `revenue ${$(s.revenue)} · net sales ${$(s.netSales)} · orders ${s.orders} · AOV ${$(s.aov)} · ad spend ${$(s.spend)} · MER ${s.mer.toFixed(2)}x · new customers ${s.newCustomers}` : 'n/a';
+      const plats = (perf.platforms as Array<{ platform: string; spend: number; revenue: number; roas: number; conversions: number }>) || [];
+      const cr = perf.creatives as { best: Array<{ name: string; platform: string; spend: number; roas: number; conversions: number }>; worst: typeof cr.best };
+      const prods = (perf.products as Array<{ name: string; revenue: number; unitsSold: number }>) || [];
+      type OwnedCamp = { name: string; revenue?: number; recipients?: number; openRate?: number; clickRate?: number };
+      const owned = perf.owned as { email: OwnedCamp[]; sms: OwnedCamp[]; overview?: { email: { revenue: number }; sms: { revenue: number } } } | null;
+      perfText = `Performance ${perf.previewLastYear ? '(PREVIEW: last year\'s same dates, the sale has not started)' : ''} ${w.from} → ${w.to}:
+Store: ${line(st)}
+Last year same dates: ${line(py)}
+Platforms: ${plats.map(p => `${p.platform} spend ${$(p.spend)} · revenue ${$(p.revenue)} · ROAS ${p.roas.toFixed(2)}x · purchases ${p.conversions}`).join(' | ') || 'n/a'}
+Best creatives: ${cr?.best?.map(c => `${c.name} [${c.platform}] ROAS ${c.roas.toFixed(2)}x on ${$(c.spend)}`).join('; ') || 'n/a'}
+Worst creatives: ${cr?.worst?.map(c => `${c.name} [${c.platform}] ROAS ${c.roas.toFixed(2)}x on ${$(c.spend)}`).join('; ') || 'n/a'}
+Top products: ${prods.slice(0, 8).map(p => `${p.name} ${$(p.revenue)} (${p.unitsSold} units)`).join('; ') || 'n/a'}
+Email: ${owned?.overview ? `${$(owned.overview.email.revenue)} total · ` : ''}${owned?.email?.slice(0, 5).map(c => `${c.name} ${$(c.revenue || 0)}${c.openRate != null ? ` · open ${(c.openRate * 100).toFixed(0)}%` : ''}`).join('; ') || 'none in window'}
+SMS: ${owned?.overview ? `${$(owned.overview.sms.revenue)} total · ` : ''}${owned?.sms?.slice(0, 5).map(c => `${c.name} ${$(c.revenue || 0)}`).join('; ') || 'none in window'}`;
+    }
+    return `${bfcmPlanText(plan, today)}\n\n${perfText}`;
   }
 
   if (name === 'get_tasks') {

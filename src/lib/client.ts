@@ -190,6 +190,8 @@ export interface ClientProfile {
   lines?: ProductLine[];
   /** Marketplace channels reported on their own tab (Shopify sales_channel filter). */
   marketplaces?: MarketplaceChannel[];
+  /** BFCM tab seeds: collection pages the sale drives traffic to (shown until an admin edits the plan's links). */
+  bfcm?: { collections: Array<{ label: string; url: string }>; lastYear?: { from: string; to: string; earlyAccess?: { from: string; to: string } } };
   goals: {
     /** Starting annual net-sales target shown until an admin saves one (0 = ask). */
     defaultAnnualTarget: number;
@@ -368,6 +370,17 @@ const KAILEEP: ClientProfile = {
   ],
   // October 2026 brief: blended MER 5–6 (5 = the pass line), Google ROAS ≥ 6x,
   // CPA target < $27–30.
+  // BFCM 2026 collection pages (per Angie, Oct 2026).
+  bfcm: {
+    collections: [
+      { label: 'All BFCM deals', url: 'https://www.kaileep.com/collections/all-black-friday-cyber-monday-deals' },
+      { label: "Women's shoes", url: 'https://www.kaileep.com/collections/women-shoes-2026-black-friday-cyber-monday-deals' },
+      { label: 'Bridal shoes', url: 'https://www.kaileep.com/collections/bridal-shoes-black-friday-cyber-monday-deals' },
+      { label: 'Kids shoes', url: 'https://www.kaileep.com/collections/kids-shoes-2026-black-friday-cyber-monday-deals' },
+    ],
+    // BFCM 2025 (per Angie): gated VIP early access Nov 9–15, public sale Nov 27–30.
+    lastYear: { from: '2025-11-27', to: '2025-11-30', earlyAccess: { from: '2025-11-09', to: '2025-11-15' } },
+  },
   goals: { defaultAnnualTarget: 4_000_000, targetMer: 5, targetRoas: 6, targetCac: 30 }, // $4M 2026 net-sales target set Sep 2026
   inventory: { mode: 'standard' },
   creatives: {
