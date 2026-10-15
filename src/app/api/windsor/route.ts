@@ -469,13 +469,13 @@ interface DirectPeriod {
   shopifyError: string | null;
 }
 
-async function directPeriod(from: string, to: string): Promise<DirectPeriod> {
+async function directPeriod(from: string, to: string, lite = false): Promise<DirectPeriod> {
   const [shopify, meta, split] = await Promise.all([
     fetchShopifyDaily(from, to)
       .then(rows => ({ rows, err: null as string | null }))
       .catch((e: unknown) => ({ rows: [] as Awaited<ReturnType<typeof fetchShopifyDaily>>, err: e instanceof Error ? e.message : String(e) })),
     hasPlatform('meta') ? fetchMetaDaily(from, to).catch(() => null) : Promise.resolve(null),
-    fetchShopifyCustomerSplit(from, to).catch(() => null),
+    lite ? Promise.resolve(null) : fetchShopifyCustomerSplit(from, to).catch(() => null),
   ]);
 
   const byDate = new Map<string, { date: string; revenue: number; orders: number; adSpend: number }>();
@@ -543,7 +543,9 @@ export async function GET(request: NextRequest) {
     // No Windsor for this client's sales/ads: build the Overview from Shopify + Meta directly.
     try {
       const cur = isCustom && dateFrom && dateTo ? { date_from: dateFrom, date_to: dateTo } : buildCurrentParams(tf, todayStr, yesterdayStr);
-      const current = await directPeriod(cur.date_from, cur.date_to);
+      // lite=1: totals only (the Overview's forecast) — skips the customer split.
+      const lite = searchParams.get('lite') === '1';
+      const current = await directPeriod(cur.date_from, cur.date_to, lite);
       let priorPeriod = null, priorLabel = '';
       if (withCompare) {
         let pr: { from: string; to: string; label: string };
@@ -563,7 +565,7 @@ export async function GET(request: NextRequest) {
         priorPeriod = { totalRevenue: m.totalRevenue, totalAdSpend: m.totalAdSpend, totalOrders: m.totalOrders, aov: m.aov, mer: m.mer, metaSpend: m.metaSpend, googleSpend: m.googleSpend };
         priorLabel = pr.label;
       }
-      try {
+      if (!lite) try {
         const mk = await fetchMarketplaceTotals(cur.date_from, cur.date_to);
         if (mk.length) (current.metrics as unknown as Record<string, unknown>).marketplaces = mk;
       } catch { /* note simply stays hidden */ }
