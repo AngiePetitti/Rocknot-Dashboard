@@ -87,11 +87,15 @@ async function seedProfileAdmins(users: StoredUser[]): Promise<StoredUser[]> {
   const list = profileAdmins();
   if (!list.length) { profileAdminsSeeded = true; return users; }
   try {
-    if (await getKVStrict('profile_admins_seeded')) { profileAdminsSeeded = true; return users; }
-    const missing = list.filter(e => !users.some(u => u.email === e) && !isEnvManaged(e));
+    // Remember each email copied, so one added to the profile later is still
+    // copied once — and one an admin removed is never re-added.
+    const done = new Set((await getKVStrict('profile_admins_seeded') || '').split(',').map(e => e.trim()).filter(e => e.includes('@')));
+    const pending = list.filter(e => !done.has(e));
+    if (!pending.length) { profileAdminsSeeded = true; return users; }
+    const missing = pending.filter(e => !users.some(u => u.email === e) && !isEnvManaged(e));
     const next: StoredUser[] = missing.length ? [...users, ...missing.map(email => ({ email, role: 'admin' as Role }))] : users;
     if (missing.length) await writeStoredUsers(next);
-    await setKV('profile_admins_seeded', new Date().toISOString());
+    await setKV('profile_admins_seeded', Array.from(new Set([...Array.from(done), ...pending])).join(','));
     profileAdminsSeeded = true;
     return next;
   } catch {

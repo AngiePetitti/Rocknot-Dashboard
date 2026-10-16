@@ -465,8 +465,8 @@ const SKIMPIES: ClientProfile = {
   seedsEnabled: false,
   // Shopify and Meta are connected directly; Windsor only serves Instagram.
   directData: true,
-  // Owner and operator (Oct 2026).
-  startingAdmins: ['bettebentley@me.com', 'rebeccaneises@gmail.com'],
+  // Owner, operator and team (Oct 2026).
+  startingAdmins: ['bettebentley@me.com', 'rebeccaneises@gmail.com', 'briansantamaria@gmail.com'],
 };
 
 export const CLIENTS: Record<ClientId, ClientProfile> = { rocknot: ROCKNOT, kaileep: KAILEEP, skimpies: SKIMPIES };
