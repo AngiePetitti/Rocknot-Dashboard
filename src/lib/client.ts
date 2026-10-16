@@ -64,6 +64,14 @@ export interface MarketplaceChannel {
   returnWindowDays: number;
   /** One line for the tab subtitle. */
   description: string;
+  /**
+   * Count this channel's net sales in MER (ads drive or don't distort it),
+   * while keeping it out of the store's sales, orders, AOV, customers and
+   * CAC. Default false: excluded everywhere (Kailee P's Nordstrom).
+   */
+  countInMer?: boolean;
+  /** Sidebar icon: a path under /public (e.g. a brand mark) or an emoji. Default 🏬. */
+  icon?: string;
 }
 
 export interface ProductLine {
@@ -468,12 +476,13 @@ const SKIMPIES: ClientProfile = {
   // Marketplace orders synced into Shopify (Oct 2026 sales-channel check: in
   // 30 days Amazon brought 531 orders, every one a "new customer" because
   // Amazon hides the buyer, and TikTok Shop 102 new customers). Excluded from
-  // the store's MER / CAC / AOV / customers; each gets its own tab. Fees and
+  // the store's sales / CAC / AOV / customers (each gets its own tab), but
+  // counted in MER: Meta ads drive Amazon sales, and TikTok Shop is organic. Fees and
   // commissions aren't in Shopify — fill commissionPct once known.
   marketplaces: [
-    { key: 'amazon', label: 'Amazon', shopifyChannel: 'Amazon Channel - CED', sourceMatch: 'amazon', commissionPct: null, returnFee: null, returnWindowDays: 30,
+    { key: 'amazon', label: 'Amazon', shopifyChannel: 'Amazon Channel - CED', sourceMatch: 'amazon', commissionPct: null, returnFee: null, returnWindowDays: 30, countInMer: true, icon: '/brands/amazon.svg',
       description: 'Amazon orders synced into Shopify by CedCommerce · Shopify sales channel "Amazon Channel - CED" · Amazon fees are not in Shopify' },
-    { key: 'tiktok-shop', label: 'TikTok Shop', shopifyChannel: 'TikTok', sourceMatch: 'tiktok', commissionPct: null, returnFee: null, returnWindowDays: 30,
+    { key: 'tiktok-shop', label: 'TikTok Shop', shopifyChannel: 'TikTok', sourceMatch: 'tiktok', commissionPct: null, returnFee: null, returnWindowDays: 30, countInMer: true, icon: '/brands/tiktok.svg',
       description: 'TikTok Shop orders · Shopify sales channel "TikTok" · TikTok Shop fees are not in Shopify' },
   ],
   // Owner, operator and team (Oct 2026).

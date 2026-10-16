@@ -496,6 +496,10 @@ async function directPeriod(from: string, to: string, lite = false): Promise<Dir
 
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const net = netSales || totalSales;
+  // Marketplace channels: never in the store's sales/orders/AOV/customers, but
+  // those flagged countInMer add their net sales to MER's numerator.
+  const mk = lite ? [] : await fetchMarketplaceTotals(from, to).catch(() => []);
+  const merNet = net + mk.filter(m => m.inMer).reduce((s, m) => s + m.netSales, 0);
   const metrics: Record<string, number> = {
     totalRevenue: Math.round(totalSales),
     netSales: Math.round(net),
@@ -503,7 +507,8 @@ async function directPeriod(from: string, to: string, lite = false): Promise<Dir
     totalOrders: orders,
     totalAdSpend: round2(metaSpend),
     aov: orders > 0 ? round2((aovBasis > 0 ? aovBasis : net - returnFees) / orders) : 0,
-    mer: metaSpend > 0 ? round2(net / metaSpend) : 0,
+    mer: metaSpend > 0 ? round2(merNet / metaSpend) : 0,
+    merNetSales: Math.round(merNet),
     returns: 0,
     metaSpend: round2(metaSpend), metaRevenue: Math.round(metaRevenue),
     googleSpend: 0, googleRevenue: 0, tiktokSpend: 0, tiktokRevenue: 0,
@@ -518,6 +523,7 @@ async function directPeriod(from: string, to: string, lite = false): Promise<Dir
       pctReturning: customers > 0 ? Math.round((split.returningCustomers / customers) * 1000) / 10 : 0,
     });
   }
+  if (mk.length) (metrics as unknown as Record<string, unknown>).marketplaces = mk;
   return {
     metrics,
     revenueData: Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date)).map(r => ({ ...r, revenue: Math.round(r.revenue), adSpend: Math.round(r.adSpend) })),
@@ -565,10 +571,6 @@ export async function GET(request: NextRequest) {
         priorPeriod = { totalRevenue: m.totalRevenue, totalAdSpend: m.totalAdSpend, totalOrders: m.totalOrders, aov: m.aov, mer: m.mer, metaSpend: m.metaSpend, googleSpend: m.googleSpend };
         priorLabel = pr.label;
       }
-      if (!lite) try {
-        const mk = await fetchMarketplaceTotals(cur.date_from, cur.date_to);
-        if (mk.length) (current.metrics as unknown as Record<string, unknown>).marketplaces = mk;
-      } catch { /* note simply stays hidden */ }
       const hasSales = current.metrics.totalRevenue > 0 || current.metrics.totalOrders > 0;
       return NextResponse.json(forPartner({
         source: 'direct_live',
