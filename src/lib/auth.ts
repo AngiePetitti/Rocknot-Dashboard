@@ -18,8 +18,10 @@ export function authConfigured(): boolean {
 export const authOptions: NextAuthOptions = {
   providers: [
     Google({
-      clientId: process.env.GOOGLE_CLIENT_ID || '',
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+      // Trimmed: a pasted value with a stray space or line break makes Google
+      // answer 'OAuth client was not found'.
+      clientId: (process.env.GOOGLE_CLIENT_ID || '').trim(),
+      clientSecret: (process.env.GOOGLE_CLIENT_SECRET || '').trim(),
       // Always show Google's account chooser so people can pick which account
       // to sign in with, instead of being forced into the currently-active one.
       authorization: { params: { prompt: 'select_account' } },
