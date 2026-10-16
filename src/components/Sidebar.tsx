@@ -45,7 +45,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   // (unauthenticated session), show everything so the pre-auth site is intact.
   const visibleNav = navItems.filter(i => !i.adminOnly || isAdmin || status === 'unauthenticated');
   // Marketplace channels (e.g. Nordstrom) get their own tab, right after Overview.
-  const marketplaceNav = (client.marketplaces || []).map(m => ({ href: `/dashboard/channel/${m.key}`, label: m.label, icon: '🏬' }));
+  const marketplaceNav = (client.marketplaces || []).map(m => ({ href: `/dashboard/channel/${m.key}`, label: m.label, icon: m.icon || '🏬' }));
   const isPartner = session?.user?.role === 'partner';
   const nav = isPartner
     ? visibleNav.filter(i => PARTNER_PAGES.includes(i.href))
@@ -119,7 +119,9 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                   : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
               }`}
             >
-              <span className="text-base">{item.icon}</span>
+              {item.icon.startsWith('/')
+                ? <img src={item.icon} alt="" className="w-4 h-4 object-contain" />
+                : <span className="text-base">{item.icon}</span>}
               <span>{item.label}</span>
               {isActive && (
                 <span className="ml-auto w-1.5 h-1.5 rounded-full bg-violet-500" />
