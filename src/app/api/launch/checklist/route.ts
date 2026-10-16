@@ -32,12 +32,20 @@ const DEFAULT_TEMPLATE: TemplateItem[] = [
 
 async function load(): Promise<Store> {
   try {
-    const raw = await loadDoc(DOC);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Store;
-      if (Array.isArray(parsed.template) && parsed.template.length) return { template: parsed.template, byEvent: parsed.byEvent || {} };
-    }
-  } catch { /* fall through to default */ }
+    return await loadStrict();
+  } catch { /* reads can degrade to the default for display */ }
+  return { template: DEFAULT_TEMPLATE, byEvent: {} };
+}
+
+// For WRITE paths: a storage read failure throws — saving on top of a
+// failed read replaced the whole store with one checkbox and wiped
+// everything the team had checked.
+async function loadStrict(): Promise<Store> {
+  const raw = await loadDoc(DOC);
+  if (raw) {
+    const parsed = JSON.parse(raw) as Store;
+    if (Array.isArray(parsed.template) && parsed.template.length) return { template: parsed.template, byEvent: parsed.byEvent || {} };
+  }
   return { template: DEFAULT_TEMPLATE, byEvent: {} };
 }
 
@@ -61,7 +69,12 @@ export async function PUT(req: NextRequest) {
     .filter((t: TemplateItem) => t.label)
     .slice(0, 40);
   if (!template.length) return NextResponse.json({ error: 'Template needs at least one item' }, { status: 400 });
-  const store = await load();
+  let store: Store;
+  try {
+    store = await loadStrict();
+  } catch {
+    return NextResponse.json({ error: 'Storage is busy — try saving the playbook again in a few seconds.' }, { status: 503 });
+  }
   store.template = template;
   await saveDoc(DOC, JSON.stringify(store));
   return NextResponse.json({ ok: true, template });
@@ -79,7 +92,12 @@ export async function PATCH(req: NextRequest) {
   const eventId = String(body.eventId || '');
   const label = String(body.label || '').slice(0, 200);
   if (!eventId || !label) return NextResponse.json({ error: 'eventId and label required' }, { status: 400 });
-  const store = await load();
+  let store: Store;
+  try {
+    store = await loadStrict();
+  } catch {
+    return NextResponse.json({ error: 'Storage is busy (Sheets quota) — tap the box again in a few seconds.' }, { status: 503 });
+  }
   const checks = store.byEvent[eventId] || {};
   checks[label] = { done: Boolean(body.done), ...(by ? { by } : {}), at: new Date().toISOString() };
   store.byEvent[eventId] = checks;
