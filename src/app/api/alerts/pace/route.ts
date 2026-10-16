@@ -111,6 +111,19 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // Heartbeat: a one-line status every scheduled check, healthy or not —
+  // the operator asked for a pulse they can glance at, not just silence.
+  // Disable with PULSE_HEARTBEAT=off.
+  const heartbeat = (process.env.PULSE_HEARTBEAT || 'on').toLowerCase() !== 'off';
+  const hourLabel = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: true }).format(now);
+  if (heartbeat && !alerts.length && spend > 0) {
+    await fetch(webhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: `🟢 ${client.name} · ${hourLabel} ET — ${fmt(todayNet)} net today · MER ${mer.toFixed(2)}x · pacing ${pace.toFixed(0)}%` }),
+    }).catch(() => {});
+  }
+
   if (!alerts.length) {
     // If a MER breach was alerted earlier today and it has now recovered,
     // say so once — the operator shouldn't have to wonder if silence means
