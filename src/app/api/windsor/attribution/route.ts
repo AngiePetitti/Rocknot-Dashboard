@@ -5,7 +5,9 @@ import { getAdsOverview } from '@/src/lib/bqAds';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { shopifyql, shopifyConfigured } from '@/src/lib/shopifyql';
-import { storeOnlyWhere } from '@/src/lib/client';
+import { storeOnlyWhere, usesDirectData, hasPlatform } from '@/src/lib/client';
+import { fetchShopifyTotals } from '@/src/lib/bqOverview';
+import { fetchMetaInsights } from '@/src/lib/metaLive';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,6 +94,41 @@ export async function GET(request: NextRequest) {
   const tfRaw = searchParams.get('tf') || '30d';
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
+
+  // Direct-data clients: store totals from Shopify, platform claims straight
+  // from each ad platform's API (Meta today), same response shape.
+  if (usesDirectData()) {
+    try {
+      const range = rangeForTf(tfRaw, dateFrom, dateTo);
+      const [totals, meta, referrers] = await Promise.all([
+        fetchShopifyTotals(range.from, range.to).catch(() => null),
+        hasPlatform('meta') ? fetchMetaInsights(range.from, range.to, { level: 'account' }).catch(() => null) : Promise.resolve(null),
+        fetchShopifyReferrers(range.from, range.to),
+      ]);
+      const totalRevenue = Math.round(totals?.totalSales ?? 0);
+      const totalOrders = totals?.orders ?? 0;
+      const attribution: AttributionData[] = [];
+      let attributedRevenue = 0, attributedOrders = 0, totalSpend = 0;
+      if (meta?.length) {
+        const spend = Math.round(meta.reduce((s, r) => s + r.spend, 0) * 100) / 100;
+        const revenue = Math.round(meta.reduce((s, r) => s + r.revenue, 0));
+        const orders = Math.round(meta.reduce((s, r) => s + r.purchases, 0));
+        if (spend > 0 || revenue > 0) {
+          attribution.push({ platform: 'Meta', revenue, orders, spend,
+            roas: spend > 0 ? Math.round((revenue / spend) * 100) / 100 : 0,
+            costPerOrder: orders > 0 ? Math.round((spend / orders) * 100) / 100 : 0, percentage: 0, color: '#818cf8' });
+          attributedRevenue += revenue; attributedOrders += orders; totalSpend += spend;
+        }
+      }
+      attribution.push({ platform: 'Direct / Other', revenue: Math.max(0, totalRevenue - attributedRevenue), orders: Math.max(0, totalOrders - attributedOrders), spend: 0, roas: 0, costPerOrder: 0, percentage: 0, color: '#96BF48' });
+      const grandTotal = attribution.reduce((s, a) => s + a.revenue, 0) || 1;
+      for (const a of attribution) a.percentage = Math.round((a.revenue / grandTotal) * 1000) / 10;
+      const claimedPct = totalRevenue > 0 ? Math.round((attributedRevenue / totalRevenue) * 1000) / 10 : 0;
+      return NextResponse.json({ source: 'direct_live', totalRevenue, totalSpend, attribution, claimedPct, referrers }, { headers: cacheHeaders(tfRaw === 'today') });
+    } catch (err) {
+      return NextResponse.json({ source: 'error', error: String(err), attribution: [] });
+    }
+  }
 
   if (!isBigQueryConfigured()) {
     return NextResponse.json({ source: 'error', error: 'BigQuery not configured', attribution: [] });
