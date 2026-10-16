@@ -427,7 +427,7 @@ const SKIMPIES: ClientProfile = {
     platforms: ['meta', 'google'],
     metaAccountNameMatch: 'skimpies',
     metaAccountNameMode: 'contains',
-    metaAccountIdDefault: '', // META_AD_ACCOUNT_ID env until set
+    metaAccountIdDefault: '551437367250692', // "Skimpies's ad account", via Area 6's A6-dashboard system user (Oct 2026)
   },
   finance: { qbAccountMatch: 'skimpies', grossMarginPct: null, expensesSheet: null },
   revenue: { includeReturnFees: false },
