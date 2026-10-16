@@ -465,6 +465,17 @@ const SKIMPIES: ClientProfile = {
   seedsEnabled: false,
   // Shopify and Meta are connected directly; Windsor only serves Instagram.
   directData: true,
+  // Marketplace orders synced into Shopify (Oct 2026 sales-channel check: in
+  // 30 days Amazon brought 531 orders, every one a "new customer" because
+  // Amazon hides the buyer, and TikTok Shop 102 new customers). Excluded from
+  // the store's MER / CAC / AOV / customers; each gets its own tab. Fees and
+  // commissions aren't in Shopify — fill commissionPct once known.
+  marketplaces: [
+    { key: 'amazon', label: 'Amazon', shopifyChannel: 'Amazon Channel - CED', sourceMatch: 'amazon', commissionPct: null, returnFee: null, returnWindowDays: 30,
+      description: 'Amazon orders synced into Shopify by CedCommerce · Shopify sales channel "Amazon Channel - CED" · Amazon fees are not in Shopify' },
+    { key: 'tiktok-shop', label: 'TikTok Shop', shopifyChannel: 'TikTok', sourceMatch: 'tiktok', commissionPct: null, returnFee: null, returnWindowDays: 30,
+      description: 'TikTok Shop orders · Shopify sales channel "TikTok" · TikTok Shop fees are not in Shopify' },
+  ],
   // Owner, operator and team (Oct 2026).
   startingAdmins: ['bettebentley@me.com', 'rebeccaneises@gmail.com', 'briansantamaria@gmail.com'],
 };

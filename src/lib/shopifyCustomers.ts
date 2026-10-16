@@ -8,7 +8,7 @@
 // Shopify only returns orders from the last 60 days unless the app has the
 // read_all_orders scope, so without it older ranges come back partial —
 // `partial` says so (the scope is checked on the installed app, not assumed).
-import { shopifyDomain } from '@/src/lib/client';
+import { shopifyDomain, marketplaces } from '@/src/lib/client';
 import { shopifyToken } from '@/src/lib/shopifyAuth';
 
 export interface DirectCustomerMetrics {
@@ -37,6 +37,15 @@ interface OrderNode {
   currentTotalPriceSet: { shopMoney: { amount: string } };
   customerJourneySummary: { customerOrderIndex: number | null } | null;
   customer: { id: string; numberOfOrders: string; amountSpent: { amount: string } } | null;
+  app?: { name: string | null } | null;
+}
+
+// Marketplace orders (Amazon, TikTok Shop…) are not store customers: the
+// store's figures exclude them, as the ShopifyQL reports do via storeOnlyWhere.
+function isMarketplaceOrder(o: OrderNode): boolean {
+  const name = (o.app?.name || '').toLowerCase();
+  if (!name) return false;
+  return marketplaces().some(m => name === m.shopifyChannel.toLowerCase() || (m.sourceMatch && new RegExp(m.sourceMatch, 'i').test(name)));
 }
 
 const QUERY = `query Orders($q: String!, $after: String) {
@@ -48,6 +57,7 @@ const QUERY = `query Orders($q: String!, $after: String) {
       currentTotalPriceSet { shopMoney { amount } }
       customerJourneySummary { customerOrderIndex }
       customer { id numberOfOrders amountSpent { amount } }
+      app { name }
     }
   }
 }`;
@@ -110,7 +120,8 @@ const BULK_FIELDS = `createdAt
       totalPriceSet { shopMoney { amount } }
       currentTotalPriceSet { shopMoney { amount } }
       customerJourneySummary { customerOrderIndex }
-      customer { id numberOfOrders amountSpent { amount } }`;
+      customer { id numberOfOrders amountSpent { amount } }
+      app { name }`;
 
 // Shopify usually finishes a bulk export of a few thousand orders in seconds;
 // stay well inside the route's time limit.
@@ -160,6 +171,7 @@ export async function fetchDirectCustomerMetrics(from: string, to: string): Prom
   // Lifetime tiers for each customer who bought in the period.
   const customers = new Map<string, { orders: number; spent: number }>();
   for (const o of orders) {
+    if (isMarketplaceOrder(o)) continue;
     const lifetimeOrders = Math.round(num(o.customer?.numberOfOrders));
     const idx = o.customerJourneySummary?.customerOrderIndex ?? (lifetimeOrders === 1 ? 1 : null);
     if (idx) {
