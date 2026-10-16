@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { reconcileAdSpend } from '@/src/lib/adsReconcile';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
+import { usesDirectData } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,12 @@ export async function GET(request: NextRequest) {
   const to = searchParams.get('to') || undefined;
   const daysParam = searchParams.get('days');
   const days = daysParam ? Math.max(1, Math.min(180, parseInt(daysParam, 10) || 7)) : undefined;
+
+  // Direct-data clients read ad spend straight from each platform's API, so
+  // there is no synced copy to check — comparing would always flag $0.
+  if (usesDirectData()) {
+    return NextResponse.json({ range: { from: from ?? '', to: to ?? '' }, allOk: true, platforms: [], note: 'Ad spend is read directly from each platform; no synced copy to reconcile.' }, { headers: cacheHeaders(false) });
+  }
 
   try {
     const result = await reconcileAdSpend({ from, to, days });
