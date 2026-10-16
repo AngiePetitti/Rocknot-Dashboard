@@ -61,7 +61,7 @@ export default function AttributionContent() {
     fetch(`/api/windsor/attribution?${params}`)
       .then(r => r.json())
       .then(data => {
-        if (data.source === 'bigquery_live') {
+        if (data.source === 'bigquery_live' || data.source === 'direct_live') {
           setAttribution(data.attribution || []);
           setTotalRevenue(data.totalRevenue ?? 0);
           setTotalSpend(data.totalSpend ?? 0);
