@@ -231,6 +231,13 @@ export interface ClientProfile {
    * even when WINDSOR_API_KEY is set for other sources such as Instagram.
    */
   directData?: boolean;
+  /**
+   * The client's own admins (e.g. owner and operator). Admins straight away;
+   * copied once into the Team & Access list when that store is first
+   * available, after which they are ordinary, removable admins — unlike
+   * AUTH_ADMINS, which are permanent.
+   */
+  startingAdmins?: string[];
 }
 
 const ROCKNOT: ClientProfile = {
@@ -458,6 +465,8 @@ const SKIMPIES: ClientProfile = {
   seedsEnabled: false,
   // Shopify and Meta are connected directly; Windsor only serves Instagram.
   directData: true,
+  // Owner, operator and team (Oct 2026).
+  startingAdmins: ['bettebentley@me.com', 'rebeccaneises@gmail.com', 'briansantamaria@gmail.com'],
 };
 
 export const CLIENTS: Record<ClientId, ClientProfile> = { rocknot: ROCKNOT, kaileep: KAILEEP, skimpies: SKIMPIES };

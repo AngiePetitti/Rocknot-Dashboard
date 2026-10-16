@@ -5,6 +5,8 @@
 
 import { JWT } from 'google-auth-library';
 import type { Role } from '@/src/lib/auth';
+import { getClient } from '@/src/lib/client';
+import { getKVStrict, setKV } from '@/src/lib/chatStore';
 
 const SHEET_ID = (process.env.CALENDAR_SHEET_ID || '').trim();
 const TAB = 'Users';
@@ -19,6 +21,12 @@ export const OWNER_EMAILS = ['info@area6marketing.com', 'petittillc@gmail.com'];
 export const isOwner = (email: string) => OWNER_EMAILS.includes(email.toLowerCase().trim());
 export const envAdmins = () => Array.from(new Set([...OWNER_EMAILS, ...envList('AUTH_ADMINS')]));
 export const envMembers = () => envList('AUTH_MEMBERS');
+
+// The client profile's starting admins (owner, operator…): admins until the
+// Team & Access store exists, then copied into it once (flag in Settings KV)
+// so they can be demoted or removed there like anyone else.
+const profileAdmins = () => (getClient().startingAdmins ?? []).map(e => e.toLowerCase().trim()).filter(Boolean);
+let profileAdminsSeeded = false;
 
 export interface StoredUser { email: string; role: Role; }
 export interface ListedUser { email: string; role: Role; locked: boolean; source: 'owner' | 'env' | 'sheet'; }
@@ -68,9 +76,30 @@ export async function getStoredUsers(): Promise<StoredUser[]> {
       .map((r: string[]) => { const rr = (r[1] || '').toLowerCase().trim(); return { email: (r[0] || '').toLowerCase().trim(), role: (rr === 'admin' ? 'admin' : rr === 'partner' ? 'partner' : 'team') as Role }; })
       .filter((u: StoredUser) => u.email);
     cache = { at: Date.now(), users };
-    return users;
+    return await seedProfileAdmins(users);
   } catch {
     return cache?.users ?? [];
+  }
+}
+
+async function seedProfileAdmins(users: StoredUser[]): Promise<StoredUser[]> {
+  if (profileAdminsSeeded) return users;
+  const list = profileAdmins();
+  if (!list.length) { profileAdminsSeeded = true; return users; }
+  try {
+    // Remember each email copied, so one added to the profile later is still
+    // copied once — and one an admin removed is never re-added.
+    const done = new Set((await getKVStrict('profile_admins_seeded') || '').split(',').map(e => e.trim()).filter(e => e.includes('@')));
+    const pending = list.filter(e => !done.has(e));
+    if (!pending.length) { profileAdminsSeeded = true; return users; }
+    const missing = pending.filter(e => !users.some(u => u.email === e) && !isEnvManaged(e));
+    const next: StoredUser[] = missing.length ? [...users, ...missing.map(email => ({ email, role: 'admin' as Role }))] : users;
+    if (missing.length) await writeStoredUsers(next);
+    await setKV('profile_admins_seeded', Array.from(new Set([...Array.from(done), ...pending])).join(','));
+    profileAdminsSeeded = true;
+    return next;
+  } catch {
+    return users; // try again on the next read; until then they stay admins via roleFor
   }
 }
 
@@ -94,6 +123,8 @@ export async function roleFor(email?: string | null): Promise<Role | null> {
   const u = stored.find(x => x.email === e);
   if (u) return u.role;
   if (envMembers().includes(e)) return 'team';
+  // Not yet copied into the store (or no store yet): profile admins are admins.
+  if (!profileAdminsSeeded && profileAdmins().includes(e)) return 'admin';
   return null;
 }
 
@@ -105,6 +136,8 @@ export async function listUsers(): Promise<ListedUser[]> {
   for (const e of envAdmins()) { out.push({ email: e, role: 'admin', locked: true, source: isOwner(e) ? 'owner' : 'env' }); seen.add(e); }
   for (const e of envMembers()) if (!seen.has(e) && !stored.some(u => u.email === e)) { out.push({ email: e, role: 'team', locked: true, source: 'env' }); seen.add(e); }
   for (const u of stored) if (!seen.has(u.email)) { out.push({ ...u, locked: false, source: 'sheet' }); seen.add(u.email); }
+  // Until they're copied into the store they can't be edited — shown as locked.
+  if (!profileAdminsSeeded) for (const e of profileAdmins()) if (!seen.has(e)) { out.push({ email: e, role: 'admin', locked: true, source: 'env' }); seen.add(e); }
   return out.sort((a, b) => (a.role === b.role ? a.email.localeCompare(b.email) : a.role === 'admin' ? -1 : 1));
 }
 
