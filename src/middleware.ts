@@ -34,7 +34,9 @@ export async function middleware(req: NextRequest) {
   // token.role === null means the periodic re-check found the user removed
   // from the allowlist — stop honoring the session even though the JWT is
   // otherwise still valid.
-  if (token && token.role !== null) {
+  // 30 days after signing in, the session no longer counts: sign in again.
+  const expired = Boolean(token) && typeof token!.signedInAt === 'number' && Math.floor(Date.now() / 1000) - (token!.signedInAt as number) > 60 * 60 * 24 * 30;
+  if (token && token.role !== null && !expired) {
     // Debug endpoints expose raw data — admins only.
     if (pathname.startsWith('/api/debug') && token.role !== 'admin') {
       return new NextResponse(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } });
