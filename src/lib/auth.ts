@@ -15,6 +15,12 @@ export function authConfigured(): boolean {
   );
 }
 
+// Hard limit: everyone signs in again 30 days after their last Google sign-in,
+// however active they are. (NextAuth's maxAge alone slides forward with use.)
+export const SIGN_IN_MAX_AGE_S = 60 * 60 * 24 * 30;
+export const signInExpired = (signedInAt: unknown, now = Math.floor(Date.now() / 1000)) =>
+  typeof signedInAt === 'number' && now - signedInAt > SIGN_IN_MAX_AGE_S;
+
 export const authOptions: NextAuthOptions = {
   providers: [
     Google({
@@ -31,17 +37,24 @@ export const authOptions: NextAuthOptions = {
   // re-validates the role every 15 minutes (below) and the middleware rejects
   // tokens whose role has been revoked — a removed user loses access within
   // minutes of active use, not after 30 days.
-  session: { strategy: 'jwt', maxAge: 60 * 60 * 24 * 30 },
+  session: { strategy: 'jwt', maxAge: SIGN_IN_MAX_AGE_S },
   pages: { signIn: '/login', error: '/login' },
   callbacks: {
     // Only allow-listed emails may sign in.
     async signIn({ user }) {
       return (await roleFor(user.email)) !== null;
     },
-    async jwt({ token }) {
+    async jwt({ token, user }) {
+      const now = Math.floor(Date.now() / 1000);
+      // Start the 30-day clock at sign-in (sessions from before this rule
+      // start it at their next request). Past it, the session is dead: the
+      // middleware sends them back to the sign-in page.
+      if (user || typeof token.signedInAt !== 'number') token.signedInAt = now;
+      // A fresh sign-in always re-checks the role (clears an expired session's lock-out).
+      if (user) token.roleCheckedAt = 0;
+      if (signInExpired(token.signedInAt, now)) { token.role = null; return token; }
       // Re-validate the role at most every 15 minutes. If the lookup fails
       // (Sheets hiccup), keep the last known role rather than locking out.
-      const now = Math.floor(Date.now() / 1000);
       const checkedAt = (token.roleCheckedAt as number | undefined) ?? 0;
       if (token.role === undefined || now - checkedAt > 900) {
         try {
