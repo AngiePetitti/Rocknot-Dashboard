@@ -46,6 +46,8 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const visibleNav = navItems.filter(i => !i.adminOnly || isAdmin || status === 'unauthenticated');
   // Marketplace channels (e.g. Nordstrom) get their own tab, right after Overview.
   const marketplaceNav = (client.marketplaces || []).map(m => ({ href: `/dashboard/channel/${m.key}`, label: m.label, icon: m.icon || '🏬' }));
+  // Subscription brands (Loop) get a Subscriptions tab after the channel tabs.
+  if (client.subscriptions) marketplaceNav.push({ href: '/dashboard/subscriptions', label: 'Subscriptions', icon: '🔁' });
   const isPartner = session?.user?.role === 'partner';
   const nav = isPartner
     ? visibleNav.filter(i => PARTNER_PAGES.includes(i.href))
