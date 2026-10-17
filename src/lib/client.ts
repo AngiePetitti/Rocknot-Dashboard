@@ -246,6 +246,12 @@ export interface ClientProfile {
    * AUTH_ADMINS, which are permanent.
    */
   startingAdmins?: string[];
+  /**
+   * Subscription app whose renewal orders land in Shopify as their own sales
+   * channel (e.g. Loop). Turns on the Subscriptions tab. Omit when the brand
+   * sells no subscriptions.
+   */
+  subscriptions?: { provider: 'loop'; shopifyChannel: string };
 }
 
 const ROCKNOT: ClientProfile = {
@@ -485,6 +491,8 @@ const SKIMPIES: ClientProfile = {
     { key: 'tiktok-shop', label: 'TikTok Shop', shopifyChannel: 'TikTok', sourceMatch: 'tiktok', commissionPct: null, returnFee: null, returnWindowDays: 30, countInMer: true, icon: '/brands/tiktok.svg',
       description: 'TikTok Shop orders · Shopify sales channel "TikTok" · TikTok Shop fees are not in Shopify' },
   ],
+  // Loop renewals arrive in Shopify as the "Loop Subscriptions" channel.
+  subscriptions: { provider: 'loop', shopifyChannel: 'Loop Subscriptions' },
   // Owner, operator and team (Oct 2026).
   startingAdmins: ['bettebentley@me.com', 'rebeccaneises@gmail.com', 'briansantamaria@gmail.com'],
 };
