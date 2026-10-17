@@ -1,6 +1,6 @@
 import { runQuery, getDataset, dedupedOrdersCte, tableExists, dailyShopifySalesSql, shopifyOrdersFilter, googleSource, metaSource } from '@/src/lib/bigquery';
 import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
-import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees, storeOnlyWhere } from '@/src/lib/client';
+import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees, storeOnlyWhere, salesWhere } from '@/src/lib/client';
 import { fetchHumanConversion } from '@/src/lib/traffic';
 import { fetchMarketplaceTotals, MarketplaceTotals } from '@/src/lib/channel';
 import { runShopifyQLRaw } from '@/src/lib/shopifyql';
@@ -118,7 +118,7 @@ async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean
   const fields = withFees
     ? 'orders, net_sales, return_fees, total_sales, average_order_value'
     : 'orders, net_sales, total_sales, average_order_value';
-  const ql = `FROM sales SHOW ${fields} TIMESERIES day ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
+  const ql = `FROM sales SHOW ${fields} TIMESERIES day ${salesWhere()} SINCE ${from} UNTIL ${to}`;
   const q = { tableData: await runShopifyQLRaw(ql) };
   const cols: { name: string }[] = q?.tableData?.columns || [];
   // The live Admin API returns each row as an object keyed by column name;
@@ -160,7 +160,7 @@ export async function fetchShopifyTotals(from: string, to: string): Promise<Shop
       ? 'orders, net_sales, return_fees, total_sales, average_order_value'
       : 'orders, net_sales, total_sales, average_order_value';
     try {
-      const q = { tableData: await runShopifyQLRaw(`FROM sales SHOW ${fields} ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`, { timeoutMs: 15000 }) };
+      const q = { tableData: await runShopifyQLRaw(`FROM sales SHOW ${fields} ${salesWhere()} SINCE ${from} UNTIL ${to}`, { timeoutMs: 15000 }) };
       const cols: { name: string }[] = q?.tableData?.columns || [];
       const rows: Array<Record<string, string> | string[]> = q?.tableData?.rows || [];
       if (!rows.length) return null;

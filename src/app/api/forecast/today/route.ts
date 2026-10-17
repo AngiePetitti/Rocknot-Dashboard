@@ -1,6 +1,6 @@
 import { runShopifyQLRaw } from '@/src/lib/shopifyql';
 import { NextResponse } from 'next/server';
-import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
+import { shopifyDomain, salesWhere } from '@/src/lib/client';
 import { shopifyConfigured, shopifyToken } from '@/src/lib/shopifyAuth';
 
 export const dynamic = 'force-dynamic';
@@ -54,7 +54,7 @@ export async function GET() {
     const tz = await shopTimezone();
     const today = new Date().toLocaleDateString('en-CA', { timeZone: tz });
     const rows = await hourlySales(
-      `FROM sales SHOW total_sales, orders TIMESERIES hour ${storeOnlyWhere()} SINCE -7d UNTIL ${today}`
+      `FROM sales SHOW total_sales, orders TIMESERIES hour ${salesWhere()} SINCE -7d UNTIL ${today}`
     );
 
     // Split into complete past days vs today; bucket by date + hour-of-day.

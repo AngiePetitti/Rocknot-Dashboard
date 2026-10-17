@@ -496,10 +496,10 @@ async function directPeriod(from: string, to: string, lite = false): Promise<Dir
 
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const net = netSales || totalSales;
-  // Marketplace channels: never in the store's sales/orders/AOV/customers, but
-  // those flagged countInMer add their net sales to MER's numerator.
+  // Marketplace channels flagged countInSales are already in the sales above;
+  // those flagged only countInMer add their net sales to MER's numerator.
   const mk = lite ? [] : await fetchMarketplaceTotals(from, to).catch(() => []);
-  const merNet = net + mk.filter(m => m.inMer).reduce((s, m) => s + m.netSales, 0);
+  const merNet = net + mk.filter(m => m.inMer && !m.inSales).reduce((s, m) => s + m.netSales, 0);
   const metrics: Record<string, number> = {
     totalRevenue: Math.round(totalSales),
     netSales: Math.round(net),

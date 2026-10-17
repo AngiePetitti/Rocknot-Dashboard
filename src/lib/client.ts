@@ -70,6 +70,13 @@ export interface MarketplaceChannel {
    * CAC. Default false: excluded everywhere (Kailee P's Nordstrom).
    */
   countInMer?: boolean;
+  /**
+   * Count this channel in the Overview's sales, orders, AOV and daily revenue
+   * too (implies MER). Customers, new-customer CAC and the product, returns and
+   * traffic pages stay store-only: marketplace buyers aren't store customers
+   * (Amazon hides who they are, so every order would read as a new customer).
+   */
+  countInSales?: boolean;
   /** Sidebar icon: a path under /public (e.g. a brand mark) or an emoji. Default 🏬. */
   icon?: string;
 }
@@ -486,9 +493,9 @@ const SKIMPIES: ClientProfile = {
   // counted in MER: Meta ads drive Amazon sales, and TikTok Shop is organic. Fees and
   // commissions aren't in Shopify — fill commissionPct once known.
   marketplaces: [
-    { key: 'amazon', label: 'Amazon', shopifyChannel: 'Amazon Channel - CED', sourceMatch: 'amazon', commissionPct: null, returnFee: null, returnWindowDays: 30, countInMer: true, icon: '/brands/amazon.svg',
+    { key: 'amazon', label: 'Amazon', shopifyChannel: 'Amazon Channel - CED', sourceMatch: 'amazon', commissionPct: null, returnFee: null, returnWindowDays: 30, countInMer: true, countInSales: true, icon: '/brands/amazon.svg',
       description: 'Amazon orders synced into Shopify by CedCommerce · Shopify sales channel "Amazon Channel - CED" · Amazon fees are not in Shopify' },
-    { key: 'tiktok-shop', label: 'TikTok Shop', shopifyChannel: 'TikTok', sourceMatch: 'tiktok', commissionPct: null, returnFee: null, returnWindowDays: 30, countInMer: true, icon: '/brands/tiktok.svg',
+    { key: 'tiktok-shop', label: 'TikTok Shop', shopifyChannel: 'TikTok', sourceMatch: 'tiktok', commissionPct: null, returnFee: null, returnWindowDays: 30, countInMer: true, countInSales: true, icon: '/brands/tiktok.svg',
       description: 'TikTok Shop orders · Shopify sales channel "TikTok" · TikTok Shop fees are not in Shopify' },
   ],
   // Loop renewals arrive in Shopify as the "Loop Subscriptions" channel.
@@ -664,6 +671,15 @@ export function marketplaces(profile: ClientProfile = getClient()): MarketplaceC
  */
 export function storeOnlyWhere(profile: ClientProfile = getClient()): string {
   const list = marketplaces(profile);
+  if (!list.length) return '';
+  return 'WHERE ' + list.map(m => `sales_channel != '${m.shopifyChannel.replace(/'/g, "\\'")}'`).join(' AND ');
+}
+/**
+ * ShopifyQL WHERE clause for the Overview's sales, orders and AOV: like
+ * storeOnlyWhere, but keeps marketplace channels flagged countInSales.
+ */
+export function salesWhere(profile: ClientProfile = getClient()): string {
+  const list = marketplaces(profile).filter(m => !m.countInSales);
   if (!list.length) return '';
   return 'WHERE ' + list.map(m => `sales_channel != '${m.shopifyChannel.replace(/'/g, "\\'")}'`).join(' AND ');
 }
