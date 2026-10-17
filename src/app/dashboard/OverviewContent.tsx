@@ -74,7 +74,7 @@ interface LiveMetrics {
   humanSessions?: number;
   botSessions?: number;
   /** Marketplace channels excluded from every figure on this page (they have their own tab). */
-  marketplaces?: Array<{ key: string; label: string; netSales: number; totalSales: number; orders: number; returnFees: number; inMer?: boolean }>;
+  marketplaces?: Array<{ key: string; label: string; netSales: number; totalSales: number; orders: number; returnFees: number; inMer?: boolean; inSales?: boolean }>;
   /** MER numerator when marketplace sales count toward MER (all channels). */
   merNetSales?: number;
 }
@@ -704,7 +704,7 @@ export default function OverviewContent() {
               </div>
             </div>
             <p className="text-sm text-gray-400 mt-1">
-              {metrics.merNetSales !== undefined && metrics.merNetSales !== (metrics.netSales ?? metrics.totalRevenue) ? 'Net Sales (all channels)' : (metrics.returnFees ?? 0) > 0 ? 'Net Sales + Return Fees' : 'Net Sales'} ÷ {metrics.adCreditApplied ? 'Net Ad Spend' : 'Total Ad Spend'} ={' '}
+              {(metrics.merNetSales !== undefined && metrics.merNetSales !== (metrics.netSales ?? metrics.totalRevenue)) || metrics.marketplaces?.some(m => m.inSales) ? 'Net Sales (all channels)' : (metrics.returnFees ?? 0) > 0 ? 'Net Sales + Return Fees' : 'Net Sales'} ÷ {metrics.adCreditApplied ? 'Net Ad Spend' : 'Total Ad Spend'} ={' '}
               <span className="font-semibold text-gray-600">
                 {formatCurrency(metrics.merNetSales ?? metrics.netSales ?? metrics.totalRevenue)} ÷ {formatCurrency(metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend)}
               </span>
@@ -716,9 +716,9 @@ export default function OverviewContent() {
               )}
             </p>
             {!isPartner && metrics.marketplaces && metrics.marketplaces.length > 0 && (
-              <p className="text-[11px] text-amber-600 mt-1">
-                Online store only · {metrics.marketplaces.map(m => (
-                  <span key={m.key}>{m.label} ({m.orders.toLocaleString()} orders · {formatCurrency(m.netSales)} net) {m.inMer ? 'is counted in MER only — not in sales, orders, AOV or customers' : 'is not in any figure on this page'} — see the <Link href={`/dashboard/channel/${m.key}?tf=${tfRaw}`} className="underline">{m.label} tab</Link></span>
+              <p className={`text-[11px] mt-1 ${metrics.marketplaces.every(m => m.inSales) ? 'text-gray-400' : 'text-amber-600'}`}>
+                {metrics.marketplaces.every(m => m.inSales) ? 'All channels · ' : 'Online store only · '}{metrics.marketplaces.map((m, i) => (
+                  <span key={m.key}>{i > 0 && ' · '}{m.label} ({m.orders.toLocaleString()} orders · {formatCurrency(m.netSales)} net) {m.inSales ? 'is included in sales, orders, AOV and MER — not in customers or CAC' : m.inMer ? 'is counted in MER only — not in sales, orders, AOV or customers' : 'is not in any figure on this page'} — see the <Link href={`/dashboard/channel/${m.key}?tf=${tfRaw}`} className="underline">{m.label} tab</Link></span>
                 ))}
               </p>
             )}
