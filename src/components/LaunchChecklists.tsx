@@ -43,6 +43,14 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
   // parked "TBD" sit on the 1st of a month by convention, so a specific
   // future date means someone confirmed it (even if the old marker text
   // survived an edit made before the auto-clear fix).
+  // Checklists are for real launches and sales ONLY. An event typed Launch
+  // but channeled Email/SMS (or titled like a send) is a campaign task, not
+  // a product launch — it gets no 11-item playbook.
+  const needsChecklist = (e: MarketingEvent) =>
+    (e.type === 'launch' || e.type === 'sale') &&
+    !/email|sms/i.test(e.channel || '') &&
+    !/\b(email|sms|text)\b/i.test(e.title || '');
+
   const isTbd = (e: MarketingEvent) => {
     if (!/tbd|tbc|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || '')) return false;
     const day = Number((e.date || '').slice(8, 10));
@@ -64,7 +72,7 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
   // after launch day). completedCount keeps a quiet tally so finishing a
   // list reads as success, not as the card vanishing into a bug.
   const eligible = useMemo(() => events
-    .filter(e => (e.type === 'launch' || e.type === 'sale') && e.status !== 'done' && !isTbd(e) && daysUntil(e.date) >= -1 && daysUntil(e.date) <= 21), [events]);
+    .filter(e => needsChecklist(e) && e.status !== 'done' && !isTbd(e) && daysUntil(e.date) >= -1 && daysUntil(e.date) <= 21), [events]);
   const upcoming = useMemo(() => eligible
     .filter(e => !allChecked(e))
     .sort((a, b) => a.date.localeCompare(b.date)),
@@ -77,7 +85,7 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
   // marked Live or Done has launched: it is no longer "waiting on a date".
   const awaitingDate = useMemo(() => {
     return events
-      .filter(e => (e.type === 'launch' || e.type === 'sale') && isTbd(e) && e.status !== 'live' && e.status !== 'done' && daysUntil(e.date) >= -45)
+      .filter(e => needsChecklist(e) && isTbd(e) && e.status !== 'live' && e.status !== 'done' && daysUntil(e.date) >= -45)
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [events]);
   const [showAwaiting, setShowAwaiting] = useState(false);

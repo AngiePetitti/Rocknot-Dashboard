@@ -170,7 +170,7 @@ export default function OverviewContent() {
       }
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
       const inWindow = allEvents
-        .filter(e => (e.type === 'launch' || e.type === 'sale'))
+        .filter(e => (e.type === 'launch' || e.type === 'sale') && !/email|sms/i.test(e.channel || '') && !/\b(email|sms|text)\b/i.test(e.title || ''))
         .map(e => ({ e, days: Math.round((Date.parse(e.date) - Date.parse(today)) / 86400000) }))
         .filter(x => x.days >= -1 && x.days <= 7);
       const tbdCount = inWindow.filter(x => isTbd(x.e)).length;
