@@ -148,7 +148,7 @@ export default function OverviewContent() {
       fetch('/api/calendar', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
       fetch('/api/launch/checklist', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
     ]).then(([cal, play]) => {
-      const allEvents = ((cal?.events || []) as { id: string; title: string; date: string; type: string; description?: string }[]);
+      const allEvents = ((cal?.events || []) as { id: string; title: string; date: string; type: string; description?: string; channel?: string }[]);
       // A stale TBD marker must not override a real confirmed date: TBD
       // placeholders sit on the 1st by convention, so a specific future date
       // wins even if old marker text survived in the notes.
