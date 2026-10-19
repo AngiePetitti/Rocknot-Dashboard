@@ -756,10 +756,13 @@ export default function CalendarContent() {
                     {day}
                   </span>
                   {/* Up to 3 colored dots for events */}
-                  {dayEvents.length > 0 && (
+                  {(dayEvents.length > 0 || campaignsForDate(dateStr).length > 0) && (
                     <div className="flex gap-0.5 mt-0.5">
                       {dayEvents.slice(0, 3).map((ev, di) => (
                         <div key={di} className="w-1 h-1 rounded-full" style={{ backgroundColor: ev.color }} />
+                      ))}
+                      {campaignsForDate(dateStr).slice(0, 2).map(c => (
+                        <div key={c.id} className="w-1 h-1 rounded-full bg-sky-400" title={c.name} />
                       ))}
                     </div>
                   )}
@@ -787,6 +790,16 @@ export default function CalendarContent() {
                 <span className="text-base leading-none">+</span> Add
               </button>
             </div>
+            {campaignsForDate(selectedDate).map(c => (
+              <div key={c.id} onClick={() => setEmailModal(c)} className="flex items-start gap-2 p-2 rounded-lg cursor-pointer hover:bg-sky-50 transition-colors">
+                <span className="text-sm mt-0.5">{c.channel === 'sms' ? '💬' : '✉️'}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-gray-800 truncate">{c.name}</p>
+                  <p className="text-[11px] text-gray-400 capitalize">{c.channel === 'sms' ? 'SMS' : 'Email'} · {c.status}{c.sendTime ? ` · ${new Date(c.sendTime).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })} ET` : ''}</p>
+                </div>
+                <span className="text-xs text-gray-300">›</span>
+              </div>
+            ))}
             {selectedDayEvents.length === 0 ? (
               <p className="text-xs text-gray-400 pb-1">Tap &quot;+ Add&quot; to create an event for this day.</p>
             ) : (
