@@ -13,7 +13,7 @@
 
 import { JWT } from 'google-auth-library';
 
-export type EventType = 'deadline' | 'launch' | 'sale' | 'influencer' | 'content' | 'photo_shoot' | 'other';
+export type EventType = 'deadline' | 'launch' | 'sale' | 'influencer' | 'content' | 'photo_shoot' | 'email' | 'sms' | 'other';
 export type EventStatus = 'planned' | 'live' | 'done';
 
 export interface MarketingEvent {
@@ -35,13 +35,15 @@ export const TYPE_COLORS: Record<EventType, string> = {
   influencer: '#ec4899',
   content: '#3b82f6',
   photo_shoot: '#06b6d4',
+  email: '#0ea5e9',
+  sms: '#14b8a6',
   other: '#6b7280',
 };
 
 // Human labels used in the Sheet (and the dashboard dropdown) <-> internal type.
 const TYPE_TO_LABEL: Record<EventType, string> = {
   launch: 'Launch', sale: 'Sale', influencer: 'Influencer', content: 'Content Due',
-  photo_shoot: 'Photo Shoot', deadline: 'Deadline', other: 'Other',
+  photo_shoot: 'Photo Shoot', deadline: 'Deadline', email: 'Email', sms: 'SMS', other: 'Other',
 };
 function labelToType(label: string): EventType {
   const s = (label || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -51,6 +53,8 @@ function labelToType(label: string): EventType {
   if (s === 'content due' || s === 'content') return 'content';
   if (s === 'photo shoot' || s === 'photoshoot') return 'photo_shoot';
   if (s === 'deadline') return 'deadline';
+  if (s === 'email') return 'email';
+  if (s === 'sms') return 'sms';
   return 'other';
 }
 function labelToStatus(label: string): EventStatus | undefined {

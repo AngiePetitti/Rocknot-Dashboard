@@ -15,6 +15,8 @@ const TYPE_LABELS: Record<MarketingEvent['type'], string> = {
   influencer: 'Influencer',
   content: 'Content Due',
   photo_shoot: 'Photo Shoot',
+  email: 'Email',
+  sms: 'SMS',
   other: 'Other',
 };
 
@@ -25,6 +27,8 @@ const TYPE_COLORS: Record<MarketingEvent['type'], string> = {
   influencer: '#ec4899',
   content: '#3b82f6',
   photo_shoot: '#06b6d4',
+  email: '#0ea5e9',
+  sms: '#14b8a6',
   other: '#6b7280',
 };
 
@@ -35,6 +39,8 @@ const TYPE_BG: Record<MarketingEvent['type'], string> = {
   influencer: 'bg-pink-50 text-pink-700',
   content: 'bg-blue-50 text-blue-700',
   photo_shoot: 'bg-cyan-50 text-cyan-700',
+  email: 'bg-sky-50 text-sky-700',
+  sms: 'bg-teal-50 text-teal-700',
   other: 'bg-gray-100 text-gray-600',
 };
 
