@@ -735,11 +735,19 @@ export default function OverviewContent() {
               if (missing <= 0) return null;
               const shownSpend = metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend;
               const net = metrics.netSales ?? metrics.totalRevenue;
-              const corrected = shownSpend + missing > 0 ? net / (shownSpend + missing) : null;
+              // The reconcile window is 7 complete days; the shortfall must be
+              // scaled to THIS view's length before correcting its MER —
+              // adding a week's missing spend to a single morning's
+              // denominator once "estimated" a 0.39x MER on a 4x day.
+              const RECONCILE_DAYS = 7;
+              const viewDays = tfRaw === 'today' || tfRaw === 'yesterday' ? 1 : Math.max(1, revenueData.length);
+              const missingScaled = (missing / RECONCILE_DAYS) * Math.min(viewDays, RECONCILE_DAYS)
+                * (tfRaw === 'today' ? Math.max(0.2, new Date().getHours() / 24) : 1);
+              const corrected = shownSpend + missingScaled > 0 ? net / (shownSpend + missingScaled) : null;
               return (
                 <p className="text-[11px] font-semibold text-amber-600 mt-0.5">
-                  ⚠ PROVISIONAL — ad spend is still syncing (≈{formatCurrency(missing)} not yet counted over the check window).
-                  {corrected !== null && metrics.mer > 0 && <> True MER is likely closer to <b>{corrected.toFixed(2)}x</b>.</>}
+                  ⚠ PROVISIONAL — some ad spend is still syncing (≈{formatCurrency(missing)} short over the 7-day check window{viewDays <= 1 ? `, roughly ${formatCurrency(missingScaled)} of it belongs to this view` : ''}).
+                  {corrected !== null && metrics.mer > 0 && <> Adjusted for that, this view&apos;s MER is likely closer to <b>{corrected.toFixed(2)}x</b>.</>}
                 </p>
               );
             })()}
