@@ -21,7 +21,7 @@ import { PLATFORMS } from '@/src/lib/client';
 import NcacBreakdown from '@/src/components/NcacBreakdown';
 import MyTasksBanner from '@/src/components/MyTasksBanner';
 import DailyBrief from '@/src/components/DailyBrief';
-import MarketingExpenses from '@/src/components/MarketingExpenses';
+import MarketingExpenses, { type ExpensesPayload } from '@/src/components/MarketingExpenses';
 
 // MER runs on NET sales (post-discount/returns, excl. taxes+shipping); the
 // goal is the client profile's targetMer on that basis (Rocknot: 3.5x —
@@ -214,6 +214,21 @@ export default function OverviewContent() {
       .then(r => (r.ok ? r.json() : null))
       .then(d => { if (d && d.actual) setProfitBasis(d); })
       .catch(() => {});
+  }, [tfRaw, dateFrom, dateTo]);
+
+  // Marketing costs beyond ad spend (budgeting sheet) for the fully loaded
+  // panel; admin-only endpoint — undefined = loading, null = none/forbidden.
+  const [expenses, setExpenses] = useState<ExpensesPayload | null | undefined>(undefined);
+  useEffect(() => {
+    if (tfRaw === 'today') { setExpenses(null); return; }
+    setExpenses(undefined);
+    const params = new URLSearchParams({ tf: tfRaw });
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    fetch(`/api/expenses?${params}`, { cache: 'no-store' })
+      .then(async r => (r.ok ? r.json() : null))
+      .then(d => setExpenses(d && !d.error && d.range ? d : null))
+      .catch(() => setExpenses(null));
   }, [tfRaw, dateFrom, dateTo]);
 
   const [calEvents, setCalEvents] = useState<MarketingEvent[]>([]);
@@ -669,12 +684,28 @@ export default function OverviewContent() {
         </div>
       )}
 
-      {/* MER Hero */}
+      {/* MER Hero — two numbers, two owners: paid media MER (the agency's)
+          and fully loaded MER + contribution margin (the business's). */}
+      {(() => {
+        const netS = metrics.netSales ?? metrics.totalRevenue;
+        const adS = metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend;
+        const other = expenses ? expenses.range.nonAdMarketing : null;
+        const cogsPct = profitBasis?.cogsPct ?? (client.finance.grossMarginPct != null ? 100 - client.finance.grossMarginPct : null);
+        const totalMk = other != null ? adS + other : null;
+        const flMer = totalMk && totalMk > 0 ? netS / totalMk : null;
+        const contrib = cogsPct != null && totalMk != null ? netS - netS * (cogsPct / 100) - totalMk : null;
+        const cmPct = contrib != null && netS > 0 ? (contrib / netS) * 100 : null;
+        const flGoal = client.goals.targetFullyLoadedMer ?? null;
+        const floor = client.goals.contributionFloorPct ?? null;
+        const showLoaded = !isPartner && expenses !== null && tfRaw !== 'today';
+        const okFl = flMer != null && flGoal != null ? flMer >= flGoal : null;
+        const okCm = cmPct != null && floor != null ? cmPct >= floor : null;
+        return (
       <div className="mb-6">
-        <Card accentColor="#c4b5fd" className="flex flex-col sm:flex-row sm:items-center gap-6">
+        <Card accentColor="#c4b5fd" className={`grid gap-6 ${showLoaded ? 'lg:grid-cols-2 lg:divide-x lg:divide-gray-100' : ''}`}>
           <div className="flex-1">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-              MER — Marketing Efficiency Ratio
+              Paid media MER <span className="normal-case font-normal text-gray-300">· net sales ÷ ad spend · the agency&apos;s number</span>
             </p>
             <div className="flex items-end gap-3">
               <span
@@ -736,28 +767,56 @@ export default function OverviewContent() {
                 </p>
               );
             })()}
-          </div>
-          <div className="hidden sm:block w-px h-20 bg-gray-100" />
-          <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-4 sm:gap-8">
-            <div>
-              <p className="text-xs text-gray-400 uppercase tracking-wider">Revenue</p>
-              <p className="text-xl sm:text-2xl font-bold text-gray-800">{formatCurrency(metrics.totalRevenue)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400 uppercase tracking-wider">Ad Spend</p>
-              <p className="text-xl sm:text-2xl font-bold text-gray-800">{formatCurrency(metrics.totalAdSpend)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400 uppercase tracking-wider">Orders</p>
-              <p className="text-xl sm:text-2xl font-bold text-gray-800">{metrics.totalOrders.toLocaleString()}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400 uppercase tracking-wider">AOV</p>
-              <p className="text-xl sm:text-2xl font-bold text-gray-800">{formatCurrency(metrics.aov)}</p>
+            <div className="grid grid-cols-4 gap-3 mt-4 pt-3 border-t border-gray-100">
+              {([['Revenue', formatCurrency(metrics.totalRevenue)], ['Ad spend', formatCurrency(metrics.totalAdSpend)], ['Orders', metrics.totalOrders.toLocaleString()], ['AOV', formatCurrency(metrics.aov)]] as const).map(([k, v]) => (
+                <div key={k}><p className="text-[10px] text-gray-400 uppercase tracking-wider">{k}</p><p className="text-lg font-bold text-gray-800 tabular-nums">{v}</p></div>
+              ))}
             </div>
           </div>
+
+          {showLoaded && (
+            <div className="lg:pl-6">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+                Fully loaded MER <span className="normal-case font-normal text-gray-300">· net sales ÷ all marketing · the business&apos;s number</span>
+              </p>
+              {expenses === undefined ? (
+                <p className="text-sm text-gray-400 py-6">Loading marketing costs…</p>
+              ) : (
+                <>
+                  <div className="flex items-end gap-3">
+                    <span className="text-6xl font-black" style={{ color: okFl == null ? '#1e293b' : okFl ? '#22c55e' : '#ef4444' }}>{flMer != null ? formatROAS(flMer) : '—'}</span>
+                    {flGoal != null && (
+                      <div className="pb-2">
+                        <span className="text-sm font-bold px-2 py-1 rounded-lg" style={{ backgroundColor: okFl ? '#dcfce7' : '#fee2e2', color: okFl ? '#22c55e' : '#ef4444' }}>{okFl ? '✓ Above Goal' : '✗ Below Goal'}</span>
+                        <p className="text-xs text-gray-400 mt-1">Goal: {flGoal}x</p>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-400 mt-1">
+                    {formatCurrency(netS)} ÷ <span className="font-semibold text-gray-600">{formatCurrency(totalMk || 0)}</span>
+                    <span className="text-[11px]"> = {formatCurrency(adS)} ads + {formatCurrency(other || 0)} other marketing{expenses?.range.includesPlan ? ' (this month is plan until actuals land)' : ''}</span>
+                  </p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Other marketing = agency, content, email/SMS, tools, photoshoots, SEO, partnerships — from the budgeting sheet, prorated to these days · marketing is {netS > 0 && totalMk != null ? ((totalMk / netS) * 100).toFixed(1) : '—'}% of net sales</p>
+                  <div className="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-100">
+                    <div>
+                      <p className="text-[10px] text-gray-400 uppercase tracking-wider">Contribution margin</p>
+                      <p className="text-lg font-bold tabular-nums" style={{ color: okCm == null ? '#1e293b' : okCm ? '#16a34a' : '#dc2626' }}>{cmPct != null ? `${cmPct.toFixed(1)}%` : '—'}{floor != null && <span className="text-xs font-semibold text-gray-400 ml-1.5">floor {floor}%</span>}</p>
+                      <p className="text-[11px] text-gray-400">{contrib != null ? `${formatCurrency(contrib)} after COGS${cogsPct != null ? ` (${cogsPct}%)` : ''} and all marketing` : 'needs a gross margin on file'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-400 uppercase tracking-wider">Total marketing</p>
+                      <p className="text-lg font-bold text-gray-800 tabular-nums">{formatCurrency(totalMk || 0)}</p>
+                      <p className="text-[11px] text-gray-400">{expenses && expenses.range.budget > 0 ? `${(((totalMk || 0) / expenses.range.budget) * 100).toFixed(0)}% of the ${formatCurrency(expenses.range.budget)} budget for these days` : 'ads + other marketing'}</p>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </Card>
       </div>
+        );
+      })()}
 
       {/* Net profit — admin-only (basis endpoint 403s for others). Booked
           months show QuickBooks ACTUALS; only the unbooked remainder is
@@ -856,18 +915,27 @@ export default function OverviewContent() {
           accentColor="#fde68a"
           comparison={compareOn && priorPeriod ? { current: metrics.aov, prior: priorPeriod.aov, label: deltaLabel } : undefined}
         />
-        <MetricCard
-          title="Blended MER"
-          value={formatROAS(metrics.mer)}
-          subtitle="Across all platforms"
-          accentColor={metrics.mer >= MER_GOAL ? '#86efac' : '#fca5a5'}
-          valueColor={merColor}
-          comparison={compareOn && priorPeriod ? { current: metrics.mer, prior: priorPeriod.mer, label: deltaLabel } : undefined}
-          trend={!(compareOn && priorPeriod) ? {
-            value: metrics.mer >= MER_GOAL ? `Above ${MER_GOAL}x goal` : `Below ${MER_GOAL}x goal`,
-            positive: metrics.mer >= MER_GOAL,
-          } : undefined}
-        />
+        {expenses && tfRaw !== 'today' ? (
+          <MetricCard
+            title="Total Marketing"
+            value={formatCurrency((metrics.netAdSpend ?? metrics.totalAdSpend) + expenses.range.nonAdMarketing)}
+            subtitle={`${formatCurrency(metrics.netAdSpend ?? metrics.totalAdSpend)} ads + ${formatCurrency(expenses.range.nonAdMarketing)} other · ${(metrics.netSales ?? metrics.totalRevenue) > 0 ? ((((metrics.netAdSpend ?? metrics.totalAdSpend) + expenses.range.nonAdMarketing) / (metrics.netSales ?? metrics.totalRevenue)) * 100).toFixed(1) : '—'}% of net sales`}
+            accentColor="#a5b4fc"
+          />
+        ) : (
+          <MetricCard
+            title="Blended MER"
+            value={formatROAS(metrics.mer)}
+            subtitle="Across all platforms"
+            accentColor={metrics.mer >= MER_GOAL ? '#86efac' : '#fca5a5'}
+            valueColor={merColor}
+            comparison={compareOn && priorPeriod ? { current: metrics.mer, prior: priorPeriod.mer, label: deltaLabel } : undefined}
+            trend={!(compareOn && priorPeriod) ? {
+              value: metrics.mer >= MER_GOAL ? `Above ${MER_GOAL}x goal` : `Below ${MER_GOAL}x goal`,
+              positive: metrics.mer >= MER_GOAL,
+            } : undefined}
+          />
+        )}
       </div>
 
       {/* New vs Returning Customer Cards — hidden on Today: the customer
@@ -1003,7 +1071,7 @@ export default function OverviewContent() {
       {/* ── True profit: net sales − COGS − live ad spend − every other marketing
           cost from the budgeting sheet (admin-only; hides when no sheet). ── */}
       {!isPartner && tfRaw !== 'today' && (
-        <MarketingExpenses tf={tfRaw} dateFrom={dateFrom} dateTo={dateTo}
+        <MarketingExpenses tf={tfRaw} dateFrom={dateFrom} dateTo={dateTo} data={expenses === undefined ? undefined : expenses}
           netSales={metrics.netSales ?? metrics.totalRevenue} adSpend={metrics.netAdSpend ?? metrics.totalAdSpend}
           newCustomers={metrics.newCustomers ?? 0} cogsPct={profitBasis?.cogsPct ?? (client.finance.grossMarginPct != null ? 100 - client.finance.grossMarginPct : null)} />
       )}
