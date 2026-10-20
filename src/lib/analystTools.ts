@@ -202,6 +202,11 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: { date_from: { type: 'string', description: 'YYYY-MM-DD (optional)' }, date_to: { type: 'string', description: 'YYYY-MM-DD (optional)' } } },
   },
   {
+    name: 'get_return_rate',
+    description: "Return rate (refunded sales ÷ gross sales, Shopify) for a date range, with a trailing six-month baseline and a by-month series, and whether it is normal / elevated / high vs baseline. Use when asked about returns, refunds, or why paid MER (which is on net sales, after returns) moved. Shopify books a return when it is processed, so the newest weeks rise as returns land.",
+    input_schema: { type: 'object', properties: { date_from: { type: 'string', description: 'YYYY-MM-DD' }, date_to: { type: 'string', description: 'YYYY-MM-DD' } }, required: ['date_from', 'date_to'] },
+  },
+  {
     name: 'get_goals',
     description: "The company's monthly revenue goals and ad-spend budgets (the Goals tab plan, including which months are pinned/manually set). Compare against get_metrics actuals to judge pace toward the annual target.",
     input_schema: { type: 'object', properties: {} },
@@ -616,6 +621,14 @@ UNPAID SITE SESSIONS REFERRED BY: Pinterest ${st?.Pinterest?.sessions ?? 0} (${s
       const range = DATE_RE.test(from) && DATE_RE.test(to) && from <= to ? expensesForRange(sheet, from, to) : null;
       return expensesText(sheet, range);
     } catch (e) { return `Marketing expenses sheet unavailable: ${e instanceof Error ? e.message : String(e)}`; }
+  }
+
+  if (name === 'get_return_rate') {
+    const { returnsConfigured, fetchReturnsSummary, returnsText } = await import('@/src/lib/returns');
+    if (!returnsConfigured()) return 'Shopify is not connected for this client.';
+    if (!(DATE_RE.test(from) && DATE_RE.test(to) && from <= to)) return 'date_from and date_to (YYYY-MM-DD) are required.';
+    try { return returnsText(await fetchReturnsSummary(from, to)); }
+    catch (e) { return `Return rate unavailable: ${e instanceof Error ? e.message : String(e)}`; }
   }
 
   if (name === 'get_goals') {

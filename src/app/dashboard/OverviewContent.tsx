@@ -9,6 +9,7 @@ import { cachedJson, primeCache } from '@/src/lib/clientCache';
 import type { MarketingEvent } from '@/src/app/api/calendar/route';
 import { Timeframe, PlatformSpend, DailyRevenue } from '@/src/lib/mockData';
 import { formatCurrency, formatROAS, TIMEFRAME_LABELS, isLiveOverviewSource } from '@/src/lib/utils';
+import type { ReturnsSummary } from '@/src/lib/returns';
 import Header from '@/src/components/Header';
 import MetricCard from '@/src/components/ui/MetricCard';
 import Card from '@/src/components/ui/Card';
@@ -232,6 +233,21 @@ export default function OverviewContent() {
       .then(async r => (r.ok ? r.json() : null))
       .then(d => setExpenses(d && !d.error && d.range ? d : null))
       .catch(() => setExpenses(null));
+  }, [tfRaw, dateFrom, dateTo]);
+
+  // Return rate next to paid MER — MER stays on net sales; a returns spike
+  // shows here against a trailing baseline instead of reading as a worse MER.
+  const [returnsInfo, setReturnsInfo] = useState<ReturnsSummary | null>(null);
+  useEffect(() => {
+    setReturnsInfo(null);
+    if (tfRaw === 'today' || tfRaw === 'yesterday') return;
+    const params = new URLSearchParams({ tf: tfRaw });
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    fetch(`/api/returns?${params}`, { cache: 'no-store' })
+      .then(async r => (r.ok ? r.json() : null))
+      .then(d => setReturnsInfo(d && !d.error && d.range ? d : null))
+      .catch(() => setReturnsInfo(null));
   }, [tfRaw, dateFrom, dateTo]);
 
   const [calEvents, setCalEvents] = useState<MarketingEvent[]>([]);
@@ -744,6 +760,20 @@ export default function OverviewContent() {
               {correctedMer !== null && metrics.mer > 0 && (
                 <p className="text-[11px] font-semibold text-amber-600 mt-1">⚠ Provisional — about {formatCurrency(missingSpend)} of ad spend is still syncing; true MER is likely closer to {correctedMer.toFixed(2)}x.</p>
               )}
+              {returnsInfo && returnsInfo.range.ratePct != null && (() => {
+                const st = returnsInfo.status;
+                const tone = st === 'high' ? '#dc2626' : st === 'elevated' ? '#d97706' : '#16a34a';
+                const d = returnsInfo.deltaPts;
+                return (
+                  <p className="text-[11px] text-gray-500 mt-1.5 tabular-nums">
+                    Returns <span className="font-semibold" style={{ color: tone }}>{returnsInfo.range.ratePct}%</span> of gross sales
+                    {returnsInfo.baseline.ratePct != null && d != null ? (
+                      <> · baseline {returnsInfo.baseline.ratePct}% · <span className="font-semibold" style={{ color: tone }}>{d >= 0 ? '+' : ''}{d} pts</span>{st && st !== 'normal' && <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ backgroundColor: st === 'high' ? '#fee2e2' : '#fef3c7', color: tone }}>{st}</span>}</>
+                    ) : ' · no baseline yet'}
+                    {' · '}<Link href={`/dashboard/returns?tf=${tfRaw}${dateFrom ? `&date_from=${dateFrom}` : ''}${dateTo ? `&date_to=${dateTo}` : ''}`} className="underline hover:text-gray-700">Returns tab</Link>
+                  </p>
+                );
+              })()}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 mt-4 pt-3 border-t border-gray-100">
                 <Stat k="Revenue" v={formatCurrency(metrics.totalRevenue)} />
                 <Stat k="Ad spend" v={formatCurrency(metrics.totalAdSpend)} />
@@ -787,6 +817,7 @@ export default function OverviewContent() {
               <ul className="text-[11px] text-gray-500 mt-2 space-y-1 list-disc pl-4">
                 <li>Net sales = after discounts and returns, before taxes and shipping (total sales {formatCurrency(metrics.totalRevenue)}){(metrics.returnFees ?? 0) > 0 ? `; includes ${formatCurrency(metrics.returnFees!)} in return fees the store keeps` : ''}.</li>
                 <li>Paid media MER = net sales ÷ {metrics.adCreditApplied ? 'net ad spend' : 'ad spend'} on every platform{(metrics.adCreditApplied ?? 0) > 0 ? ` (${formatCurrency(metrics.adCreditApplied!)} Snapchat ad credit deducted; gross ${formatCurrency(metrics.totalAdSpend)})` : ''}. Goal {MER_GOAL}x is the agency&apos;s target.</li>
+                {returnsInfo && <li>Return rate = refunded sales ÷ gross sales for these days ({formatCurrency(returnsInfo.range.returns)} of {formatCurrency(returnsInfo.range.gross)}){returnsInfo.baseline.ratePct != null ? `; baseline is the ${returnsInfo.baseline.months} full month${returnsInfo.baseline.months === 1 ? '' : 's'} before this period (${returnsInfo.baseline.ratePct}%)` : ''}. Shopify counts a return in the period it is processed, so recent weeks rise as returns land. Paid MER stays on net sales; a jump here is a returns conversation, not a worse MER.</li>}
                 {showLoaded && <li>Fully loaded MER = net sales ÷ (ad spend + other marketing). Other marketing is agency, content, email/SMS, tools, photoshoots, SEO and partnerships from the budgeting sheet, prorated to these days{expenses?.range.includesPlan ? '; the current month is plan until actuals are entered' : ''}. Goal {flGoal ?? '—'}x is the business&apos;s target.</li>}
                 {showLoaded && <li>Contribution margin = net sales − cost of goods ({cogsPct ?? '—'}%) − all marketing, as a share of net sales. Floor {floor ?? '—'}%. Rent, non-marketing payroll and other overhead are not included.</li>}
                 {!isPartner && metrics.marketplaces && metrics.marketplaces.length > 0 && metrics.marketplaces.map(m => (
