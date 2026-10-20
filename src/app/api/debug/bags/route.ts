@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { shopifyDomain, getClient } from '@/src/lib/client';
+import { shopifyToken } from '@/src/lib/shopifyAuth';
 
 export const dynamic = 'force-dynamic';
 
-const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 const DOMAIN = shopifyDomain();
 
 // Lists every bag-ish row in the live inventory so we can walk through which
@@ -12,7 +12,7 @@ const DOMAIN = shopifyDomain();
 async function runShopifyQL(query: string) {
   const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await shopifyToken() },
     body: JSON.stringify({
       query: `{ shopifyqlQuery(query: ${JSON.stringify(query)}) {
         tableData { rows columns { name } } parseErrors

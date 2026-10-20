@@ -135,7 +135,7 @@ export async function fetchChannel(key: string, from: string, to: string, prior?
 
 /** Net / total sales and orders per marketplace channel for the range — what the
  *  store-only MER card subtracts from the all-channel figures. [] when none. */
-export interface MarketplaceTotals { key: string; label: string; netSales: number; totalSales: number; orders: number; returnFees: number }
+export interface MarketplaceTotals { key: string; label: string; netSales: number; totalSales: number; orders: number; returnFees: number; /** Counted in MER (profile countInMer or countInSales). */ inMer: boolean; /** Already inside the Overview's sales figures (profile countInSales). */ inSales: boolean }
 export async function fetchMarketplaceTotals(from: string, to: string): Promise<MarketplaceTotals[]> {
   const list = marketplaces();
   if (!list.length || !trafficConfigured()) return [];
@@ -143,7 +143,7 @@ export async function fetchMarketplaceTotals(from: string, to: string): Promise<
     try {
       const rows = await shopifyql(`FROM sales SHOW orders, net_sales, total_sales, return_fees WHERE sales_channel = ${lit(m.shopifyChannel)} SINCE ${from} UNTIL ${to}`, 12000);
       const r = rows[0] || {};
-      return { key: m.key, label: m.label, netSales: num(r.net_sales), totalSales: num(r.total_sales), orders: Math.round(num(r.orders)), returnFees: Math.abs(num(r.return_fees)) };
+      return { key: m.key, label: m.label, netSales: num(r.net_sales), totalSales: num(r.total_sales), orders: Math.round(num(r.orders)), returnFees: Math.abs(num(r.return_fees)), inMer: Boolean(m.countInMer || m.countInSales), inSales: Boolean(m.countInSales) };
     } catch {
       return null;
     }

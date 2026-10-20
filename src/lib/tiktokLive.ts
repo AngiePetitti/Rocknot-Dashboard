@@ -40,7 +40,9 @@ async function fetchWindsorDaily(
     // response must degrade to "no patch", never hang the whole dashboard.
     // Cached 10 min: Windsor itself refreshes hourly at best, so re-fetching
     // this on every dashboard load was pure added latency.
-    const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { next: { revalidate: 600 }, signal: AbortSignal.timeout(8000) });
+    // 20s budget: Windsor's slower connectors (TikTok especially) regularly
+    // exceed 8s, which silently dropped the patch and showed $0 spend.
+    const res = await fetch(`https://connectors.windsor.ai/${source}?${qs}`, { next: { revalidate: 600 }, signal: AbortSignal.timeout(20000) });
     const json = await res.json();
     if (json.error || !Array.isArray(json.data)) return null;
     const byDate = new Map<string, PlatformDay>();

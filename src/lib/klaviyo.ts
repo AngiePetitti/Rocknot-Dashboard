@@ -126,6 +126,17 @@ async function listCampaigns(channel: 'email' | 'sms'): Promise<KlaviyoCampaign[
   return out;
 }
 
+// Lightweight campaign feed for the Marketing Calendar: every campaign with
+// a send time (sent + scheduled/queued/draft-with-date), both channels.
+export async function listCampaignsForCalendar(): Promise<KlaviyoCampaign[]> {
+  if (!klaviyoConfigured()) return [];
+  const [email, sms] = await Promise.all([
+    listCampaigns('email').catch(() => [] as KlaviyoCampaign[]),
+    listCampaigns('sms').catch(() => [] as KlaviyoCampaign[]),
+  ]);
+  return [...email, ...sms].filter(c => c.sendTime);
+}
+
 async function placedOrderMetricId(): Promise<string | null> {
   let url: string | null = '/api/metrics';
   for (let page = 0; page < 4 && url; page++) {

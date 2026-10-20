@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { shopifyDomain } from '@/src/lib/client';
 import { isBigQueryConfigured, tableExists } from '@/src/lib/bigquery';
 import { getProductSales } from '@/src/lib/bqProducts';
+import { shopifyToken } from '@/src/lib/shopifyAuth';
 
 export const dynamic = 'force-dynamic';
 
-const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 const DOMAIN = shopifyDomain();
 
 function addDays(dateStr: string, days: number): string {
@@ -26,7 +26,7 @@ function rangeForTf(tfRaw: string): { from: string; to: string } {
 async function runShopifyQL(query: string) {
   const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await shopifyToken() },
     body: JSON.stringify({
       query: `{ shopifyqlQuery(query: ${JSON.stringify(query)}) {
         tableData { rows columns { name } } parseErrors

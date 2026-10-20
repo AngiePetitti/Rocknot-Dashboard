@@ -19,6 +19,10 @@ export async function middleware(req: NextRequest) {
   // beyond what the brief itself states.
   if (pathname.startsWith('/brief/')) return NextResponse.next();
 
+  // Slack Events API posts here with its own HMAC signature, verified inside
+  // the route — no dashboard session exists on Slack's servers.
+  if (pathname === '/api/slack/events') return NextResponse.next();
+
   // Vercel Cron / internal service calls authenticate with the CRON_SECRET
   // bearer token instead of a user session (used by the Monday restock alert).
   const cronSecret = (process.env.CRON_SECRET || '').trim();
@@ -30,7 +34,9 @@ export async function middleware(req: NextRequest) {
   // token.role === null means the periodic re-check found the user removed
   // from the allowlist — stop honoring the session even though the JWT is
   // otherwise still valid.
-  if (token && token.role !== null) {
+  // 30 days after signing in, the session no longer counts: sign in again.
+  const expired = Boolean(token) && typeof token!.signedInAt === 'number' && Math.floor(Date.now() / 1000) - (token!.signedInAt as number) > 60 * 60 * 24 * 30;
+  if (token && token.role !== null && !expired) {
     // Debug endpoints expose raw data — admins only.
     if (pathname.startsWith('/api/debug') && token.role !== 'admin') {
       return new NextResponse(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } });
@@ -61,5 +67,5 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   // Run on everything except Next internals and static assets.
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|icon.svg|robots.txt).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|icon.svg|brand-icon|brands/|robots.txt).*)'],
 };

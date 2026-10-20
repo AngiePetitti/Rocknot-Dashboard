@@ -8,7 +8,7 @@ import { buildCallouts } from '@/src/lib/callouts';
 import { cachedJson, primeCache } from '@/src/lib/clientCache';
 import type { MarketingEvent } from '@/src/app/api/calendar/route';
 import { Timeframe, PlatformSpend, DailyRevenue } from '@/src/lib/mockData';
-import { formatCurrency, formatROAS, TIMEFRAME_LABELS } from '@/src/lib/utils';
+import { formatCurrency, formatROAS, TIMEFRAME_LABELS, isLiveOverviewSource } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import MetricCard from '@/src/components/ui/MetricCard';
 import Card from '@/src/components/ui/Card';
@@ -74,7 +74,9 @@ interface LiveMetrics {
   humanSessions?: number;
   botSessions?: number;
   /** Marketplace channels excluded from every figure on this page (they have their own tab). */
-  marketplaces?: Array<{ key: string; label: string; netSales: number; totalSales: number; orders: number; returnFees: number }>;
+  marketplaces?: Array<{ key: string; label: string; netSales: number; totalSales: number; orders: number; returnFees: number; inMer?: boolean; inSales?: boolean }>;
+  /** MER numerator when marketplace sales count toward MER (all channels). */
+  merNetSales?: number;
 }
 
 interface PriorPeriod {
@@ -147,7 +149,7 @@ export default function OverviewContent() {
       fetch('/api/calendar', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
       fetch('/api/launch/checklist', { cache: 'no-store' }).then(r => r.json()).catch(() => null),
     ]).then(([cal, play]) => {
-      const allEvents = ((cal?.events || []) as { id: string; title: string; date: string; type: string; description?: string }[]);
+      const allEvents = ((cal?.events || []) as { id: string; title: string; date: string; type: string; description?: string; channel?: string }[]);
       // A stale TBD marker must not override a real confirmed date: TBD
       // placeholders sit on the 1st by convention, so a specific future date
       // wins even if old marker text survived in the notes.
@@ -169,7 +171,7 @@ export default function OverviewContent() {
       }
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
       const inWindow = allEvents
-        .filter(e => (e.type === 'launch' || e.type === 'sale'))
+        .filter(e => (e.type === 'launch' || e.type === 'sale') && !/email|sms/i.test(e.channel || '') && !/\b(email|sms|text)\b/i.test(e.title || ''))
         .map(e => ({ e, days: Math.round((Date.parse(e.date) - Date.parse(today)) / 86400000) }))
         .filter(x => x.days >= -1 && x.days <= 7);
       const tbdCount = inWindow.filter(x => isTbd(x.e)).length;
@@ -351,7 +353,7 @@ export default function OverviewContent() {
       data => {
         if (activeReqKey.current !== reqKey) return; // stale response — a newer timeframe is active
         const source = data.source || 'unknown';
-        if (source !== 'windsor_live' && source !== 'bigquery_live') {
+        if (!isLiveOverviewSource(source)) {
           setApiErrorDetail(typeof data.error === 'string' && data.error ? String(data.error).slice(0, 300) : null);
           setMetrics(EMPTY_METRICS);
           setRevenueData([]);
@@ -416,7 +418,12 @@ export default function OverviewContent() {
   // FULL total hides being ahead day-for-day when last month finished strong.
   const [sameDaysSnap, setSameDaysSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
 
+  // The forecast loads after the headline numbers: its three requests used to
+  // start at the same moment and compete with them for Shopify's rate limit.
+  const forecastStarted = useRef(false);
   useEffect(() => {
+    if (liveSource === 'loading' || forecastStarted.current) return;
+    forecastStarted.current = true;
     // Forecast pace must come from COMPLETE days only — MTD now includes
     // today's partial data (matching Shopify), so fetch 1st→yesterday
     // explicitly for the projection.
@@ -425,9 +432,9 @@ export default function OverviewContent() {
       const first = `${ty}-${String(tm).padStart(2, '0')}-01`;
       const yest = new Date(Date.UTC(ty, tm - 1, td - 1)).toISOString().slice(0, 10);
       cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
-        `/api/windsor?tf=custom&date_from=${first}&date_to=${yest}`,
+        `/api/windsor?tf=custom&date_from=${first}&date_to=${yest}&lite=1`,
         d => {
-          if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
+          if (isLiveOverviewSource(d.source) && d.metrics) {
             setMtdSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
           }
         }
@@ -438,23 +445,23 @@ export default function OverviewContent() {
       const prevM = prevLast.getMonth() + 1;
       const prevTo = Math.min(td - 1, prevLast.getDate());
       cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
-        `/api/windsor?tf=custom&date_from=${prevY}-${String(prevM).padStart(2, '0')}-01&date_to=${prevY}-${String(prevM).padStart(2, '0')}-${String(prevTo).padStart(2, '0')}`,
+        `/api/windsor?tf=custom&date_from=${prevY}-${String(prevM).padStart(2, '0')}-01&date_to=${prevY}-${String(prevM).padStart(2, '0')}-${String(prevTo).padStart(2, '0')}&lite=1`,
         d => {
-          if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
+          if (isLiveOverviewSource(d.source) && d.metrics) {
             setSameDaysSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
           }
         }
       );
     }
     cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
-      '/api/windsor?tf=last_month',
+      '/api/windsor?tf=last_month&lite=1',
       d => {
-        if ((d.source === 'windsor_live' || d.source === 'bigquery_live') && d.metrics) {
+        if (isLiveOverviewSource(d.source) && d.metrics) {
           setLastMonthSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
         }
       }
     );
-  }, []);
+  }, [liveSource]);
 
   const forecast = useMemo(() => {
     if (!mtdSnap) return null;
@@ -491,7 +498,7 @@ export default function OverviewContent() {
 
   const merColor = metrics.mer >= MER_GOAL ? '#22c55e' : '#ef4444';
   const merLabel = metrics.mer >= MER_GOAL ? '✓ Above Goal' : '✗ Below Goal';
-  const isLive = liveSource === 'windsor_live' || liveSource === 'bigquery_live';
+  const isLive = isLiveOverviewSource(liveSource);
 
   return (
     <div>
@@ -558,7 +565,7 @@ export default function OverviewContent() {
           {liveSource === 'loading'
             ? 'Loading Windsor data...'
             : isLive
-            ? `Live · Windsor.ai · Updated ${lastUpdated}`
+            ? `Live · ${liveSource === 'direct_live' ? 'Shopify + ad platforms direct' : 'Windsor.ai'} · Updated ${lastUpdated}`
             : `Data unavailable · ${lastUpdated}`}
         </span>
         <button
@@ -580,9 +587,9 @@ export default function OverviewContent() {
             fetch(`/api/windsor?${p}`, { cache: 'no-store' })
               .then(r => r.json())
               .then(data => {
-                if (data?.source === 'windsor_live' || data?.source === 'bigquery_live') primeCache(`/api/windsor?${p}`, data);
+                if (isLiveOverviewSource(data?.source)) primeCache(`/api/windsor?${p}`, data);
                 const source = data.source || 'unknown';
-                if (source !== 'windsor_live' && source !== 'bigquery_live') {
+                if (!isLiveOverviewSource(source)) {
                   setMetrics(EMPTY_METRICS);
                   setRevenueData([]);
                   setLivePlatformSpend(null);
@@ -690,7 +697,9 @@ export default function OverviewContent() {
           definitions live behind one "How these are calculated" toggle so
           the numbers read clean, especially on a phone. */}
       {(() => {
-        const netS = metrics.netSales ?? metrics.totalRevenue;
+        // MER's net sales can include marketplace channels for some clients (merNetSales).
+        const netS = metrics.merNetSales ?? metrics.netSales ?? metrics.totalRevenue;
+        const allChannels = (metrics.merNetSales !== undefined && metrics.merNetSales !== (metrics.netSales ?? metrics.totalRevenue)) || Boolean(metrics.marketplaces?.some(m => m.inSales));
         const adS = metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend;
         const other = expenses ? expenses.range.nonAdMarketing : null;
         const cogsPct = profitBasis?.cogsPct ?? (client.finance.grossMarginPct != null ? 100 - client.finance.grossMarginPct : null);
@@ -703,7 +712,12 @@ export default function OverviewContent() {
         const showLoaded = !isPartner && expenses !== null && tfRaw !== 'today';
         const okFl = flMer != null && flGoal != null ? flMer >= flGoal : null;
         const okCm = cmPct != null && floor != null ? cmPct >= floor : null;
-        const missingSpend = health && !health.allOk ? health.platforms.reduce((s, p) => s + (p.status === 'warn' && p.diff !== null && p.diff < 0 ? -p.diff : 0), 0) : 0;
+        // Reconcile shortfall is over a 7-day window; scale it to this view's
+        // length before correcting the MER (a week's gap on one morning once
+        // "estimated" 0.39x on a 4x day).
+        const missing7d = health && !health.allOk ? health.platforms.reduce((s, p) => s + (p.status === 'warn' && p.diff !== null && p.diff < 0 ? -p.diff : 0), 0) : 0;
+        const viewDays = tfRaw === 'today' || tfRaw === 'yesterday' ? 1 : Math.max(1, revenueData.length);
+        const missingSpend = (missing7d / 7) * Math.min(viewDays, 7) * (tfRaw === 'today' ? Math.max(0.2, new Date().getHours() / 24) : 1);
         const correctedMer = missingSpend > 0 && adS + missingSpend > 0 ? netS / (adS + missingSpend) : null;
         const Badge = ({ ok, goal }: { ok: boolean | null; goal: number | null }) => (goal == null || ok == null ? null : (
           <div className="pb-1.5 sm:pb-2">
@@ -721,7 +735,7 @@ export default function OverviewContent() {
             {/* Paid media */}
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Paid media MER</p>
-              <p className="text-[11px] text-gray-400 mb-1">Net sales ÷ ad spend · the agency&apos;s number</p>
+              <p className="text-[11px] text-gray-400 mb-1">Net sales{allChannels ? ' (all channels)' : ''} ÷ ad spend · the agency&apos;s number</p>
               <div className="flex items-end gap-3">
                 <span className="text-5xl sm:text-6xl font-black leading-none" style={{ color: merColor }}>{formatROAS(metrics.mer)}</span>
                 <Badge ok={metrics.mer >= MER_GOAL} goal={MER_GOAL} />
@@ -767,7 +781,7 @@ export default function OverviewContent() {
           {/* Definitions and exclusions, out of the way until wanted */}
           <div className="mt-4 pt-3 border-t border-gray-100">
             <button type="button" onClick={() => setShowDefs(v => !v)} className="text-[11px] font-semibold text-violet-600 hover:text-violet-800">
-              {showDefs ? 'Hide' : 'How these are calculated'}{!showDefs && !isPartner && metrics.marketplaces && metrics.marketplaces.length > 0 ? ` · online store only, ${metrics.marketplaces.map(m => m.label).join(', ')} excluded` : ''}
+              {showDefs ? 'Hide' : 'How these are calculated'}{!showDefs && !isPartner && metrics.marketplaces && metrics.marketplaces.length > 0 ? (metrics.marketplaces.every(m => m.inSales) ? ` · all channels incl. ${metrics.marketplaces.map(m => m.label).join(', ')}` : ` · online store only, ${metrics.marketplaces.filter(m => !m.inSales).map(m => m.label).join(', ')} excluded`) : ''}
             </button>
             {showDefs && (
               <ul className="text-[11px] text-gray-500 mt-2 space-y-1 list-disc pl-4">
@@ -776,7 +790,7 @@ export default function OverviewContent() {
                 {showLoaded && <li>Fully loaded MER = net sales ÷ (ad spend + other marketing). Other marketing is agency, content, email/SMS, tools, photoshoots, SEO and partnerships from the budgeting sheet, prorated to these days{expenses?.range.includesPlan ? '; the current month is plan until actuals are entered' : ''}. Goal {flGoal ?? '—'}x is the business&apos;s target.</li>}
                 {showLoaded && <li>Contribution margin = net sales − cost of goods ({cogsPct ?? '—'}%) − all marketing, as a share of net sales. Floor {floor ?? '—'}%. Rent, non-marketing payroll and other overhead are not included.</li>}
                 {!isPartner && metrics.marketplaces && metrics.marketplaces.length > 0 && metrics.marketplaces.map(m => (
-                  <li key={m.key}>Online store only. {m.label} ({m.orders.toLocaleString()} orders · {formatCurrency(m.netSales)} net) is not in any figure on this page — see the <Link href={`/dashboard/channel/${m.key}?tf=${tfRaw}`} className="underline">{m.label} tab</Link>.</li>
+                  <li key={m.key}>{m.label} ({m.orders.toLocaleString()} orders · {formatCurrency(m.netSales)} net) {m.inSales ? 'is included in sales, orders, AOV and MER, not in customers or CAC' : m.inMer ? 'is counted in MER only, not in sales, orders, AOV or customers' : 'is not in any figure on this page'} — see the <Link href={`/dashboard/channel/${m.key}?tf=${tfRaw}`} className="underline">{m.label} tab</Link>.</li>
                 ))}
               </ul>
             )}

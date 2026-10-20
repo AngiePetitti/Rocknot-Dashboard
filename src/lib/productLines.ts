@@ -1,6 +1,7 @@
 import { runShopifyQLRaw } from '@/src/lib/shopifyql';
 import { runQuery, getDataset, isBigQueryConfigured, tableExists, metaSource, googleSource } from '@/src/lib/bigquery';
 import { productLines, lineForProduct, shopifyDomain, metaAccountSql, hasPlatform, PLATFORMS, ProductLine, storeOnlyWhere } from '@/src/lib/client';
+import { shopifyConfigured } from '@/src/lib/shopifyAuth';
 
 // Per-product-line split of the Overview (e.g. women's vs kids):
 //   revenue + orders  — ShopifyQL grouped by product_type (Shopify's own numbers)
@@ -24,10 +25,9 @@ export interface LineResult {
   revenueShare: number;    // planned share, from the profile
 }
 
-const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 
 async function shopifyByProductType(from: string, to: string): Promise<Array<{ productType: string; netSales: number; totalSales: number; orders: number }>> {
-  if (!SHOPIFY_TOKEN) throw new Error('SHOPIFY_ACCESS_TOKEN not set');
+  if (!shopifyConfigured()) throw new Error('Shopify not configured — set SHOPIFY_ACCESS_TOKEN, or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET');
   const ql = `FROM sales SHOW net_sales, total_sales, orders GROUP BY product_type ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
   const q = { tableData: await runShopifyQLRaw(ql, { timeoutMs: 12000 }) };
   const cols: { name: string }[] = q?.tableData?.columns || [];

@@ -13,7 +13,7 @@
 
 import { JWT } from 'google-auth-library';
 
-export type EventType = 'deadline' | 'launch' | 'sale' | 'influencer' | 'content' | 'photo_shoot' | 'other';
+export type EventType = 'deadline' | 'launch' | 'sale' | 'influencer' | 'content' | 'photo_shoot' | 'email' | 'sms' | 'other';
 export type EventStatus = 'planned' | 'live' | 'done';
 
 export interface MarketingEvent {
@@ -35,13 +35,15 @@ export const TYPE_COLORS: Record<EventType, string> = {
   influencer: '#ec4899',
   content: '#3b82f6',
   photo_shoot: '#06b6d4',
+  email: '#0ea5e9',
+  sms: '#14b8a6',
   other: '#6b7280',
 };
 
 // Human labels used in the Sheet (and the dashboard dropdown) <-> internal type.
 const TYPE_TO_LABEL: Record<EventType, string> = {
   launch: 'Launch', sale: 'Sale', influencer: 'Influencer', content: 'Content Due',
-  photo_shoot: 'Photo Shoot', deadline: 'Deadline', other: 'Other',
+  photo_shoot: 'Photo Shoot', deadline: 'Deadline', email: 'Email', sms: 'SMS', other: 'Other',
 };
 function labelToType(label: string): EventType {
   const s = (label || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -51,6 +53,8 @@ function labelToType(label: string): EventType {
   if (s === 'content due' || s === 'content') return 'content';
   if (s === 'photo shoot' || s === 'photoshoot') return 'photo_shoot';
   if (s === 'deadline') return 'deadline';
+  if (s === 'email') return 'email';
+  if (s === 'sms') return 'sms';
   return 'other';
 }
 function labelToStatus(label: string): EventStatus | undefined {
@@ -90,18 +94,25 @@ async function getToken(): Promise<string> {
 }
 
 async function sheetsFetch(path: string, init?: RequestInit): Promise<unknown> {
-  const token = await getToken();
-  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}${path}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init?.headers || {}) },
-    cache: 'no-store',
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
+  // Google's per-minute read quota trips during bursts (dashboard + crons
+  // share one service account). 429s are transient — retry with backoff
+  // instead of failing the whole calendar load.
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 1500));
+    const token = await getToken();
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}${path}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init?.headers || {}) },
+      cache: 'no-store',
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) return json;
     const msg = (json as { error?: { message?: string } })?.error?.message || `Sheets API error ${res.status}`;
-    throw new Error(msg);
+    lastErr = new Error(msg);
+    if (res.status !== 429 && !/quota exceeded/i.test(msg)) break;
   }
-  return json;
+  throw lastErr || new Error('Sheets API error');
 }
 
 function newId(): string {

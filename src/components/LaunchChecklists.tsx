@@ -43,6 +43,14 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
   // parked "TBD" sit on the 1st of a month by convention, so a specific
   // future date means someone confirmed it (even if the old marker text
   // survived an edit made before the auto-clear fix).
+  // Checklists are for real launches and sales ONLY. An event typed Launch
+  // but channeled Email/SMS (or titled like a send) is a campaign task, not
+  // a product launch — it gets no 11-item playbook.
+  const needsChecklist = (e: MarketingEvent) =>
+    (e.type === 'launch' || e.type === 'sale') &&
+    !/email|sms/i.test(e.channel || '') &&
+    !/\b(email|sms|text)\b/i.test(e.title || '');
+
   const isTbd = (e: MarketingEvent) => {
     if (!/tbd|tbc|placeholder|to be confirmed|not confirmed|no confirmation/i.test(e.description || '')) return false;
     const day = Number((e.date || '').slice(8, 10));
@@ -55,24 +63,29 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
   // finished regardless of date, and a launch whose date has passed with
   // every checklist item checked has nothing left to show — it drops off
   // instead of lingering as "✓ ready".
-  const upcoming = useMemo(() => {
-    const allChecked = (e: MarketingEvent) => {
-      if (!template.length) return false;
-      const checks = byEvent[e.id] || {};
-      return template.every(t => checks[t.label]?.done);
-    };
-    return events
-      .filter(e => (e.type === 'launch' || e.type === 'sale') && e.status !== 'done' && !isTbd(e) && daysUntil(e.date) >= -1 && daysUntil(e.date) <= 21)
-      .filter(e => !(daysUntil(e.date) < 0 && allChecked(e)))
-      .sort((a, b) => a.date.localeCompare(b.date));
-  }, [events, template, byEvent]);
+  const allChecked = (e: MarketingEvent) => {
+    if (!template.length) return false;
+    const checks = byEvent[e.id] || {};
+    return template.every(t => checks[t.label]?.done);
+  };
+  // A fully checked checklist is DONE — it disappears immediately (not just
+  // after launch day). completedCount keeps a quiet tally so finishing a
+  // list reads as success, not as the card vanishing into a bug.
+  const eligible = useMemo(() => events
+    .filter(e => needsChecklist(e) && e.status !== 'done' && !isTbd(e) && daysUntil(e.date) >= -1 && daysUntil(e.date) <= 21), [events]);
+  const upcoming = useMemo(() => eligible
+    .filter(e => !allChecked(e))
+    .sort((a, b) => a.date.localeCompare(b.date)),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [eligible, template, byEvent]);
+  const completedCount = eligible.length - upcoming.length;
 
   // Undated launches wait in a compact holding list — checklist available,
   // nothing ever turns red until a real date is set on the event. An event
   // marked Live or Done has launched: it is no longer "waiting on a date".
   const awaitingDate = useMemo(() => {
     return events
-      .filter(e => (e.type === 'launch' || e.type === 'sale') && isTbd(e) && e.status !== 'live' && e.status !== 'done' && daysUntil(e.date) >= -45)
+      .filter(e => needsChecklist(e) && isTbd(e) && e.status !== 'live' && e.status !== 'done' && daysUntil(e.date) >= -45)
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [events]);
   const [showAwaiting, setShowAwaiting] = useState(false);
@@ -213,8 +226,11 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
 
         return (
           <>
+            {completedCount > 0 && (
+              <p className="text-[11px] text-green-600 font-semibold mb-2">✓ {completedCount} checklist{completedCount > 1 ? 's' : ''} completed — removed from the list</p>
+            )}
             {upcoming.length === 0 && awaitingDate.length === 0 && (
-              <p className="text-xs text-gray-400 py-2">No launches or sales on the calendar in the next 3 weeks. Add one above and its checklist appears here.</p>
+              <p className="text-xs text-gray-400 py-2">{completedCount > 0 ? 'All current launch checklists are complete. ' : ''}No open launch or sale checklists in the next 3 weeks.</p>
             )}
             {upcoming.length > 0 && (
               <div className="flex flex-col gap-2">{upcoming.map(ev => renderEvent(ev, false))}</div>

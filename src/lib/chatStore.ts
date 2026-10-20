@@ -46,18 +46,26 @@ async function getToken(): Promise<string> {
 }
 
 async function api(path: string, init?: RequestInit): Promise<Record<string, unknown>> {
-  const token = await getToken();
-  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets${path}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init?.headers || {}) },
-    cache: 'no-store',
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
+  // Sheets' per-minute quota trips during bursts (dashboards + crons share
+  // one service account); 429s are transient, so retry with backoff before
+  // surfacing — a swallowed read failure here once ERASED checklist state
+  // (empty read + save = wiped store).
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 1500));
+    const token = await getToken();
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets${path}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init?.headers || {}) },
+      cache: 'no-store',
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) return json as Record<string, unknown>;
     const msg = (json as { error?: { message?: string } })?.error?.message || `Sheets API error ${res.status}`;
-    throw new Error(msg);
+    lastErr = new Error(msg);
+    if (res.status !== 429 && !/quota exceeded/i.test(msg)) break;
   }
-  return json as Record<string, unknown>;
+  throw lastErr || new Error('Sheets API error');
 }
 
 // ── Chat-sheet id bookkeeping ────────────────────────────────────────────
@@ -414,6 +422,17 @@ async function ensureSettingsTab(sheetId: string): Promise<void> {
       body: JSON.stringify({ range: `${SETTINGS_TAB}!A1`, majorDimension: 'ROWS', values: [['Key', 'Value']] }),
     });
   } catch { /* tab already exists */ }
+}
+
+// Strict read: throws on API failure instead of returning null, so callers
+// can tell "key absent" from "read failed" — writers MUST use this before a
+// read-modify-write or a quota blip turns into data loss.
+export async function getKVStrict(key: string): Promise<string | null> {
+  const sheetId = await getChatSheetId(false);
+  if (!sheetId) return null;
+  const data = await api(`/${sheetId}/values/${SETTINGS_TAB}!A2:B`) as { values?: string[][] };
+  const row = (data.values || []).find(r => (r[0] || '').trim() === key);
+  return row ? (row[1] || '').trim() || null : null;
 }
 
 export async function getKV(key: string): Promise<string | null> {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getClient } from '@/src/lib/client';
 import { getKV, setKV } from '@/src/lib/chatStore';
+import { isLiveOverviewSource } from '@/src/lib/utils';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -21,12 +22,16 @@ interface Metrics {
 const fmt = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
 
 async function getMetrics(origin: string, headers: HeadersInit, qs: string): Promise<Metrics | null> {
-  try {
-    const r = await fetch(`${origin}/api/windsor?${qs}`, { cache: 'no-store', headers });
-    const d = await r.json();
-    if ((d?.source === 'windsor_live' || d?.source === 'bigquery_live') && d.metrics) return d.metrics as Metrics;
-    return null;
-  } catch { return null; }
+  // Retry before declaring the run blind — live queries hit throttles.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 8000));
+    try {
+      const r = await fetch(`${origin}/api/windsor?${qs}`, { cache: 'no-store', headers });
+      const d = await r.json();
+      if (isLiveOverviewSource(d?.source) && d.metrics) return d.metrics as Metrics;
+    } catch { /* retry */ }
+  }
+  return null;
 }
 
 function addDays(ds: string, n: number): string {
@@ -55,7 +60,21 @@ export async function GET(req: NextRequest) {
     getMetrics(req.nextUrl.origin, fwd, 'tf=today'),
     getMetrics(req.nextUrl.origin, fwd, `tf=custom&date_from=${addDays(today, -7)}&date_to=${addDays(today, -1)}`),
   ]);
-  if (!todayM || !trailing) return NextResponse.json({ ok: false, error: 'metrics unavailable' }, { status: 502 });
+  if (!todayM || !trailing) {
+    // A blind watchdog must say so (once per day) — silence has to mean
+    // "healthy", never "broken".
+    const blindKey = `pace_blind_${today}`;
+    const saidBlind = await getKV(blindKey).catch(() => null);
+    if (!saidBlind) {
+      await fetch(webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: `⚠️ ${client.name}: the pacing watchdog couldn't read metrics this run (data source slow/down) — MER is unmonitored until the next check. <https://${req.nextUrl.host}/dashboard?tf=today|Open live view →>` }),
+      }).catch(() => {});
+      await setKV(blindKey, new Date().toISOString()).catch(() => {});
+    }
+    return NextResponse.json({ ok: false, error: 'metrics unavailable — blind notice posted' }, { status: 502 });
+  }
 
   const todayNet = todayM.netSales ?? todayM.totalRevenue;
   const avgDaily = (trailing.netSales ?? trailing.totalRevenue) / 7;
@@ -90,6 +109,19 @@ export async function GET(req: NextRequest) {
       key: 'mer',
       text: `🟠 *${client.name}: MER ${mer.toFixed(2)}x — below the ${merGoal}x goal* with ${fmt(spend)} net spend vs ${fmt(todayNet)} net sales so far today.${mix ? `\nSpend mix: ${mix}.` : ''} This repeats every check-in until MER is back above goal.`,
     });
+  }
+
+  // Heartbeat: a one-line status every scheduled check, healthy or not —
+  // the operator asked for a pulse they can glance at, not just silence.
+  // Disable with PULSE_HEARTBEAT=off.
+  const heartbeat = (process.env.PULSE_HEARTBEAT || 'on').toLowerCase() !== 'off';
+  const hourLabel = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: true }).format(now);
+  if (heartbeat && !alerts.length && spend > 0) {
+    await fetch(webhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: `🟢 ${client.name} · ${hourLabel} ET — ${fmt(todayNet)} net today · MER ${mer.toFixed(2)}x · pacing ${pace.toFixed(0)}%` }),
+    }).catch(() => {});
   }
 
   if (!alerts.length) {

@@ -1,15 +1,24 @@
 import { runShopifyQLRaw } from '@/src/lib/shopifyql';
 import { NextRequest, NextResponse } from 'next/server';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
+import { fetchDirectCustomerMetrics } from '@/src/lib/shopifyCustomers';
+import { unstable_cache } from 'next/cache';
+
+// Long ranges run a Shopify bulk export (up to ~45 s), so allow the time and
+// keep each range's result: an hour for finished ranges, 10 minutes when the
+// range includes today.
+export const maxDuration = 60;
+const cachedDirectMetrics = (from: string, to: string, includesToday: boolean) =>
+  unstable_cache(() => fetchDirectCustomerMetrics(from, to), ['direct-customer-metrics', from, to], { revalidate: includesToday ? 600 : 3600 })();
 import { getCustomerMetrics, getCohortData } from '@/src/lib/bqCustomers';
 import { CustomerMetrics } from '@/src/lib/mockData';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
-import { shopifyDomain, storeOnlyWhere } from '@/src/lib/client';
+import { shopifyDomain, storeOnlyWhere, usesDirectData } from '@/src/lib/client';
+import { shopifyConfigured } from '@/src/lib/shopifyAuth';
 
 export const dynamic = 'force-dynamic';
 
-const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 const SHOPIFY_DOMAIN = shopifyDomain();
 
 function addDays(dateStr: string, days: number): string {
@@ -53,7 +62,7 @@ interface ShopifyCustomerTotals {
 // Returning-customer rate straight from Shopify so the headline matches
 // Shopify's own Customers report for the selected timeframe exactly.
 async function fetchShopifyCustomers(from: string, to: string): Promise<ShopifyCustomerTotals | null> {
-  if (!SHOPIFY_TOKEN) return null;
+  if (!shopifyConfigured()) return null;
   const ql = `FROM sales SHOW customers, returning_customers, returning_customer_rate ${storeOnlyWhere()} SINCE ${from} UNTIL ${to}`;
   const q = { tableData: await runShopifyQLRaw(ql, { timeoutMs: 12000 }) };
   const cols: { name: string }[] = q?.tableData?.columns || [];
@@ -80,6 +89,35 @@ export async function GET(request: NextRequest) {
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
   const { from, to } = rangeForTf(tfRaw, dateFrom, dateTo);
+
+  // Direct-data clients have no Windsor order table: read orders and lifetime
+  // customer figures straight from Shopify.
+  if (usesDirectData()) {
+    try {
+      const [direct, shopify] = await Promise.all([
+        cachedDirectMetrics(from, to, to >= new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })),
+        fetchShopifyCustomers(from, to).catch(() => null),
+      ]);
+      const totalCustomers = shopify?.customers ?? direct.activeCustomers;
+      const repeatCustomers = shopify?.returningCustomers ?? 0;
+      const { ordersRead, partial, ...metrics } = direct;
+      const customerMetrics: CustomerMetrics = {
+        ...metrics,
+        repeatPurchaserRate: shopify?.returningRate ?? (totalCustomers > 0 ? Math.round((repeatCustomers / totalCustomers) * 1000) / 10 : 0),
+        totalCustomers,
+        repeatCustomers,
+      };
+      const notes = ['Cohort retention is not yet calculated for stores connected directly to Shopify.'];
+      if (partial === 'cap') notes.unshift(`This range has more orders than the page reads at once, so order values and tiers cover its most recent ${ordersRead.toLocaleString()} orders. Shorter ranges (up to about two months) are complete.`);
+      if (partial === 'sixty-days') notes.unshift(`Order values and tiers cover the last 60 days only (${ordersRead.toLocaleString()} orders): the Shopify app does not have the read_all_orders permission.`);
+      return NextResponse.json(
+        { source: 'direct_live', customerMetrics, cohortData: [], note: notes.join(' ') },
+        { headers: cacheHeaders() },
+      );
+    } catch (e) {
+      return NextResponse.json({ source: 'error', error: e instanceof Error ? e.message : String(e), customerMetrics: null, cohortData: null });
+    }
+  }
 
   if (!isBigQueryConfigured()) {
     return NextResponse.json({ source: 'error', error: 'BigQuery not configured', customerMetrics: null, cohortData: null });

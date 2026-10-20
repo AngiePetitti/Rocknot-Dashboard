@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
-import { keepClientMetaRows, metaAccountId, hasPlatform, windsorParams } from '@/src/lib/client';
+import { keepClientMetaRows, metaAccountId, hasPlatform, windsorParams, usesDirectData } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -281,11 +281,33 @@ export async function GET(request: NextRequest) {
   const tfRaw = searchParams.get('tf') || '30d';
   const debug = searchParams.get('debug') === 'true';
 
-  if (!WINDSOR_API_KEY) {
-    return NextResponse.json({ source: 'error', error: 'Windsor API key not configured', creatives: [] });
-  }
-
   const params = buildDateParams(tfRaw, searchParams.get('date_from') || '', searchParams.get('date_to') || '');
+
+  // No Windsor for this client's ads: per-ad Meta numbers and media straight
+  // from the Graph API (other platforms join as their direct connections land).
+  if (usesDirectData()) {
+    if (!hasPlatform('meta')) return NextResponse.json({ source: 'direct_live', creatives: [] });
+    const metaMod = await import('@/src/lib/metaLive');
+    const ads = await metaMod.fetchMetaInsights(params.date_from, params.date_to, { level: 'ad' });
+    if (!ads) {
+      return NextResponse.json({ source: 'error', error: metaMod.lastMetaInsightsError || 'META_ACCESS_TOKEN is not set', creatives: [] });
+    }
+    // Same row shape the Windsor path aggregates, so ROAS/CTR/CPA math is shared.
+    const rows: CreativeRow[] = ads.map(a => ({
+      ad_id: a.adId, ad_name: a.adName, adset_name: a.adsetName, campaign: a.campaignName, account_id: a.accountId,
+      spend: a.spend, impressions: a.impressions, clicks: a.clicks,
+      action_values_omni_purchase: a.revenue, actions_omni_purchase: a.purchases,
+    }));
+    const creatives = aggregateCreatives(rows, 'Meta').sort((a, b) => b.spend - a.spend);
+    const media = await metaMod.fetchMetaAdMedia(creatives.slice(0, 100).map(c => c.id));
+    for (const c of creatives) {
+      c.thumbnailUrl = media?.[c.id]?.thumbnailUrl || null;
+      c.videoUrl = media?.[c.id]?.videoUrl || null;
+      c.previewUrl = media?.[c.id]?.previewUrl || null;
+      if (media?.[c.id]?.catalog) c.catalog = true;
+    }
+    return NextResponse.json({ source: 'direct_live', creatives }, { headers: cacheHeaders(tfRaw === 'today') });
+  }
   // Fixed wide window for thumbnail/video URL lookups, independent of `tf`,
   // so the request URL — and Next's revalidate: 3600 fetch cache — is
   // identical across timeframe switches.

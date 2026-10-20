@@ -15,6 +15,8 @@ const TYPE_LABELS: Record<MarketingEvent['type'], string> = {
   influencer: 'Influencer',
   content: 'Content Due',
   photo_shoot: 'Photo Shoot',
+  email: 'Email',
+  sms: 'SMS',
   other: 'Other',
 };
 
@@ -25,6 +27,8 @@ const TYPE_COLORS: Record<MarketingEvent['type'], string> = {
   influencer: '#ec4899',
   content: '#3b82f6',
   photo_shoot: '#06b6d4',
+  email: '#0ea5e9',
+  sms: '#14b8a6',
   other: '#6b7280',
 };
 
@@ -35,6 +39,8 @@ const TYPE_BG: Record<MarketingEvent['type'], string> = {
   influencer: 'bg-pink-50 text-pink-700',
   content: 'bg-blue-50 text-blue-700',
   photo_shoot: 'bg-cyan-50 text-cyan-700',
+  email: 'bg-sky-50 text-sky-700',
+  sms: 'bg-teal-50 text-teal-700',
   other: 'bg-gray-100 text-gray-600',
 };
 
@@ -106,6 +112,11 @@ export default function CalendarContent() {
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === 'admin';
   const [events, setEvents] = useState<MarketingEvent[]>([]);
+  // Klaviyo campaigns overlaid on the calendar (read-only; edits deep-link
+  // into Klaviyo). Email = ✉️, SMS = 💬.
+  interface CalCampaign { id: string; name: string; channel: 'email' | 'sms'; status: string; sendTime: string | null; recipients?: number; openRate?: number; revenue?: number }
+  const [klaviyoCampaigns, setKlaviyoCampaigns] = useState<CalCampaign[]>([]);
+  const [emailModal, setEmailModal] = useState<CalCampaign | null>(null);
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [{ year, month }, setView] = useState(todayObj());
   const [showModal, setShowModal] = useState(false);
@@ -120,6 +131,14 @@ export default function CalendarContent() {
 
   const showModalRef = useRef(false);
   useEffect(() => { showModalRef.current = showModal; }, [showModal]);
+  useEffect(() => {
+    fetch('/api/calendar/emails', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d?.campaigns)) setKlaviyoCampaigns(d.campaigns); })
+      .catch(() => {});
+  }, []);
+  const campaignDate = (c: CalCampaign) => c.sendTime ? new Date(c.sendTime).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) : '';
+  const campaignsForDate = (dateStr: string) => klaviyoCampaigns.filter(c => campaignDate(c) === dateStr);
 
   const refreshEvents = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -601,6 +620,16 @@ export default function CalendarContent() {
                     {(spans.length + singles.length) > 3 && (
                       <div className="text-[10px] text-gray-400 px-1">+{spans.length + singles.length - 3} more</div>
                     )}
+                    {campaignsForDate(dateStr).slice(0, 2).map(c => (
+                      <div
+                        key={c.id}
+                        onClick={e => { e.stopPropagation(); setEmailModal(c); }}
+                        className={`truncate text-[10px] font-medium px-1 py-0.5 rounded cursor-pointer hover:opacity-80 ${c.status === 'sent' ? 'bg-sky-50 text-sky-600' : 'bg-sky-100 text-sky-700 border border-sky-200'}`}
+                        title={`${c.channel === 'sms' ? 'SMS' : 'Email'}: ${c.name} (${c.status})`}
+                      >
+                        {c.channel === 'sms' ? '💬' : '✉️'} {c.name}
+                      </div>
+                    ))}
                   </div>
                   {showPerf && dateStr <= todayDateStr && perf[dateStr] && perf[dateStr].revenue > 0 && (
                     <div className="mt-0.5 text-[9px] font-semibold text-emerald-600 text-right leading-none" title={`Revenue ${money(perf[dateStr].revenue)} · Ad spend ${money(perf[dateStr].spend)}`}>
@@ -618,7 +647,16 @@ export default function CalendarContent() {
                 <p className="text-xs font-semibold text-gray-700">{formatDisplayDate(selectedDate)}</p>
                 <button onClick={() => openNew(selectedDate)} className="text-xs text-violet-600 hover:text-violet-700 font-medium">+ Add event</button>
               </div>
-              {selectedDayEvents.length === 0 ? (
+              {campaignsForDate(selectedDate).map(c => (
+                <div key={c.id} onClick={() => setEmailModal(c)} className="flex items-start gap-2 p-2 rounded-lg cursor-pointer hover:bg-sky-50 transition-colors">
+                  <span className="text-xs mt-0.5">{c.channel === 'sms' ? '💬' : '✉️'}</span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-gray-800 truncate">{c.name}</p>
+                    <p className="text-[10px] text-gray-400 capitalize">{c.channel === 'sms' ? 'SMS' : 'Email'} · {c.status}{c.sendTime ? ` · ${new Date(c.sendTime).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })} ET` : ''}</p>
+                  </div>
+                </div>
+              ))}
+              {selectedDayEvents.length === 0 && campaignsForDate(selectedDate).length === 0 ? (
                 <p className="text-xs text-gray-400">No events. Click &quot;+ Add event&quot; to create one.</p>
               ) : (
                 <div className="space-y-1.5">
@@ -724,10 +762,13 @@ export default function CalendarContent() {
                     {day}
                   </span>
                   {/* Up to 3 colored dots for events */}
-                  {dayEvents.length > 0 && (
+                  {(dayEvents.length > 0 || campaignsForDate(dateStr).length > 0) && (
                     <div className="flex gap-0.5 mt-0.5">
                       {dayEvents.slice(0, 3).map((ev, di) => (
                         <div key={di} className="w-1 h-1 rounded-full" style={{ backgroundColor: ev.color }} />
+                      ))}
+                      {campaignsForDate(dateStr).slice(0, 2).map(c => (
+                        <div key={c.id} className="w-1 h-1 rounded-full bg-sky-400" title={c.name} />
                       ))}
                     </div>
                   )}
@@ -755,6 +796,16 @@ export default function CalendarContent() {
                 <span className="text-base leading-none">+</span> Add
               </button>
             </div>
+            {campaignsForDate(selectedDate).map(c => (
+              <div key={c.id} onClick={() => setEmailModal(c)} className="flex items-start gap-2 p-2 rounded-lg cursor-pointer hover:bg-sky-50 transition-colors">
+                <span className="text-sm mt-0.5">{c.channel === 'sms' ? '💬' : '✉️'}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-gray-800 truncate">{c.name}</p>
+                  <p className="text-[11px] text-gray-400 capitalize">{c.channel === 'sms' ? 'SMS' : 'Email'} · {c.status}{c.sendTime ? ` · ${new Date(c.sendTime).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })} ET` : ''}</p>
+                </div>
+                <span className="text-xs text-gray-300">›</span>
+              </div>
+            ))}
             {selectedDayEvents.length === 0 ? (
               <p className="text-xs text-gray-400 pb-1">Tap &quot;+ Add&quot; to create an event for this day.</p>
             ) : (
@@ -822,6 +873,42 @@ export default function CalendarContent() {
           </Card>
         )}
       </div>
+
+      {/* ── Klaviyo campaign modal: details + deep link to edit in Klaviyo ── */}
+      {emailModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setEmailModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start gap-2">
+              <span className="text-xl">{emailModal.channel === 'sms' ? '💬' : '✉️'}</span>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-sm font-bold text-gray-900">{emailModal.name}</h2>
+                <p className="text-[11px] text-gray-400 capitalize mt-0.5">
+                  {emailModal.channel === 'sms' ? 'SMS' : 'Email'} campaign · {emailModal.status}
+                  {emailModal.sendTime && <> · {new Date(emailModal.sendTime).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} ET</>}
+                </p>
+              </div>
+              <button onClick={() => setEmailModal(null)} aria-label="Close" className="text-gray-300 hover:text-gray-600 p-1">✕</button>
+            </div>
+            {(emailModal.recipients || emailModal.revenue) ? (
+              <div className="grid grid-cols-3 gap-2 mt-4 text-center">
+                <div className="bg-gray-50 rounded-xl py-2"><p className="text-[10px] text-gray-400 uppercase font-semibold">Recipients</p><p className="text-sm font-bold text-gray-800">{(emailModal.recipients ?? 0).toLocaleString()}</p></div>
+                <div className="bg-gray-50 rounded-xl py-2"><p className="text-[10px] text-gray-400 uppercase font-semibold">Open rate</p><p className="text-sm font-bold text-gray-800">{emailModal.openRate != null ? `${(emailModal.openRate * 100).toFixed(1)}%` : '—'}</p></div>
+                <div className="bg-gray-50 rounded-xl py-2"><p className="text-[10px] text-gray-400 uppercase font-semibold">Revenue</p><p className="text-sm font-bold text-gray-800">{emailModal.revenue != null ? money(emailModal.revenue) : '—'}</p></div>
+              </div>
+            ) : null}
+            <div className="flex items-center gap-3 mt-5">
+              <a
+                href={`https://www.klaviyo.com/campaign/${emailModal.id}`}
+                target="_blank" rel="noopener noreferrer"
+                className="text-xs font-semibold bg-violet-600 text-white rounded-lg px-3 py-2"
+              >
+                {emailModal.status === 'sent' ? 'View in Klaviyo ↗' : 'Edit in Klaviyo ↗'}
+              </a>
+              <p className="text-[10px] text-gray-400 flex-1">Content, audience and send time are edited in Klaviyo — changes show here on the next refresh.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Event Modal ── */}
       {showModal && (

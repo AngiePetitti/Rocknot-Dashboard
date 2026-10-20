@@ -21,9 +21,9 @@ function forPartner<T extends { metrics?: unknown }>(payload: T, partner: boolea
 }
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
-import { fetchMetaToday } from '@/src/lib/metaLive';
+import { fetchMetaToday, fetchMetaDaily } from '@/src/lib/metaLive';
 import { fetchSnapToday } from '@/src/lib/snapLive';
-import { metaAccountNameMatch, hasPlatform, windsorParams } from '@/src/lib/client';
+import { metaAccountNameMatch, hasPlatform, windsorParams, usesDirectData } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -458,6 +458,79 @@ function addDays(dateStr: string, days: number): string {
   return d.toISOString().split('T')[0];
 }
 
+
+// ── Direct mode: clients with no Windsor key (Skimpies) ─────────────────────
+// Sales come straight from Shopify (ShopifyQL, per day) and Meta spend straight
+// from the Graph API, so the Overview works without any Windsor connection.
+// Platforms with no direct connection yet simply contribute no spend.
+interface DirectPeriod {
+  metrics: Record<string, number>;
+  revenueData: Array<{ date: string; revenue: number; orders: number; adSpend: number }>;
+  shopifyError: string | null;
+}
+
+async function directPeriod(from: string, to: string, lite = false): Promise<DirectPeriod> {
+  const [shopify, meta, split] = await Promise.all([
+    fetchShopifyDaily(from, to)
+      .then(rows => ({ rows, err: null as string | null }))
+      .catch((e: unknown) => ({ rows: [] as Awaited<ReturnType<typeof fetchShopifyDaily>>, err: e instanceof Error ? e.message : String(e) })),
+    hasPlatform('meta') ? fetchMetaDaily(from, to).catch(() => null) : Promise.resolve(null),
+    lite ? Promise.resolve(null) : fetchShopifyCustomerSplit(from, to).catch(() => null),
+  ]);
+
+  const byDate = new Map<string, { date: string; revenue: number; orders: number; adSpend: number }>();
+  const day = (date: string) => {
+    if (!byDate.has(date)) byDate.set(date, { date, revenue: 0, orders: 0, adSpend: 0 });
+    return byDate.get(date)!;
+  };
+  let totalSales = 0, netSales = 0, returnFees = 0, aovBasis = 0, orders = 0;
+  for (const d of shopify.rows) {
+    totalSales += d.totalSales; netSales += d.netSales; returnFees += d.returnFees; aovBasis += d.aovBasis; orders += d.orders;
+    const r = day(d.date); r.revenue += d.totalSales; r.orders += d.orders;
+  }
+  let metaSpend = 0, metaRevenue = 0;
+  for (const d of meta ?? []) {
+    metaSpend += d.spend; metaRevenue += d.revenue;
+    day(d.date).adSpend += d.spend;
+  }
+
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const net = netSales || totalSales;
+  // Marketplace channels flagged countInSales are already in the sales above;
+  // those flagged only countInMer add their net sales to MER's numerator.
+  const mk = lite ? [] : await fetchMarketplaceTotals(from, to).catch(() => []);
+  const merNet = net + mk.filter(m => m.inMer && !m.inSales).reduce((s, m) => s + m.netSales, 0);
+  const metrics: Record<string, number> = {
+    totalRevenue: Math.round(totalSales),
+    netSales: Math.round(net),
+    returnFees: Math.round(returnFees),
+    totalOrders: orders,
+    totalAdSpend: round2(metaSpend),
+    aov: orders > 0 ? round2((aovBasis > 0 ? aovBasis : net - returnFees) / orders) : 0,
+    mer: metaSpend > 0 ? round2(merNet / metaSpend) : 0,
+    merNetSales: Math.round(merNet),
+    returns: 0,
+    metaSpend: round2(metaSpend), metaRevenue: Math.round(metaRevenue),
+    googleSpend: 0, googleRevenue: 0, tiktokSpend: 0, tiktokRevenue: 0,
+    snapchatSpend: 0, snapchatRevenue: 0, pinterestSpend: 0, pinterestRevenue: 0,
+  };
+  if (split) {
+    const customers = split.newCustomers + split.returningCustomers;
+    Object.assign(metrics, {
+      newCustomers: split.newCustomers, returningCustomers: split.returningCustomers,
+      newCustomerRevenue: Math.round(split.newRevenue), returningCustomerRevenue: Math.round(split.returningRevenue),
+      pctNew: customers > 0 ? Math.round((split.newCustomers / customers) * 1000) / 10 : 0,
+      pctReturning: customers > 0 ? Math.round((split.returningCustomers / customers) * 1000) / 10 : 0,
+    });
+  }
+  if (mk.length) (metrics as unknown as Record<string, unknown>).marketplaces = mk;
+  return {
+    metrics,
+    revenueData: Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date)).map(r => ({ ...r, revenue: Math.round(r.revenue), adSpend: Math.round(r.adSpend) })),
+    shopifyError: shopify.err,
+  };
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const tfRaw = searchParams.get('tf') || '30d';
@@ -469,12 +542,52 @@ export async function GET(request: NextRequest) {
   const compareMode = parseCompareMode(searchParams.get('compare_to'));
   const debug = searchParams.get('debug') === 'true';
 
-  if (!WINDSOR_API_KEY) {
-    return NextResponse.json({ source: 'error', error: 'Windsor API key not configured', timeframe: tf, metrics: null, revenueData: [] });
-  }
-
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const yesterdayStr = addDays(todayStr, -1);
+
+  if (usesDirectData()) {
+    // No Windsor for this client's sales/ads: build the Overview from Shopify + Meta directly.
+    try {
+      const cur = isCustom && dateFrom && dateTo ? { date_from: dateFrom, date_to: dateTo } : buildCurrentParams(tf, todayStr, yesterdayStr);
+      // lite=1: totals only (the Overview's forecast) — skips the customer split.
+      const lite = searchParams.get('lite') === '1';
+      const current = await directPeriod(cur.date_from, cur.date_to, lite);
+      let priorPeriod = null, priorLabel = '';
+      if (withCompare) {
+        let pr: { from: string; to: string; label: string };
+        if (compareMode !== 'prior') {
+          const r = priorRangeFor(compareMode, isCustom ? 'custom' : tf, cur.date_from, cur.date_to);
+          pr = { from: r.from, to: r.to, label: r.label };
+        } else if (isCustom && dateFrom && dateTo) {
+          const days = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1;
+          pr = { from: addDays(dateFrom, -days), to: addDays(dateFrom, -1), label: '' };
+          pr.label = `${pr.from} – ${pr.to}`;
+        } else {
+          const p = buildPriorParams(tf, todayStr, yesterdayStr);
+          pr = { from: p.params.date_from, to: p.params.date_to, label: p.label };
+        }
+        const prior = await directPeriod(pr.from, pr.to);
+        const m = prior.metrics;
+        priorPeriod = { totalRevenue: m.totalRevenue, totalAdSpend: m.totalAdSpend, totalOrders: m.totalOrders, aov: m.aov, mer: m.mer, metaSpend: m.metaSpend, googleSpend: m.googleSpend };
+        priorLabel = pr.label;
+      }
+      const hasSales = current.metrics.totalRevenue > 0 || current.metrics.totalOrders > 0;
+      return NextResponse.json(forPartner({
+        source: 'direct_live',
+        timeframe: tf,
+        dateFrom: dateFrom || null,
+        dateTo: dateTo || null,
+        revenueSource: hasSales ? 'shopify' : 'none',
+        shopifySource: 'shopifyql',
+        ...(current.shopifyError && !hasSales ? { shopifyLiveError: current.shopifyError } : {}),
+        metrics: current.metrics,
+        revenueData: current.revenueData,
+        ...(priorPeriod ? { priorPeriod, priorLabel, compareMode } : {}),
+      }, await partnerSession()), { headers: cacheHeaders(cur.date_to >= todayStr) });
+    } catch (err) {
+      return NextResponse.json({ source: 'error', error: err instanceof Error ? err.message : 'Unknown error', timeframe: tf, metrics: null, revenueData: [] });
+    }
+  }
 
   try {
     let currentParams: Record<string, string>;

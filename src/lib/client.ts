@@ -9,7 +9,7 @@
 // client with env vars only.
 //
 // Selecting the client (checked in this order):
-//   1. CLIENT env var            — "rocknot" | "kaileep"
+//   1. CLIENT env var            — "rocknot" | "kaileep" | "skimpies"
 //   2. BQ_DATASET env var        — a dataset named after a known client
 //   3. default                   — "kaileep"
 //
@@ -17,7 +17,7 @@
 // src/components/ClientProvider.tsx (the root layout hands the profile down).
 // Keep profiles JSON-serialisable: they cross the server → browser boundary.
 
-export type ClientId = 'rocknot' | 'kaileep';
+export type ClientId = 'rocknot' | 'kaileep' | 'skimpies';
 
 // Every ad platform the dashboard knows how to read. A client lists the ones
 // it actually runs; queries and UI for the rest are skipped.
@@ -64,6 +64,21 @@ export interface MarketplaceChannel {
   returnWindowDays: number;
   /** One line for the tab subtitle. */
   description: string;
+  /**
+   * Count this channel's net sales in MER (ads drive or don't distort it),
+   * while keeping it out of the store's sales, orders, AOV, customers and
+   * CAC. Default false: excluded everywhere (Kailee P's Nordstrom).
+   */
+  countInMer?: boolean;
+  /**
+   * Count this channel in the Overview's sales, orders, AOV and daily revenue
+   * too (implies MER). Customers, new-customer CAC and the product, returns and
+   * traffic pages stay store-only: marketplace buyers aren't store customers
+   * (Amazon hides who they are, so every order would read as a new customer).
+   */
+  countInSales?: boolean;
+  /** Sidebar icon: a path under /public (e.g. a brand mark) or an emoji. Default 🏬. */
+  icon?: string;
 }
 
 export interface ProductLine {
@@ -229,6 +244,25 @@ export interface ClientProfile {
   };
   /** Rocknot's one-time data seed routes (reorders, calendar) only make sense for Rocknot. */
   seedsEnabled: boolean;
+  /**
+   * Sales and ad numbers (Overview, Ad Performance, Creative Analysis) come
+   * straight from Shopify and each ad platform's API instead of Windsor —
+   * even when WINDSOR_API_KEY is set for other sources such as Instagram.
+   */
+  directData?: boolean;
+  /**
+   * The client's own admins (e.g. owner and operator). Admins straight away;
+   * copied once into the Team & Access list when that store is first
+   * available, after which they are ordinary, removable admins — unlike
+   * AUTH_ADMINS, which are permanent.
+   */
+  startingAdmins?: string[];
+  /**
+   * Subscription app whose renewal orders land in Shopify as their own sales
+   * channel (e.g. Loop). Turns on the Subscriptions tab. Omit when the brand
+   * sells no subscriptions.
+   */
+  subscriptions?: { provider: 'loop'; shopifyChannel: string };
 }
 
 const ROCKNOT: ClientProfile = {
@@ -272,7 +306,7 @@ const ROCKNOT: ClientProfile = {
       // Organic Content tab sources (Windsor "Pinterest Organic" / "Instagram
       // Insights" data sources). null = not connected: the tab says so.
       pinterest_organic: null,
-      instagram: null,
+      instagram: '17841450822497159', // Instagram Insights (Oct 2026)
       // Google Analytics 4 (Traffic tab → Google Analytics view). null = the
       // view is hidden and Cleo's get_site_analytics says not connected.
       google_analytics: null,
@@ -398,10 +432,88 @@ const KAILEEP: ClientProfile = {
   seedsEnabled: false,
 };
 
-export const CLIENTS: Record<ClientId, ClientProfile> = { rocknot: ROCKNOT, kaileep: KAILEEP };
+// Skimpies — new client (Oct 2026). Profile scaffolded ahead of onboarding:
+// every account id is unset, so REST calls for those sources are skipped
+// rather than reading another client's data from the shared Windsor
+// workspace. Fill each blank in as the account details arrive (see the
+// README's onboarding checklist).
+const SKIMPIES: ClientProfile = {
+  id: 'skimpies',
+  name: 'Skimpies',
+  wordmark: 'SKIMPIES',
+  initial: 'S',
+  logo: '', // drop a file at public/skimpies-logo.png and set this to '/skimpies-logo.png'
+  theme: { accentFrom: '#60a5fa', accentTo: '#2563eb', loginMark: '#3b82f6', icon: { from: '#3b82f6', to: '#1d4ed8' } },
+  siteDomain: '', // storefront domain — set once confirmed
+  dashboardUrl: 'https://skimpies-dashboard.vercel.app',
+  storagePrefix: 'skimpies',
+  legalEntity: 'Skimpies',
+  brand: {
+    // Placeholder until the brand brief lands; the AI Insights page's brand
+    // brief (KV) overrides the prompt defaults without a code change.
+    description: 'Skimpies is a DTC eCommerce brand selling on Shopify.',
+    founder: null,
+    aov: null,
+    contentAngles: 'product styling, customer reviews and UGC, behind-the-scenes',
+  },
+  shopify: { defaultDomain: '63674c.myshopify.com' }, // Dev Dashboard app "A6 Dashboard - Skimpies" (Oct 2026)
+  ads: {
+    platforms: ['meta', 'google'],
+    metaAccountNameMatch: 'skimpies',
+    metaAccountNameMode: 'contains',
+    metaAccountIdDefault: '551437367250692', // "Skimpies's ad account", via Area 6's A6-dashboard system user (Oct 2026)
+  },
+  finance: { qbAccountMatch: 'skimpies', grossMarginPct: null, expensesSheet: null },
+  revenue: { includeReturnFees: false },
+  windsor: {
+    accounts: {
+      // null = not connected yet: the REST call is skipped. Set the ids from
+      // Skimpies' Windsor → BigQuery tasks (select_accounts=) as they're added,
+      // or override per source with WINDSOR_ACCOUNT_<SOURCE> env vars.
+      facebook: null,
+      shopify: null,
+      google_ads: null,
+      tiktok: null,
+      snapchat: null,
+      pinterest: null,
+      quickbooks: null,
+      pinterest_organic: null,
+      instagram: '17841454886028910', // Instagram Insights (Oct 2026) — the only Windsor source Skimpies uses
+      google_analytics: null,
+    },
+  },
+  // No targets agreed yet — the Goals tab asks for the annual target; the
+  // MER/ROAS/CAC bars start from agency defaults until the plan lands.
+  goals: { defaultAnnualTarget: 0, targetMer: 3, targetRoas: 3, targetCac: 50 },
+  inventory: { mode: 'standard' },
+  creatives: { founderTrack: null, driveFolders: [] },
+  alerts: { fromName: 'Skimpies Dashboard' },
+  analyst: { name: 'Cleo' },
+  seedsEnabled: false,
+  // Shopify and Meta are connected directly; Windsor only serves Instagram.
+  directData: true,
+  // Marketplace orders synced into Shopify (Oct 2026 sales-channel check: in
+  // 30 days Amazon brought 531 orders, every one a "new customer" because
+  // Amazon hides the buyer, and TikTok Shop 102 new customers). Excluded from
+  // the store's sales / CAC / AOV / customers (each gets its own tab), but
+  // counted in MER: Meta ads drive Amazon sales, and TikTok Shop is organic. Fees and
+  // commissions aren't in Shopify — fill commissionPct once known.
+  marketplaces: [
+    { key: 'amazon', label: 'Amazon', shopifyChannel: 'Amazon Channel - CED', sourceMatch: 'amazon', commissionPct: null, returnFee: null, returnWindowDays: 30, countInMer: true, countInSales: true, icon: '/brands/amazon.svg',
+      description: 'Amazon orders synced into Shopify by CedCommerce · Shopify sales channel "Amazon Channel - CED" · Amazon fees are not in Shopify' },
+    { key: 'tiktok-shop', label: 'TikTok Shop', shopifyChannel: 'TikTok', sourceMatch: 'tiktok', commissionPct: null, returnFee: null, returnWindowDays: 30, countInMer: true, countInSales: true, icon: '/brands/tiktok.svg',
+      description: 'TikTok Shop orders · Shopify sales channel "TikTok" · TikTok Shop fees are not in Shopify' },
+  ],
+  // Loop renewals arrive in Shopify as the "Loop Subscriptions" channel.
+  subscriptions: { provider: 'loop', shopifyChannel: 'Loop Subscriptions' },
+  // Owner, operator and team (Oct 2026).
+  startingAdmins: ['bettebentley@me.com', 'rebeccaneises@gmail.com', 'briansantamaria@gmail.com'],
+};
+
+export const CLIENTS: Record<ClientId, ClientProfile> = { rocknot: ROCKNOT, kaileep: KAILEEP, skimpies: SKIMPIES };
 
 function isClientId(v: string): v is ClientId {
-  return v === 'rocknot' || v === 'kaileep';
+  return v === 'rocknot' || v === 'kaileep' || v === 'skimpies';
 }
 
 let warnedUnset = false;
@@ -420,6 +532,7 @@ export function getClientId(): ClientId {
     || (metaId && metaId === ROCKNOT.ads.metaAccountIdDefault) || Boolean((process.env.SNAP_AD_ACCOUNT_ID || '').trim());
   if (looksRocknot) return 'rocknot';
   if (ds.includes('kailee') || shop.includes('kailee')) return 'kaileep';
+  if (ds.includes('skimpies') || shop.includes('skimpies')) return 'skimpies';
 
   if (!warnedUnset && typeof process !== 'undefined' && process.env.NODE_ENV === 'production') {
     warnedUnset = true;
@@ -436,6 +549,15 @@ export function getClient(): ClientProfile {
 
 export function clientPlatforms(profile: ClientProfile = getClient()): PlatformDef[] {
   return profile.ads.platforms.map(k => PLATFORMS[k]);
+}
+
+/**
+ * Whether sales and ad numbers come straight from Shopify and the ad platforms
+ * (no Windsor): set on the profile, or implied when the deployment has no
+ * Windsor key at all.
+ */
+export function usesDirectData(profile: ClientProfile = getClient()): boolean {
+  return Boolean(profile.directData) || !(process.env.WINDSOR_API_KEY || '').trim();
 }
 
 export function hasPlatform(key: PlatformKey, profile: ClientProfile = getClient()): boolean {
@@ -555,6 +677,15 @@ export function marketplaces(profile: ClientProfile = getClient()): MarketplaceC
  */
 export function storeOnlyWhere(profile: ClientProfile = getClient()): string {
   const list = marketplaces(profile);
+  if (!list.length) return '';
+  return 'WHERE ' + list.map(m => `sales_channel != '${m.shopifyChannel.replace(/'/g, "\\'")}'`).join(' AND ');
+}
+/**
+ * ShopifyQL WHERE clause for the Overview's sales, orders and AOV: like
+ * storeOnlyWhere, but keeps marketplace channels flagged countInSales.
+ */
+export function salesWhere(profile: ClientProfile = getClient()): string {
+  const list = marketplaces(profile).filter(m => !m.countInSales);
   if (!list.length) return '';
   return 'WHERE ' + list.map(m => `sales_channel != '${m.shopifyChannel.replace(/'/g, "\\'")}'`).join(' AND ');
 }

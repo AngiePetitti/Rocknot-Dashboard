@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { shopifyDomain, getClient } from '@/src/lib/client';
 import { cacheHeaders } from '@/src/lib/cacheHeaders';
+import { shopifyConfigured, shopifyToken } from '@/src/lib/shopifyAuth';
 
 export const dynamic = 'force-dynamic';
 
-const TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 const DOMAIN = shopifyDomain();
 // Rocknot's hand-audited bag/strap consolidation rules only apply to Rocknot's
 // catalog. Every other client gets the standard model: one row per variant.
@@ -84,7 +84,7 @@ function isPublicBag(title: string, category: string, keys: Set<string>): boolea
 async function runShopifyQL(query: string) {
   const res = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await shopifyToken() },
     body: JSON.stringify({
       query: `{ shopifyqlQuery(query: ${JSON.stringify(query)}) {
         tableData { rows columns { name } }
@@ -136,7 +136,7 @@ async function fetchVariantPrices(): Promise<{ byKey: Map<string, number>; byPro
       }`;
       const res: Response = await fetch(`https://${DOMAIN}/admin/api/2026-04/graphql.json`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': TOKEN },
+        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await shopifyToken() },
         body: JSON.stringify({ query, variables: { cursor } }),
         cache: 'no-store',
       });
@@ -174,7 +174,7 @@ function statusFor(stock: number, days: number | null): InventoryItem['status'] 
 }
 
 export async function GET() {
-  if (!TOKEN) {
+  if (!shopifyConfigured()) {
     return NextResponse.json({ source: 'error', error: 'Shopify token not configured', items: [] });
   }
 

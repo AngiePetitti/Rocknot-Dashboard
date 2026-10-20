@@ -7,14 +7,14 @@
 import { shopifyDomain, hasPlatform, metaAccountSql, getClient, storeOnlyWhere } from '@/src/lib/client';
 import { shopifyql as sharedShopifyql } from '@/src/lib/shopifyql';
 import { runQuery, getDataset, metaSource } from '@/src/lib/bigquery';
+import { shopifyConfigured } from '@/src/lib/shopifyAuth';
 
-const SHOPIFY_TOKEN = (process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
 const SHOPIFY_DOMAIN = shopifyDomain();
 
 export type Row = Record<string, string>;
 
 export function trafficConfigured(): boolean {
-  return Boolean(SHOPIFY_TOKEN && SHOPIFY_DOMAIN);
+  return shopifyConfigured();
 }
 
 export async function shopifyql(ql: string, timeoutMs = 20000): Promise<Row[]> {

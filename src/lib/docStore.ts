@@ -1,6 +1,6 @@
 // Chunked large-value storage on the private sheet's Settings tab — for
 // documents that exceed one cell (briefs, plans, brand guidelines).
-import { getKV, setKV } from '@/src/lib/chatStore';
+import { getKVStrict, setKV } from '@/src/lib/chatStore';
 
 const CHUNK = 40000;
 
@@ -12,10 +12,13 @@ export async function saveDoc(name: string, value: string): Promise<void> {
   }
 }
 
+// Strict reads: a storage failure THROWS instead of reading as "no
+// document" — callers doing load-modify-save must never mistake a quota
+// blip for an empty store (that combination erased live checklist data).
 export async function loadDoc(name: string): Promise<string | null> {
-  const parts = Number(await getKV(`${name}_parts`)) || 0;
+  const parts = Number(await getKVStrict(`${name}_parts`)) || 0;
   if (!parts) return null;
   let out = '';
-  for (let i = 0; i < parts; i++) out += (await getKV(`${name}_${i}`)) || '';
+  for (let i = 0; i < parts; i++) out += (await getKVStrict(`${name}_${i}`)) || '';
   return out || null;
 }
