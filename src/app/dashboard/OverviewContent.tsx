@@ -111,6 +111,7 @@ export default function OverviewContent() {
   const [liveSource, setLiveSource] = useState<string>('loading');
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [dataLag, setDataLag] = useState<boolean>(false);
+  const [showDefs, setShowDefs] = useState(false);
   const [latestAvailableDate, setLatestAvailableDate] = useState<string | null>(null);
   const [shopifyDataLag, setShopifyDataLag] = useState<boolean>(false);
   const [shopifyLatestDate, setShopifyLatestDate] = useState<string | null>(null);
@@ -685,7 +686,9 @@ export default function OverviewContent() {
       )}
 
       {/* MER Hero — two numbers, two owners: paid media MER (the agency's)
-          and fully loaded MER + contribution margin (the business's). */}
+          and fully loaded MER + contribution margin (the business's). The
+          definitions live behind one "How these are calculated" toggle so
+          the numbers read clean, especially on a phone. */}
       {(() => {
         const netS = metrics.netSales ?? metrics.totalRevenue;
         const adS = metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend;
@@ -700,172 +703,86 @@ export default function OverviewContent() {
         const showLoaded = !isPartner && expenses !== null && tfRaw !== 'today';
         const okFl = flMer != null && flGoal != null ? flMer >= flGoal : null;
         const okCm = cmPct != null && floor != null ? cmPct >= floor : null;
+        const missingSpend = health && !health.allOk ? health.platforms.reduce((s, p) => s + (p.status === 'warn' && p.diff !== null && p.diff < 0 ? -p.diff : 0), 0) : 0;
+        const correctedMer = missingSpend > 0 && adS + missingSpend > 0 ? netS / (adS + missingSpend) : null;
+        const Badge = ({ ok, goal }: { ok: boolean | null; goal: number | null }) => (goal == null || ok == null ? null : (
+          <div className="pb-1.5 sm:pb-2">
+            <span className="text-xs sm:text-sm font-bold px-2 py-1 rounded-lg whitespace-nowrap" style={{ backgroundColor: ok ? '#dcfce7' : '#fee2e2', color: ok ? '#22c55e' : '#ef4444' }}>{ok ? '✓ Above goal' : '✗ Below goal'}</span>
+            <p className="text-[11px] text-gray-400 mt-1">Goal {goal}x</p>
+          </div>
+        ));
+        const Stat = ({ k, v, tone }: { k: string; v: string; tone?: string }) => (
+          <div className="min-w-0"><p className="text-[10px] text-gray-400 uppercase tracking-wider truncate">{k}</p><p className="text-base sm:text-lg font-bold tabular-nums truncate" style={{ color: tone || '#1e293b' }}>{v}</p></div>
+        );
         return (
       <div className="mb-6">
-        <Card accentColor="#c4b5fd" className={`grid gap-6 ${showLoaded ? 'lg:grid-cols-2 lg:divide-x lg:divide-gray-100' : ''}`}>
-          <div className="flex-1">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-              Paid media MER <span className="normal-case font-normal text-gray-300">· net sales ÷ ad spend · the agency&apos;s number</span>
-            </p>
-            <div className="flex items-end gap-3">
-              <span
-                className="text-6xl font-black"
-                style={{ color: merColor }}
-              >
-                {formatROAS(metrics.mer)}
-              </span>
-              <div className="pb-2">
-                <span
-                  className="text-sm font-bold px-2 py-1 rounded-lg"
-                  style={{
-                    backgroundColor: metrics.mer >= MER_GOAL ? '#dcfce7' : '#fee2e2',
-                    color: merColor,
-                  }}
-                >
-                  {merLabel}
-                </span>
-                <p className="text-xs text-gray-400 mt-1">Goal: {MER_GOAL}x</p>
+        <Card accentColor="#c4b5fd">
+          <div className={`grid gap-6 ${showLoaded ? 'lg:grid-cols-2 lg:divide-x lg:divide-gray-100' : ''}`}>
+            {/* Paid media */}
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Paid media MER</p>
+              <p className="text-[11px] text-gray-400 mb-1">Net sales ÷ ad spend · the agency&apos;s number</p>
+              <div className="flex items-end gap-3">
+                <span className="text-5xl sm:text-6xl font-black leading-none" style={{ color: merColor }}>{formatROAS(metrics.mer)}</span>
+                <Badge ok={metrics.mer >= MER_GOAL} goal={MER_GOAL} />
+              </div>
+              <p className="text-sm text-gray-500 mt-2 tabular-nums">{formatCurrency(netS)} ÷ {formatCurrency(adS)}</p>
+              {correctedMer !== null && metrics.mer > 0 && (
+                <p className="text-[11px] font-semibold text-amber-600 mt-1">⚠ Provisional — about {formatCurrency(missingSpend)} of ad spend is still syncing; true MER is likely closer to {correctedMer.toFixed(2)}x.</p>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 mt-4 pt-3 border-t border-gray-100">
+                <Stat k="Revenue" v={formatCurrency(metrics.totalRevenue)} />
+                <Stat k="Ad spend" v={formatCurrency(metrics.totalAdSpend)} />
+                <Stat k="Orders" v={metrics.totalOrders.toLocaleString()} />
+                <Stat k="AOV" v={formatCurrency(metrics.aov)} />
               </div>
             </div>
-            <p className="text-sm text-gray-400 mt-1">
-              {(metrics.returnFees ?? 0) > 0 ? 'Net Sales + Return Fees' : 'Net Sales'} ÷ {metrics.adCreditApplied ? 'Net Ad Spend' : 'Total Ad Spend'} ={' '}
-              <span className="font-semibold text-gray-600">
-                {formatCurrency(metrics.netSales ?? metrics.totalRevenue)} ÷ {formatCurrency(metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend)}
-              </span>
-            </p>
-            <p className="text-[11px] text-gray-400 mt-0.5">
-              Net sales = after discounts &amp; returns, excl. taxes/shipping (total sales {formatCurrency(metrics.totalRevenue)})
-              {(metrics.returnFees ?? 0) > 0 && (
-                <> · includes {formatCurrency(metrics.returnFees!)} in return fees the store keeps</>
-              )}
-            </p>
-            {!isPartner && metrics.marketplaces && metrics.marketplaces.length > 0 && (
-              <p className="text-[11px] text-amber-600 mt-1">
-                Online store only · {metrics.marketplaces.map(m => (
-                  <span key={m.key}>{m.label} ({m.orders.toLocaleString()} orders · {formatCurrency(m.netSales)} net) is not in any figure on this page — see the <Link href={`/dashboard/channel/${m.key}?tf=${tfRaw}`} className="underline">{m.label} tab</Link></span>
-                ))}
-              </p>
-            )}
-            {(metrics.adCreditApplied ?? 0) > 0 && (
-              <p className="text-[11px] text-emerald-600 mt-0.5">
-                🎁 {formatCurrency(metrics.adCreditApplied!)} Snapchat ad credit deducted (gross spend {formatCurrency(metrics.totalAdSpend)})
-              </p>
-            )}
-            {/* When the reconcile check says spend is under-synced, the MER
-                itself is provisional — say so ON the number, with the
-                corrected estimate, so nobody trades on a flattered ratio. */}
-            {health && !health.allOk && (() => {
-              const missing = health.platforms.reduce((s, p) => s + (p.status === 'warn' && p.diff !== null && p.diff < 0 ? -p.diff : 0), 0);
-              if (missing <= 0) return null;
-              const shownSpend = metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend;
-              const net = metrics.netSales ?? metrics.totalRevenue;
-              const corrected = shownSpend + missing > 0 ? net / (shownSpend + missing) : null;
-              return (
-                <p className="text-[11px] font-semibold text-amber-600 mt-0.5">
-                  ⚠ PROVISIONAL — ad spend is still syncing (≈{formatCurrency(missing)} not yet counted over the check window).
-                  {corrected !== null && metrics.mer > 0 && <> True MER is likely closer to <b>{corrected.toFixed(2)}x</b>.</>}
-                </p>
-              );
-            })()}
-            <div className="grid grid-cols-4 gap-3 mt-4 pt-3 border-t border-gray-100">
-              {([['Revenue', formatCurrency(metrics.totalRevenue)], ['Ad spend', formatCurrency(metrics.totalAdSpend)], ['Orders', metrics.totalOrders.toLocaleString()], ['AOV', formatCurrency(metrics.aov)]] as const).map(([k, v]) => (
-                <div key={k}><p className="text-[10px] text-gray-400 uppercase tracking-wider">{k}</p><p className="text-lg font-bold text-gray-800 tabular-nums">{v}</p></div>
-              ))}
-            </div>
-          </div>
 
-          {showLoaded && (
-            <div className="lg:pl-6">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-                Fully loaded MER <span className="normal-case font-normal text-gray-300">· net sales ÷ all marketing · the business&apos;s number</span>
-              </p>
-              {expenses === undefined ? (
-                <p className="text-sm text-gray-400 py-6">Loading marketing costs…</p>
-              ) : (
-                <>
-                  <div className="flex items-end gap-3">
-                    <span className="text-6xl font-black" style={{ color: okFl == null ? '#1e293b' : okFl ? '#22c55e' : '#ef4444' }}>{flMer != null ? formatROAS(flMer) : '—'}</span>
-                    {flGoal != null && (
-                      <div className="pb-2">
-                        <span className="text-sm font-bold px-2 py-1 rounded-lg" style={{ backgroundColor: okFl ? '#dcfce7' : '#fee2e2', color: okFl ? '#22c55e' : '#ef4444' }}>{okFl ? '✓ Above Goal' : '✗ Below Goal'}</span>
-                        <p className="text-xs text-gray-400 mt-1">Goal: {flGoal}x</p>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-sm text-gray-400 mt-1">
-                    {formatCurrency(netS)} ÷ <span className="font-semibold text-gray-600">{formatCurrency(totalMk || 0)}</span>
-                    <span className="text-[11px]"> = {formatCurrency(adS)} ads + {formatCurrency(other || 0)} other marketing{expenses?.range.includesPlan ? ' (this month is plan until actuals land)' : ''}</span>
-                  </p>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Other marketing = agency, content, email/SMS, tools, photoshoots, SEO, partnerships — from the budgeting sheet, prorated to these days · marketing is {netS > 0 && totalMk != null ? ((totalMk / netS) * 100).toFixed(1) : '—'}% of net sales</p>
-                  <div className="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-100">
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-wider">Contribution margin</p>
-                      <p className="text-lg font-bold tabular-nums" style={{ color: okCm == null ? '#1e293b' : okCm ? '#16a34a' : '#dc2626' }}>{cmPct != null ? `${cmPct.toFixed(1)}%` : '—'}{floor != null && <span className="text-xs font-semibold text-gray-400 ml-1.5">floor {floor}%</span>}</p>
-                      <p className="text-[11px] text-gray-400">{contrib != null ? `${formatCurrency(contrib)} after COGS${cogsPct != null ? ` (${cogsPct}%)` : ''} and all marketing` : 'needs a gross margin on file'}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-wider">Total marketing</p>
-                      <p className="text-lg font-bold text-gray-800 tabular-nums">{formatCurrency(totalMk || 0)}</p>
-                      <p className="text-[11px] text-gray-400">{expenses && expenses.range.budget > 0 ? `${(((totalMk || 0) / expenses.range.budget) * 100).toFixed(0)}% of the ${formatCurrency(expenses.range.budget)} budget for these days` : 'ads + other marketing'}</p>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </Card>
-      </div>
-        );
-      })()}
-
-      {/* Net profit — admin-only (basis endpoint 403s for others). Booked
-          months show QuickBooks ACTUALS; only the unbooked remainder is
-          estimated at the booked months' cost rates. */}
-      {profitBasis && metrics.totalRevenue > 0 && (() => {
-        const rev = metrics.totalRevenue;
-        const adSpend = metrics.netAdSpend ?? metrics.totalAdSpend;
-        const a = profitBasis.actual;
-        const remRev = Math.max(0, rev - a.revenue);
-        const remAd = Math.max(0, adSpend - a.adSpend);
-        const canEstimate = profitBasis.cogsPct !== null && profitBasis.nonAdOpexPct !== null;
-        const remNet = canEstimate
-          ? remRev - remRev * ((profitBasis.cogsPct! + profitBasis.nonAdOpexPct!) / 100) - remAd
-          : 0;
-        const hasActual = a.months.length > 0 && a.revenue > 0;
-        const hasRemainder = remRev > rev * 0.01;
-        if (!hasActual && !canEstimate) return null;
-        const total = (hasActual ? a.net : 0) + (hasRemainder && canEstimate ? remNet : 0);
-        const margin = (total / rev) * 100;
-        const title = hasActual && !hasRemainder ? '💰 Net Profit (actual)'
-          : hasActual ? '💰 Net Profit (actual + est.)'
-          : '💰 Est. Net Profit';
-        return (
-          <Card accentColor="#6ee7b7" className="mb-4">
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-              <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wider">{title}</p>
-                <p className="text-2xl font-bold" style={{ color: total >= 0 ? '#16a34a' : '#dc2626' }}>
-                  {formatCurrency(total)}
-                  <span className="text-sm font-semibold text-gray-400 ml-2">{margin.toFixed(1)}% margin</span>
-                </p>
-              </div>
-              <div className="text-xs text-gray-500 leading-relaxed">
-                {hasActual && <>Booked ({a.months.join(', ')}): {formatCurrency(a.net)} actual from QuickBooks</>}
-                {hasActual && hasRemainder && <br />}
-                {hasRemainder && canEstimate && (
-                  <>Unbooked remainder: est. {formatCurrency(remNet)} — {formatCurrency(remRev)} revenue − COGS {profitBasis.cogsPct}% − overhead {profitBasis.nonAdOpexPct}% − {formatCurrency(remAd)} ad spend (rates from {profitBasis.basisMonths.join(', ')})</>
-                )}
-                {(profitBasis.unbookedPastMonths?.length ?? 0) > 0 && (
+            {/* Fully loaded */}
+            {showLoaded && (
+              <div className="lg:pl-6 pt-5 lg:pt-0 border-t lg:border-t-0 border-gray-100">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Fully loaded MER</p>
+                <p className="text-[11px] text-gray-400 mb-1">Net sales ÷ all marketing · the business&apos;s number</p>
+                {expenses === undefined ? (
+                  <p className="text-sm text-gray-400 py-6">Loading marketing costs…</p>
+                ) : (
                   <>
-                    <br />
-                    <span className="text-amber-600">
-                      ⏳ {profitBasis.unbookedPastMonths!.map(u => `${u.month}: QuickBooks has ${formatCurrency(u.qbIncome)} of ${formatCurrency(u.shopifySales)} booked`).join(' · ')} — actuals replace the estimate automatically once bookkeeping is done
-                    </span>
+                    <div className="flex items-end gap-3">
+                      <span className="text-5xl sm:text-6xl font-black leading-none" style={{ color: okFl == null ? '#1e293b' : okFl ? '#22c55e' : '#ef4444' }}>{flMer != null ? formatROAS(flMer) : '—'}</span>
+                      <Badge ok={okFl} goal={flGoal} />
+                    </div>
+                    <p className="text-sm text-gray-500 mt-2 tabular-nums">{formatCurrency(netS)} ÷ {formatCurrency(totalMk || 0)}<span className="text-gray-400"> · ads {formatCurrency(adS)} + other {formatCurrency(other || 0)}</span></p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 mt-4 pt-3 border-t border-gray-100">
+                      <Stat k="Contribution" v={cmPct != null ? `${cmPct.toFixed(1)}%` : '—'} tone={okCm == null ? undefined : okCm ? '#16a34a' : '#dc2626'} />
+                      <Stat k={floor != null ? `Floor ${floor}%` : 'Contribution $'} v={contrib != null ? formatCurrency(contrib) : '—'} />
+                      <Stat k="Marketing" v={totalMk != null ? formatCurrency(totalMk) : '—'} />
+                      <Stat k="Of net sales" v={netS > 0 && totalMk != null ? `${((totalMk / netS) * 100).toFixed(1)}%` : '—'} />
+                    </div>
                   </>
                 )}
               </div>
-            </div>
-          </Card>
+            )}
+          </div>
+
+          {/* Definitions and exclusions, out of the way until wanted */}
+          <div className="mt-4 pt-3 border-t border-gray-100">
+            <button type="button" onClick={() => setShowDefs(v => !v)} className="text-[11px] font-semibold text-violet-600 hover:text-violet-800">
+              {showDefs ? 'Hide' : 'How these are calculated'}{!showDefs && !isPartner && metrics.marketplaces && metrics.marketplaces.length > 0 ? ` · online store only, ${metrics.marketplaces.map(m => m.label).join(', ')} excluded` : ''}
+            </button>
+            {showDefs && (
+              <ul className="text-[11px] text-gray-500 mt-2 space-y-1 list-disc pl-4">
+                <li>Net sales = after discounts and returns, before taxes and shipping (total sales {formatCurrency(metrics.totalRevenue)}){(metrics.returnFees ?? 0) > 0 ? `; includes ${formatCurrency(metrics.returnFees!)} in return fees the store keeps` : ''}.</li>
+                <li>Paid media MER = net sales ÷ {metrics.adCreditApplied ? 'net ad spend' : 'ad spend'} on every platform{(metrics.adCreditApplied ?? 0) > 0 ? ` (${formatCurrency(metrics.adCreditApplied!)} Snapchat ad credit deducted; gross ${formatCurrency(metrics.totalAdSpend)})` : ''}. Goal {MER_GOAL}x is the agency&apos;s target.</li>
+                {showLoaded && <li>Fully loaded MER = net sales ÷ (ad spend + other marketing). Other marketing is agency, content, email/SMS, tools, photoshoots, SEO and partnerships from the budgeting sheet, prorated to these days{expenses?.range.includesPlan ? '; the current month is plan until actuals are entered' : ''}. Goal {flGoal ?? '—'}x is the business&apos;s target.</li>}
+                {showLoaded && <li>Contribution margin = net sales − cost of goods ({cogsPct ?? '—'}%) − all marketing, as a share of net sales. Floor {floor ?? '—'}%. Rent, non-marketing payroll and other overhead are not included.</li>}
+                {!isPartner && metrics.marketplaces && metrics.marketplaces.length > 0 && metrics.marketplaces.map(m => (
+                  <li key={m.key}>Online store only. {m.label} ({m.orders.toLocaleString()} orders · {formatCurrency(m.netSales)} net) is not in any figure on this page — see the <Link href={`/dashboard/channel/${m.key}?tf=${tfRaw}`} className="underline">{m.label} tab</Link>.</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Card>
+      </div>
         );
       })()}
 
