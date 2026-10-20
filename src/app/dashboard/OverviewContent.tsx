@@ -751,12 +751,12 @@ export default function OverviewContent() {
             {/* Paid media */}
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Paid media MER</p>
-              <p className="text-[11px] text-gray-400 mb-1">Net sales{allChannels ? ' (all channels)' : ''} ÷ ad spend · the agency&apos;s number</p>
+              <p className="text-[11px] text-gray-400 mb-1">Net sales{allChannels ? ' (all channels)' : ''} ÷ ad spend. The agency&apos;s number.</p>
               <div className="flex items-end gap-3">
                 <span className="text-5xl sm:text-6xl font-black leading-none" style={{ color: merColor }}>{formatROAS(metrics.mer)}</span>
                 <Badge ok={metrics.mer >= MER_GOAL} goal={MER_GOAL} />
               </div>
-              <p className="text-sm text-gray-500 mt-2 tabular-nums">{formatCurrency(netS)} ÷ {formatCurrency(adS)}</p>
+              <p className="text-sm text-gray-500 mt-2 tabular-nums">Net sales {formatCurrency(netS)} ÷ ad spend {formatCurrency(adS)}</p>
               {correctedMer !== null && metrics.mer > 0 && (
                 <p className="text-[11px] font-semibold text-amber-600 mt-1">⚠ Provisional — about {formatCurrency(missingSpend)} of ad spend is still syncing; true MER is likely closer to {correctedMer.toFixed(2)}x.</p>
               )}
@@ -766,11 +766,11 @@ export default function OverviewContent() {
                 const d = returnsInfo.deltaPts;
                 return (
                   <p className="text-[11px] text-gray-500 mt-1.5 tabular-nums">
-                    Returns <span className="font-semibold" style={{ color: tone }}>{returnsInfo.range.ratePct}%</span> of gross sales
+                    Returns were <span className="font-semibold" style={{ color: tone }}>{returnsInfo.range.ratePct}%</span> of gross sales
                     {returnsInfo.baseline.ratePct != null && d != null ? (
-                      <> · baseline {returnsInfo.baseline.ratePct}% · <span className="font-semibold" style={{ color: tone }}>{d >= 0 ? '+' : ''}{d} pts</span>{st && st !== 'normal' && <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ backgroundColor: st === 'high' ? '#fee2e2' : '#fef3c7', color: tone }}>{st}</span>}</>
-                    ) : ' · no baseline yet'}
-                    {' · '}<Link href={`/dashboard/returns?tf=${tfRaw}${dateFrom ? `&date_from=${dateFrom}` : ''}${dateTo ? `&date_to=${dateTo}` : ''}`} className="underline hover:text-gray-700">Returns tab</Link>
+                      <>, {d === 0 ? 'the same as' : <><span className="font-semibold" style={{ color: tone }}>{Math.abs(d)} pts {d > 0 ? 'above' : 'below'}</span></>} the {returnsInfo.baseline.months}-month baseline of {returnsInfo.baseline.ratePct}%{st && st !== 'normal' && <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ backgroundColor: st === 'high' ? '#fee2e2' : '#fef3c7', color: tone }}>{st}</span>}</>
+                    ) : ' (no baseline yet)'}
+                    . <Link href={`/dashboard/returns?tf=${tfRaw}${dateFrom ? `&date_from=${dateFrom}` : ''}${dateTo ? `&date_to=${dateTo}` : ''}`} className="underline hover:text-gray-700">Returns tab</Link>
                   </p>
                 );
               })()}
@@ -786,7 +786,7 @@ export default function OverviewContent() {
             {showLoaded && (
               <div className="lg:pl-6 pt-5 lg:pt-0 border-t lg:border-t-0 border-gray-100">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Fully loaded MER</p>
-                <p className="text-[11px] text-gray-400 mb-1">Net sales ÷ all marketing · the business&apos;s number</p>
+                <p className="text-[11px] text-gray-400 mb-1">Net sales ÷ total marketing. The business&apos;s number.</p>
                 {expenses === undefined ? (
                   <p className="text-sm text-gray-400 py-6">Loading marketing costs…</p>
                 ) : (
@@ -795,7 +795,8 @@ export default function OverviewContent() {
                       <span className="text-5xl sm:text-6xl font-black leading-none" style={{ color: okFl == null ? '#1e293b' : okFl ? '#22c55e' : '#ef4444' }}>{flMer != null ? formatROAS(flMer) : '—'}</span>
                       <Badge ok={okFl} goal={flGoal} />
                     </div>
-                    <p className="text-sm text-gray-500 mt-2 tabular-nums">{formatCurrency(netS)} ÷ {formatCurrency(totalMk || 0)}<span className="text-gray-400"> · ads {formatCurrency(adS)} + other {formatCurrency(other || 0)}</span></p>
+                    <p className="text-sm text-gray-500 mt-2 tabular-nums">Net sales {formatCurrency(netS)} ÷ total marketing {formatCurrency(totalMk || 0)}</p>
+                    <p className="text-[11px] text-gray-400 tabular-nums">Total marketing = ad spend {formatCurrency(adS)} + other marketing {formatCurrency(other || 0)}</p>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 mt-4 pt-3 border-t border-gray-100">
                       <Stat k="Contribution" v={cmPct != null ? `${cmPct.toFixed(1)}%` : '—'} tone={okCm == null ? undefined : okCm ? '#16a34a' : '#dc2626'} />
                       <Stat k={floor != null ? `Floor ${floor}%` : 'Contribution $'} v={contrib != null ? formatCurrency(contrib) : '—'} />
@@ -811,7 +812,7 @@ export default function OverviewContent() {
           {/* Definitions and exclusions, out of the way until wanted */}
           <div className="mt-4 pt-3 border-t border-gray-100">
             <button type="button" onClick={() => setShowDefs(v => !v)} className="text-[11px] font-semibold text-violet-600 hover:text-violet-800">
-              {showDefs ? 'Hide' : 'How these are calculated'}{!showDefs && !isPartner && metrics.marketplaces && metrics.marketplaces.length > 0 ? (metrics.marketplaces.every(m => m.inSales) ? ` · all channels incl. ${metrics.marketplaces.map(m => m.label).join(', ')}` : ` · online store only, ${metrics.marketplaces.filter(m => !m.inSales).map(m => m.label).join(', ')} excluded`) : ''}
+              {showDefs ? 'Hide' : 'How these are calculated'}{!showDefs && !isPartner && metrics.marketplaces && metrics.marketplaces.length > 0 ? (metrics.marketplaces.every(m => m.inSales) ? ` (all channels, including ${metrics.marketplaces.map(m => m.label).join(', ')})` : ` (online store only; ${metrics.marketplaces.filter(m => !m.inSales).map(m => m.label).join(', ')} excluded)`) : ''}
             </button>
             {showDefs && (
               <ul className="text-[11px] text-gray-500 mt-2 space-y-1 list-disc pl-4">
