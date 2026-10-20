@@ -64,8 +64,33 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_product_catalog',
     description:
-      'The REAL product catalog from Shopify: every active product\'s exact title, type, price, variant names (colors/sizes), and description. MANDATORY before writing any copy, campaign, or brief that mentions a product — copy may only reference products, variants, colors, and features that appear here or that the operator stated. Never invent product names, finishes, straps, or "2-in-1" features, and never feature or mention a product or variant the catalog marks SOLD OUT / OUT OF STOCK.',
+      'The REAL product catalog from Shopify: every active product\'s exact title, type, price, variant names (colors/sizes), and description. MANDATORY before writing any copy, campaign, or brief that mentions a product — copy may only reference products, variants, colors, and features that appear here or that the operator stated. Never invent product names, finishes, straps, or "2-in-1" features, and never feature or mention a product or variant the catalog marks SOLD OUT / OUT OF STOCK. Each line also carries the product\'s tags and the collections it belongs to; for a full collection\'s contents use get_collection_products.',
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_collections',
+    description: "Every Shopify collection on the store: title, handle, product count, whether it is manual or automated (and the automation rules: tags, product type, price, vendor), storefront link and description. Use for 'what collections do we have', 'which collection should this go in', 'what qualifies for X', sale/collection planning, and to pick a collection before get_collection_products.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_collection_products',
+    description: "The products inside ONE Shopify collection (by title, handle, or storefront URL): each product's title, type, price, total units, the other collections it is in, tags, in-stock and out-of-stock variants, and link. Up to 150 products. Use whenever a question is about what sits in a collection (bridal, kids, sale, new arrivals, a BFCM collection).",
+    input_schema: { type: 'object', properties: { collection: { type: 'string', description: 'Collection title, handle, or URL' } }, required: ['collection'] },
+  },
+  {
+    name: 'search_shopify_products',
+    description: "Search the Shopify catalog with Shopify's product search syntax and get each match with type, vendor, status, price, total units, tags, the collections it belongs to, variants and link. Examples: 'tag:bridal', 'product_type:\"Kids Shoes\"', 'title:*sandal*', 'status:draft', 'created_at:>2026-09-01', 'inventory_total:0', 'vendor:Nike', combined with AND / OR. Use this when get_product_catalog's active-only list is not enough (drafts, archived, tags, collection membership, launch dates).",
+    input_schema: { type: 'object', properties: { query: { type: 'string', description: 'Shopify product search query' }, limit: { type: 'number', description: 'Max products (default 60, max 100)' } }, required: ['query'] },
+  },
+  {
+    name: 'get_discounts',
+    description: "Shopify discounts: code and automatic discounts with title, codes, what they give (summary), status, start/end dates, usage counts and what they combine with. Active only by default. Use for sale planning, 'what promos are running', BFCM offers, and checking whether a code exists.",
+    input_schema: { type: 'object', properties: { all: { type: 'boolean', description: 'true = include expired and scheduled discounts too' } } },
+  },
+  {
+    name: 'shopify_admin_query',
+    description: "Run a READ-ONLY GraphQL query against the Shopify Admin API (2026-04) for anything the other tools do not cover: orders and their line items, customers, draft orders, fulfillments, inventory by location, metafields, price lists, markets, shop policies, product media, menus. Mutations are refused. Keep results small (first: 20–50, only the fields needed); long results are truncated. Example: { orders(first: 20, query: \"created_at:>2026-10-01 tag:wholesale\", sortKey: CREATED_AT, reverse: true) { nodes { name createdAt totalPriceSet { shopMoney { amount } } customer { displayName } lineItems(first: 5) { nodes { title quantity } } } } }",
+    input_schema: { type: 'object', properties: { query: { type: 'string', description: 'GraphQL query document' }, variables: { type: 'object', description: 'Optional variables' } }, required: ['query'] },
   },
   {
     name: 'get_ad_performance',
@@ -379,6 +404,30 @@ New customers ${m.newCustomers ?? 'N/A'} (${m.pctNew ?? '?'}%) · Returning ${m.
     const rr = d as { returnRate?: number; totalReturns?: number; topReturnedProducts?: { name: string; returnRate: number }[] } | null;
     if (rr?.returnRate == null) return `No returns data for ${from} → ${to}.`;
     return `Returns ${from} → ${to}: rate ${rr.returnRate}% · $${(rr.totalReturns ?? 0).toLocaleString()} returned\nTop returned: ${(rr.topReturnedProducts ?? []).slice(0, 6).map(p => `${p.name} (${p.returnRate}%)`).join(', ') || 'N/A'}`;
+  }
+
+  if (name === 'get_collections' || name === 'get_collection_products' || name === 'search_shopify_products' || name === 'get_discounts' || name === 'shopify_admin_query') {
+    const sa = await import('@/src/lib/shopifyAdmin');
+    try {
+      if (name === 'get_collections') return sa.collectionsText(await sa.listCollections());
+      if (name === 'get_collection_products') {
+        const ref = String(input.collection || '').trim();
+        if (!ref) return 'Give a collection title, handle or URL.';
+        const { collection, products } = await sa.collectionProducts(ref);
+        if (!collection) return `No collection matches "${ref}". Call get_collections to see the exact titles and handles.`;
+        return `COLLECTION "${collection.title}" (/collections/${collection.handle}, ${collection.count} products; showing ${products.length}):\n${products.map(sa.productLine).join('\n') || '(empty)'}`;
+      }
+      if (name === 'search_shopify_products') {
+        const q = String(input.query || '').trim();
+        if (!q) return 'Give a Shopify product search query, e.g. tag:bridal or product_type:"Kids Shoes".';
+        const items = await sa.searchProducts(q, Number(input.limit) || 60);
+        return `PRODUCTS matching ${q} (${items.length}):\n${items.map(sa.productLine).join('\n') || '(no matches)'}`;
+      }
+      if (name === 'get_discounts') return await sa.listDiscounts(!input.all);
+      const q = String(input.query || '').trim();
+      if (!q) return 'Give a GraphQL query document.';
+      return await sa.guardedQuery(q, (input.variables as Record<string, unknown>) || {});
+    } catch (e) { return `Shopify request failed: ${e instanceof Error ? e.message : String(e)}`; }
   }
 
   if (name === 'get_inventory') {
