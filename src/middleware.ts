@@ -61,7 +61,9 @@ export async function middleware(req: NextRequest) {
   }
   const url = req.nextUrl.clone();
   url.pathname = '/login';
-  url.search = `?callbackUrl=${encodeURIComponent(pathname)}`;
+  // Carry the full page (incl. ?tf= and dates) back after sign-in, and let
+  // the login page start Google immediately instead of waiting for a tap.
+  url.search = `?auto=1&callbackUrl=${encodeURIComponent(pathname + (req.nextUrl.search || ''))}`;
   return NextResponse.redirect(url);
 }
 
