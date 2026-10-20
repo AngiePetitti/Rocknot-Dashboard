@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { friendlyAiError } from '@/src/lib/aiError';
 import Anthropic from '@anthropic-ai/sdk';
 import { getClient } from '@/src/lib/client';
+import { AI_BEST } from '@/src/lib/aiModels';
+import { loadDoc, saveDoc } from '@/src/lib/docStore';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120; // Claude analysis can take a while
+const INSIGHTS_CACHE_MS = 12 * 60 * 60 * 1000;
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -181,6 +184,7 @@ export async function GET(req: NextRequest) {
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
   const compareMode = searchParams.get('compare') === 'true';
+  const forceRefresh = searchParams.get('refresh') === '1';
 
   const origin = req.nextUrl.origin;
   const cookie = req.headers.get('cookie') || '';
@@ -216,9 +220,21 @@ ${dataSnapshotText}
 
 ${businessContext}`.trim();
 
+  // Server-side cache per resolved range: the same insights are served to
+  // everyone for 12 hours instead of a fresh (expensive) analysis per click.
+  // The page's Refresh button passes refresh=1 to force a new run.
+  const cacheKey = `insights_cache_${primary.from}_${primary.to}_${compareMode ? 'cmp' : 'solo'}`;
+  if (!forceRefresh) {
+    try {
+      const raw = await loadDoc(cacheKey);
+      const hit = raw ? JSON.parse(raw) as { t: number; body: unknown } : null;
+      if (hit && Date.now() - hit.t < INSIGHTS_CACHE_MS) return NextResponse.json({ ...(hit.body as object), cached: true, generatedAt: new Date(hit.t).toISOString() });
+    } catch { /* cache miss or storage blip — generate */ }
+  }
+
   try {
     const response = await client.messages.create({
-      model: 'claude-opus-4-8',
+      model: AI_BEST,
       max_tokens: 16000,
       thinking: { type: 'adaptive' },
       output_config: { format: { type: 'json_schema', schema: INSIGHTS_SCHEMA } },
@@ -232,7 +248,7 @@ ${businessContext}`.trim();
     const text = response.content.find(b => b.type === 'text')?.text ?? '';
     const parsed = JSON.parse(text);
 
-    return NextResponse.json({
+    const body = {
       ok: true,
       insights: parsed,
       snapshot: {
@@ -246,7 +262,9 @@ ${businessContext}`.trim();
         hasInventoryContext: businessContext.includes('OUT OF STOCK') || businessContext.includes('Slow/dead'),
         hasCalendarContext: businessContext.includes('UPCOMING') || businessContext.includes('LIVE NOW'),
       },
-    });
+    };
+    try { await saveDoc(cacheKey, JSON.stringify({ t: Date.now(), body })); } catch { /* cache is best-effort */ }
+    return NextResponse.json({ ...body, cached: false, generatedAt: new Date().toISOString() });
   } catch (err) {
     return NextResponse.json({ error: friendlyAiError(err) }, { status: 500 });
   }

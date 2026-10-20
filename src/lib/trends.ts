@@ -4,6 +4,7 @@
 // day per client, stored in the client's private sheet. Nothing here is
 // shared between clients — the prompt is built from each profile.
 import Anthropic from '@anthropic-ai/sdk';
+import { AI_FAST, AI_BEST } from '@/src/lib/aiModels';
 import { getClient } from '@/src/lib/client';
 import { loadDoc, saveDoc } from '@/src/lib/docStore';
 import { todayPst } from '@/src/lib/timeframes';
@@ -75,7 +76,7 @@ Return ONLY a JSON object (no prose around it) with this exact shape:
 }`;
 
   const response = await client.messages.create({
-    model: 'claude-opus-5',
+    model: AI_BEST,
     max_tokens: 16000,
     thinking: { type: 'adaptive' },
     tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 10 } as unknown as Anthropic.Tool],

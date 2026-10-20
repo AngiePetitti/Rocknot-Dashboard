@@ -13,6 +13,7 @@
 //      that appear in them, so the brief cannot invent a figure.
 // Cached per day in the Settings KV; the Overview card and Cleo read it.
 import Anthropic from '@anthropic-ai/sdk';
+import { AI_FAST, AI_BEST } from '@/src/lib/aiModels';
 import { shopifyql } from '@/src/lib/shopifyql';
 import { storeOnlyWhere, getClient, hasPlatform } from '@/src/lib/client';
 import { getAdsOverview } from '@/src/lib/bqAds';
@@ -305,7 +306,7 @@ export async function writeBrief(facts: BriefFacts, findings: Finding[] = []): P
 - FINDINGS (if any) are what the sweep of every series turned up and Cleo's investigation confirmed — problems and opportunities the standing questions did not ask about. Mention the top one or two in the summary or drivers when their impact rivals the headline movement; the card lists all of them separately, so do not repeat every one.
 - Plain language a founder reads in 30 seconds. No hedging, no "it appears". Submit with the write_brief tool.`;
   const res = await client.messages.create({
-    model: 'claude-opus-4-8', max_tokens: 1500, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+    model: AI_FAST, max_tokens: 1500, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
     system, tools: [tool], tool_choice: { type: 'tool', name: 'write_brief' },
     messages: [{ role: 'user', content: `FACTS:\n${JSON.stringify(facts)}${findings.length ? `\n\nFINDINGS:\n${JSON.stringify(findings)}` : ''}` }],
   });

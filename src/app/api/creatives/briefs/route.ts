@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { AI_FAST, AI_BEST } from '@/src/lib/aiModels';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
 import { saveDoc, loadDoc } from '@/src/lib/docStore';
@@ -147,7 +148,7 @@ At the very end, append a fenced code block tagged refs containing a strict JSON
           ? `\n\nALREADY WRITTEN FOR THIS TRACK (your brief must test a genuinely DIFFERENT concept, source ad, or variable — no overlap):\n${prevTitles.map(t => `- ${t}`).join('\n')}`
           : '';
         const msg = await client.messages.stream({
-          model: 'claude-opus-4-8',
+          model: AI_FAST,
           max_tokens: 8000,
           messages: [{ role: 'user', content: `${shared}\n\n${TRACK_SPECS[track]}${differ}` }],
         }).finalMessage();
