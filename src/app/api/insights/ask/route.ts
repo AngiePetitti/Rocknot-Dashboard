@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { friendlyAiError } from '@/src/lib/aiError';
 import Anthropic from '@anthropic-ai/sdk';
+import { AI_FAST, AI_BEST } from '@/src/lib/aiModels';
 import { ANALYST_TOOLS, execTool, makeFetcher } from '@/src/lib/analystTools';
 import { getClient, marketplaces } from '@/src/lib/client';
 import { getServerSession } from 'next-auth';
@@ -140,10 +141,10 @@ If the operator asks for a report / PDF / shareable document, call create_report
       ? `${system}\n\nVOICE MODE: your answer will be READ ALOUD by text-to-speech. Be warm and conversational, like a sharp colleague talking — short sentences, contractions, a little personality. NO tables, NO bullet lists, NO markdown formatting, NO URLs. Round numbers the way people say them ("about five eighty-four thousand", "three and a half x"). Keep it under 120 words unless the question truly needs more; offer to go deeper instead of dumping detail.`
       : system;
 
-    for (let iter = 0; iter < 8; iter++) {
+    for (let iter = 0; iter < 6; iter++) {
       const response = await client.messages.create({
-        model: 'claude-opus-4-8',
-        max_tokens: 16000,
+        model: AI_FAST,
+        max_tokens: 8000,
         thinking: { type: 'adaptive' },
         system: voiceSystem,
         tools: [...ANALYST_TOOLS, CREATE_REPORT_TOOL],

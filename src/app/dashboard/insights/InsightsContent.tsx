@@ -128,19 +128,21 @@ export default function InsightsContent() {
     } catch { /* corrupt cache — ignore */ }
   }, [STORAGE_KEY]);
 
-  async function generate() {
+  async function generate(force = false) {
     if (tf === 'custom' && (!customFrom || !customTo)) return;
     setLoading(true);
     setError(null);
     try {
       let url = `/api/insights?tf=${tf}&compare=${compareMode}`;
       if (tf === 'custom') url += `&date_from=${customFrom}&date_to=${customTo}`;
+      if (force) url += '&refresh=1';
       const res = await fetch(url, { cache: 'no-store' });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setInsights(data.insights);
       setSnapshot(data.snapshot);
-      const now = new Date();
+      // A cached answer carries the time it was actually generated.
+      const now = data.generatedAt ? new Date(data.generatedAt) : new Date();
       setGeneratedAt(now);
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -161,7 +163,7 @@ export default function InsightsContent() {
     <div>
       <Header title="AI Insights" subtitle="Data-driven ideas powered by Claude">
         <button
-          onClick={generate}
+          onClick={() => generate(Boolean(insights))}
           disabled={loading || !canGenerate}
           className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white text-sm font-semibold rounded-xl transition-colors"
         >
@@ -331,7 +333,7 @@ export default function InsightsContent() {
             Pick a timeframe, optionally compare against Q4 last year, then hit Generate. Claude analyzes your real store data and returns specific recommendations.
           </p>
           <button
-            onClick={generate}
+            onClick={() => generate()}
             disabled={!canGenerate}
             className="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
           >

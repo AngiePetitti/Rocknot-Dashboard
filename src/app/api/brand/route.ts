@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
 import Anthropic from '@anthropic-ai/sdk';
+import { AI_FAST, AI_BEST } from '@/src/lib/aiModels';
 import { saveDoc, loadDoc } from '@/src/lib/docStore';
 
 export const maxDuration = 120;
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest) {
         ? { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: buf.toString('base64') } }
         : { type: 'image' as const, source: { type: 'base64' as const, media_type: mediaType as 'image/png' | 'image/jpeg', data: buf.toString('base64') } };
       const msg = await client.messages.create({
-        model: 'claude-opus-4-8',
+        model: AI_FAST,
         max_tokens: 8000,
         messages: [{
           role: 'user',

@@ -7,6 +7,7 @@
 // and nudge the next step when it stalls, so progress never depends on
 // background execution being kept alive.
 import Anthropic from '@anthropic-ai/sdk';
+import { AI_FAST, AI_BEST } from '@/src/lib/aiModels';
 import { getClient, marketplaces } from '@/src/lib/client';
 import { ANALYST_TOOLS, execTool, makeFetcher } from '@/src/lib/analystTools';
 import { saveReport, isChatStoreConfigured, setKV, getKV } from '@/src/lib/chatStore';
@@ -232,7 +233,7 @@ Rules:
   let lastErr = '';
   for (let attempt = 0; attempt < 2 && !plan; attempt++) {
     const res = await client.messages.create({
-      model: 'claude-opus-4-8', max_tokens: 16000,
+      model: AI_BEST, max_tokens: 16000,
       thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
       system,
       tools: [planTool], tool_choice: { type: 'tool', name: 'plan_report' },
@@ -285,7 +286,7 @@ CONTENT DELIVERABLES — when the brief asks for copy the team will use, write e
   let finalText = '';
   for (let iter = 0; iter < 6; iter++) {
     const response = await client.messages.stream({
-      model: 'claude-opus-4-8', max_tokens: 14000,
+      model: AI_BEST, max_tokens: 14000,
       thinking: { type: 'adaptive' }, output_config: { effort: 'medium' },
       system, tools: ANALYST_TOOLS, messages,
     }).finalMessage();
@@ -335,7 +336,7 @@ async function runAssemble(since: number, payload: ReportPayload, brandBrief: st
   try {
     const plain = parts.join('\n').replace(/<style[\s\S]*?<\/style>/g, '').replace(/<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 14000);
     const res = await client.messages.create({
-      model: 'claude-opus-4-8', max_tokens: 700, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+      model: AI_FAST, max_tokens: 700, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
       system: `${baseContext(payload, brandBrief)}\n\nWrite the executive summary for a finished report: 2–4 plain-language sentences with the takeaway, using ONLY numbers that appear in the section text provided. Output the sentences only — no heading, no markdown.`,
       messages: [{ role: 'user', content: `Report: ${job?.title}\n\nSECTIONS (text):\n${plain}` }],
     });

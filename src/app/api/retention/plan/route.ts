@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { friendlyAiError } from '@/src/lib/aiError';
 import Anthropic from '@anthropic-ai/sdk';
+import { AI_FAST, AI_BEST } from '@/src/lib/aiModels';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
 import { getKV, setKV } from '@/src/lib/chatStore';
@@ -141,7 +142,7 @@ For SMS, subjectLines holds the 2-3 message variants (with emoji, under 160 char
 
   try {
     const msg = await client.messages.stream({
-      model: 'claude-opus-4-8',
+      model: AI_FAST,
       max_tokens: 20000,
       messages: [{ role: 'user', content: prompt }],
     }).finalMessage();

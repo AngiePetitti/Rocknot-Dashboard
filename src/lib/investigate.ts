@@ -4,6 +4,7 @@
 // finding must appear in the anomalies or in a tool result she actually saw;
 // a finding whose numbers cannot be traced is dropped, not published.
 import Anthropic from '@anthropic-ai/sdk';
+import { AI_FAST, AI_BEST } from '@/src/lib/aiModels';
 import { ANALYST_TOOLS, execTool, makeFetcher } from '@/src/lib/analystTools';
 import { getClient } from '@/src/lib/client';
 import type { Anomaly } from '@/src/lib/scan';
@@ -67,7 +68,7 @@ export async function investigate(date: string, anomalies: Anomaly[], origin: st
   try {
     for (let iter = 0; iter < 8; iter++) {
       const res = await client.messages.create({
-        model: 'claude-opus-4-8', max_tokens: 6000, thinking: { type: 'adaptive' }, output_config: { effort: 'medium' },
+        model: AI_FAST, max_tokens: 6000, thinking: { type: 'adaptive' }, output_config: { effort: 'medium' },
         system, tools: [...ANALYST_TOOLS, submit], messages,
       });
       const submitted = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === 'submit_findings');

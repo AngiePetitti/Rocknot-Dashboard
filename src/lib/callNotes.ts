@@ -3,6 +3,7 @@
 // one was said. Used by the Tasks tab importer and by the daily Wispr Flow
 // routine, so both land tasks on THIS deployment's board only.
 import Anthropic from '@anthropic-ai/sdk';
+import { AI_FAST, AI_BEST } from '@/src/lib/aiModels';
 import { getClient } from '@/src/lib/client';
 import { todayPst } from '@/src/lib/timeframes';
 
@@ -51,7 +52,7 @@ ${notes.slice(0, 20000)}
 """`;
 
   const response = await client.messages.create({
-    model: 'claude-opus-5',
+    model: AI_FAST,
     max_tokens: 8000,
     thinking: { type: 'adaptive' },
     messages: [{ role: 'user', content: prompt }],
