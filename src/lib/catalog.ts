@@ -17,6 +17,8 @@ export interface CatalogProduct {
   /** True when no variant is available to sell. */
   soldOut: boolean;
   description: string;
+  tags?: string[];
+  collections?: string[];
 }
 
 
@@ -41,6 +43,8 @@ export async function fetchCatalog(): Promise<CatalogProduct[]> {
           productType
           status
           description
+          tags
+          collections(first: 8) { nodes { title } }
           priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
           variants(first: 30) { nodes { title availableForSale ${inventoryField} } }
         }
@@ -81,6 +85,8 @@ export async function fetchCatalog(): Promise<CatalogProduct[]> {
         oosVariants: vnodes.filter(v => named(v) && !sellable(v)).map(v => v.title!),
         soldOut: vnodes.length > 0 && !vnodes.some(sellable),
         description: String(p?.description || '').replace(/\s+/g, ' ').trim().slice(0, 220),
+        tags: Array.isArray(p?.tags) ? (p.tags as string[]).slice(0, 12) : [],
+        collections: ((p?.collections?.nodes || []) as Array<{ title?: string }>).map(c => String(c.title || '')).filter(Boolean),
       });
     }
     if (!prods.pageInfo?.hasNextPage) break;
@@ -101,6 +107,8 @@ export function catalogText(items: CatalogProduct[]): string {
       bits.push(`${p.price} (internal reference — never print prices in customer-facing copy)`);
       if (p.variants.length) bits.push(`in-stock variants: ${p.variants.join(', ')}`);
       if (p.oosVariants.length) bits.push(`OUT OF STOCK (never mention): ${p.oosVariants.join(', ')}`);
+      if (p.collections?.length) bits.push(`collections: ${p.collections.join(', ')}`);
+      if (p.tags?.length) bits.push(`tags: ${p.tags.join(', ')}`);
       if (p.description) bits.push(`— ${p.description}`);
       return `• ${bits.join(' · ')}`;
     })
