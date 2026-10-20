@@ -5,10 +5,13 @@ import Card from '@/src/components/ui/Card';
 import { formatCurrency } from '@/src/lib/utils';
 import type { RangeExpenses, ExpenseMonth } from '@/src/lib/expenses';
 
+export interface ExpensesPayload { range: RangeExpenses; sheet: { title: string; months: ExpenseMonth[] } }
 interface Props {
   tf: string; dateFrom?: string; dateTo?: string;
   /** Overview figures for the same range. */
   netSales: number; adSpend: number; newCustomers: number; cogsPct: number | null;
+  /** Already-fetched expenses from the parent; when given, this card does not fetch. null = parent knows there is none. */
+  data?: ExpensesPayload | null;
 }
 
 /**
@@ -16,12 +19,14 @@ interface Props {
  * sales and live ad spend, plus every other marketing cost from the team's
  * budgeting sheet (prorated to the range). Admin-only (the API 403s otherwise).
  */
-export default function MarketingExpenses({ tf, dateFrom, dateTo, netSales, adSpend, newCustomers, cogsPct }: Props) {
-  const [data, setData] = useState<{ range: RangeExpenses; sheet: { title: string; months: ExpenseMonth[] } } | null>(null);
+export default function MarketingExpenses({ tf, dateFrom, dateTo, netSales, adSpend, newCustomers, cogsPct, data: given }: Props) {
+  const [fetched, setData] = useState<ExpensesPayload | null>(null);
+  const data = given !== undefined ? given : fetched;
   const [hidden, setHidden] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   useEffect(() => {
+    if (given !== undefined) return;
     setData(null); setFailed(null);
     const p = new URLSearchParams({ tf });
     if (dateFrom) p.set('date_from', dateFrom);
@@ -30,7 +35,7 @@ export default function MarketingExpenses({ tf, dateFrom, dateTo, netSales, adSp
       .then(async r => { if (r.status === 403 || r.status === 404) { setHidden(true); return null; } return r.json(); })
       .then(d => { if (!d) return; if (d.error) setFailed(String(d.error)); else setData(d); })
       .catch(e => setFailed(String(e)));
-  }, [tf, dateFrom, dateTo]);
+  }, [tf, dateFrom, dateTo, given]);
 
   if (hidden) return null;
   if (failed) return <Card className="mb-4"><p className="text-xs text-gray-400">Marketing expenses sheet unavailable: {failed}</p></Card>;
@@ -58,7 +63,7 @@ export default function MarketingExpenses({ tf, dateFrom, dateTo, netSales, adSp
   return (
     <Card accentColor="#a5b4fc" className="mb-4">
       <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
-        <h3 className="text-sm font-bold text-gray-800">💼 True Profit After All Marketing</h3>
+        <h3 className="text-sm font-bold text-gray-800">💼 Marketing cost detail</h3>
         <p className="text-[11px] text-gray-400">Ad spend live from the platforms · other marketing from the budgeting sheet · {monthsLabel}{r.includesPlan ? ' · current/future months are plan figures until actuals are entered' : ''}</p>
       </div>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">

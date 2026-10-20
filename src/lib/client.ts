@@ -210,6 +210,10 @@ export interface ClientProfile {
   goals: {
     /** Starting annual net-sales target shown until an admin saves one (0 = ask). */
     defaultAnnualTarget: number;
+    /** Fully loaded MER target: net sales ÷ (ad spend + every other marketing cost). null = not set. */
+    targetFullyLoadedMer?: number | null;
+    /** Contribution-margin floor (% of net sales after COGS and ALL marketing) the business holds itself to. null = not set. */
+    contributionFloorPct?: number | null;
     /** Net-sales MER the ad budgets are planned around. */
     targetMer: number;
     /** Per-platform ROAS the Ad Performance recommendations grade against. */
@@ -415,7 +419,9 @@ const KAILEEP: ClientProfile = {
     // BFCM 2025 (per Angie): gated VIP early access Nov 9–15, public sale Nov 27–30.
     lastYear: { from: '2025-11-27', to: '2025-11-30', earlyAccess: { from: '2025-11-09', to: '2025-11-15' } },
   },
-  goals: { defaultAnnualTarget: 4_000_000, targetMer: 5, targetRoas: 6, targetCac: 30 }, // $4M 2026 net-sales target set Sep 2026
+  // $4M 2026 net-sales target set Sep 2026. Paid MER 5x is the agency's number;
+  // fully loaded MER and the contribution floor are the business's (Airin, Oct 2026).
+  goals: { defaultAnnualTarget: 4_000_000, targetMer: 5, targetRoas: 6, targetCac: 30, targetFullyLoadedMer: 3.5, contributionFloorPct: 50 },
   inventory: { mode: 'standard' },
   creatives: {
     founderTrack: { label: 'Kailee', personName: 'Kailee' },
