@@ -284,11 +284,20 @@ PRODUCT TRUTH — before writing any copy that mentions a product, call get_prod
 CONTENT DELIVERABLES — when the brief asks for copy the team will use, write every item out in full (subject line, preview, body, CTA …), never "similar to above".`;
   let messages: Anthropic.MessageParam[] = [{ role: 'user', content: `SECTION BRIEF: ${section.title}\n${section.focus}\n\nReport focus for context: ${payload.focus || '(from conversation)'}\n\nBuild this section now.` }];
   let finalText = '';
-  for (let iter = 0; iter < 6; iter++) {
+  // Data-heavy sections (inventory + velocity + POs) can eat many rounds in
+  // tool calls; give them room, and if the budget runs out mid-research,
+  // force a final WRITE pass instead of failing with "produced no HTML".
+  const MAX_ITERS = 10;
+  for (let iter = 0; iter < MAX_ITERS; iter++) {
+    const lastRound = iter === MAX_ITERS - 1;
     const response = await client.messages.stream({
       model: AI_BEST, max_tokens: 14000,
       thinking: { type: 'adaptive' }, output_config: { effort: 'medium' },
-      system, tools: ANALYST_TOOLS, messages,
+      system,
+      tools: lastRound ? [] : ANALYST_TOOLS,
+      messages: lastRound
+        ? [...messages, { role: 'user', content: 'STOP researching. Write the complete section HTML NOW from the data you already fetched; note any figure you could not verify as "approx." rather than fetching more.' }]
+        : messages,
     }).finalMessage();
     if (response.stop_reason === 'refusal') throw new Error('The model declined to build this section.');
     if (response.stop_reason === 'tool_use') {
@@ -307,7 +316,12 @@ CONTENT DELIVERABLES — when the brief asks for copy the team will use, write e
     break;
   }
   let frag = stripFence(finalText);
-  const s0 = frag.search(/<section|<div|<h2|<p|<table/i);
+  let s0 = frag.search(/<section|<div|<h2|<p|<table/i);
+  // Prose without tags still beats a dead report — wrap it.
+  if (s0 === -1 && frag.length > 100) {
+    frag = `<section class="card"><h2>${section.title}</h2>${frag.split(/\n{2,}/).map(par => `<p>${par.replace(/</g, '&lt;')}</p>`).join('')}</section>`;
+    s0 = 0;
+  }
   if (s0 === -1) throw new Error(`Section "${section.title}" produced no HTML.`);
   frag = frag.slice(s0);
   if (!/^<section/i.test(frag)) frag = `<section class="card">${frag}</section>`;
