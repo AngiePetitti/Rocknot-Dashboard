@@ -30,6 +30,17 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // External AI agents (e.g. Viktor) get a scoped key: read-only API access
+  // plus asking Cleo — never debug endpoints, never writes. Set AGENT_API_KEY
+  // in Vercel to enable; each deployment can use its own value.
+  const agentKey = (process.env.AGENT_API_KEY || '').trim();
+  if (agentKey && req.headers.get('authorization') === `Bearer ${agentKey}`) {
+    const readable = req.method === 'GET' && pathname.startsWith('/api/') && !pathname.startsWith('/api/debug');
+    const askable = req.method === 'POST' && pathname === '/api/insights/ask';
+    if (readable || askable) return NextResponse.next();
+    return new NextResponse(JSON.stringify({ error: 'This key is read-only (GET /api/* and POST /api/insights/ask).' }), { status: 403, headers: { 'content-type': 'application/json' } });
+  }
+
   const token = await getToken({ req, secret });
   // token.role === null means the periodic re-check found the user removed
   // from the allowlist — stop honoring the session even though the JWT is
