@@ -318,6 +318,14 @@ function aggregateRows(rows: WindsorRow[]) {
 // Ad platform fields
 const META_FIELDS = ['date', 'source', 'account_name', 'spend', 'impressions', 'clicks', 'ctr', 'purchase_roas', 'conversions'].join(',');
 const GOOGLE_FIELDS = ['date', 'source', 'spend', 'impressions', 'clicks', 'conversions', 'conversion_value'].join(',');
+// google_ads rejects whole requests over one unrecognized field (HTTP 400) —
+// this already zeroed Google spend twice. Degraded retry: spend without
+// revenue beats no Google data at all.
+const GOOGLE_FIELDS_MIN = ['date', 'source', 'spend', 'impressions', 'clicks'].join(',');
+const fetchGoogleRows = (params: Record<string, string>) =>
+  fetchFromWindsor('google_ads', GOOGLE_FIELDS, params)
+    .then(r => (r.error ? fetchFromWindsor('google_ads', GOOGLE_FIELDS_MIN, params) : r))
+    .catch(() => fetchFromWindsor('google_ads', GOOGLE_FIELDS_MIN, params));
 // Shopify fields via Windsor /all endpoint — order-level fields only.
 // Do not mix with Customer-endpoint fields (e.g. customer_is_returning) —
 // per Windsor support, mixing reports in one query nulls out order fields.
@@ -424,7 +432,7 @@ async function fetchAllRows(params: Record<string, string>): Promise<WindsorRow[
 
   const [meta, google, shopify, snap, pinterest] = await Promise.all([
     fetchFromWindsor('facebook', META_FIELDS, params),
-    fetchFromWindsor('google_ads', GOOGLE_FIELDS, params),
+    fetchGoogleRows(params),
     // Windsor /all filtered to shopify source — /shopify endpoint returns null order fields
     fetchFromWindsor('all', SHOPIFY_FIELDS, params),
     hasPlatform('snapchat') ? fetchFromWindsor('snapchat', SNAP_FIELDS, params).catch(() => empty) : Promise.resolve(empty),
@@ -656,7 +664,7 @@ export async function GET(request: NextRequest) {
 
       const [meta, google, shopifyAll] = await Promise.all([
         fetchFromWindsor('facebook', META_FIELDS, currentParams),
-        fetchFromWindsor('google_ads', GOOGLE_FIELDS, currentParams),
+        fetchGoogleRows(currentParams),
         fetchFromWindsor('all', DISCOVERY_FIELDS, currentParams),
       ]);
       const shopifyRows = shopifyAll.rows.filter(r => String(r.source || '').toLowerCase().includes('shopify'));
