@@ -7,7 +7,6 @@ import TimeframeSelector from '@/src/components/ui/TimeframeSelector';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import MetricCard from '@/src/components/ui/MetricCard';
-import TrendBrief from '@/src/components/TrendBrief';
 import { useClient } from '@/src/components/ClientProvider';
 
 interface Campaign {
@@ -252,7 +251,6 @@ Design: ${c.designBrief || '—'}`,
       )}
 
       {/* ── On Trend: what to be making right now (web-scanned daily) ── */}
-      <TrendBrief brandName={client.name} />
 
       {/* ── Last 30 days of campaigns ── */}
       {(data?.recent?.length ?? 0) > 0 && (

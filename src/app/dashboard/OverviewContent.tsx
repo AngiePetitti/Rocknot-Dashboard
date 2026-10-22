@@ -21,7 +21,6 @@ import { useClient } from '@/src/components/ClientProvider';
 import { PLATFORMS } from '@/src/lib/client';
 import NcacBreakdown from '@/src/components/NcacBreakdown';
 import MyTasksBanner from '@/src/components/MyTasksBanner';
-import DailyBrief from '@/src/components/DailyBrief';
 import MarketingExpenses, { type ExpensesPayload } from '@/src/components/MarketingExpenses';
 
 // MER runs on NET sales (post-discount/returns, excl. taxes+shipping); the
@@ -1041,7 +1040,6 @@ export default function OverviewContent() {
 
       {/* ── The intelligence layer: what moved yesterday, why, and what to do.
           Below every metric card, so the numbers come first. ── */}
-      {!isPartner && <DailyBrief isAdmin={session?.user?.role === 'admin'} />}
 
       {metrics.newCustomers !== undefined && metrics.newCustomers > 0 && tfRaw !== 'today' && !isPartner && (
         <NcacBreakdown tf={tfRaw} dateFrom={dateFrom} dateTo={dateTo} compare={compareOn} compareTo={compareTo} targetCac={TARGET_CAC} />

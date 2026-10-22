@@ -7,7 +7,7 @@
 // and nudge the next step when it stalls, so progress never depends on
 // background execution being kept alive.
 import Anthropic from '@anthropic-ai/sdk';
-import { AI_FAST, AI_BEST } from '@/src/lib/aiModels';
+import { AI_FAST } from '@/src/lib/aiModels';
 import { getClient, marketplaces } from '@/src/lib/client';
 import { ANALYST_TOOLS, execTool, makeFetcher } from '@/src/lib/analystTools';
 import { saveReport, isChatStoreConfigured, setKV, getKV } from '@/src/lib/chatStore';
@@ -206,7 +206,7 @@ You are PLANNING a shareable report that another process will build one section 
 
 Rules:
 - title: the report's name (what it's about; include the period and year). subtitle: "${brand.name} · Prepared ${prettyDate}".
-- 1 to 8 sections, in reading order. For a simple question, 1–2 sections. For an end-of-month / team report, one section per area the operator listed. For content deliverables (campaign copy, briefs), group the items into sections of at most 4 items each so every item gets full copy.
+- 1 to 5 sections, in reading order (never more than 5; merge related areas into one section when the operator lists many). For a simple question, 1–2 sections. For an end-of-month / team report, one section per area the operator listed. For content deliverables (campaign copy, briefs), group the items into sections of at most 4 items each so every item gets full copy.
 - Each focus is a COMPLETE brief (at most 2500 characters) for that section's builder, which does NOT see this conversation: what to cover, the exact date range(s) with years, which tools to call (get_metrics, get_ad_performance, get_ad_creatives, get_organic_content, get_marketplace_channel, get_top_products, get_customer_intel, get_retention, get_attribution, get_returns, get_product_catalog…), what to compare, which visuals (stat tiles / table / chart / image cards), and EVERY standing instruction or correction from the operator that applies to it.
 - End with a "Recommendations" section for data reports (focus: concrete next steps, drawn from the other sections' topics). Not for pure content deliverables.`;
   // The plan comes back through a tool call, so the API guarantees well-formed
@@ -233,7 +233,7 @@ Rules:
   let lastErr = '';
   for (let attempt = 0; attempt < 2 && !plan; attempt++) {
     const res = await client.messages.create({
-      model: AI_BEST, max_tokens: 16000,
+      model: AI_FAST, max_tokens: 16000,
       thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
       system,
       tools: [planTool], tool_choice: { type: 'tool', name: 'plan_report' },
@@ -248,7 +248,7 @@ Rules:
     try { plan = JSON.parse(cleaned.slice(Math.max(0, cleaned.indexOf('{')), cleaned.lastIndexOf('}') + 1)) as Plan; } catch (e) { lastErr = e instanceof Error ? e.message : String(e); }
   }
   if (!plan) throw new Error(`Couldn't plan the report (${lastErr || 'no plan returned'}) — try again.`);
-  const sections = (plan.sections || []).filter(s => s && s.title && s.focus).slice(0, 8);
+  const sections = (plan.sections || []).filter(s => s && s.title && s.focus).slice(0, 5);
   if (!sections.length) throw new Error('The planner returned no sections — try a more specific request.');
   await patchJob(since, {
     status: 'running', step: 'section:0', stage: `Section 1 of ${sections.length} · ${sections[0].title}`,
@@ -291,7 +291,7 @@ CONTENT DELIVERABLES — when the brief asks for copy the team will use, write e
   for (let iter = 0; iter < MAX_ITERS; iter++) {
     const lastRound = iter === MAX_ITERS - 1;
     const response = await client.messages.stream({
-      model: AI_BEST, max_tokens: 14000,
+      model: AI_FAST, max_tokens: 14000,
       thinking: { type: 'adaptive' }, output_config: { effort: 'medium' },
       system,
       tools: lastRound ? [] : ANALYST_TOOLS,

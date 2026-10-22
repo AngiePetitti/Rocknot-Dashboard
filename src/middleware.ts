@@ -21,7 +21,6 @@ export async function middleware(req: NextRequest) {
 
   // Slack Events API posts here with its own HMAC signature, verified inside
   // the route — no dashboard session exists on Slack's servers.
-  if (pathname === '/api/slack/events') return NextResponse.next();
 
   // Vercel Cron / internal service calls authenticate with the CRON_SECRET
   // bearer token instead of a user session (used by the Monday restock alert).
