@@ -13,6 +13,40 @@ import { getClient } from '@/src/lib/client';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
+// Structured output: the model can only answer with this shape, so a plan can
+// never come back as half-finished JSON. A cut-off (output limit) is reported
+// as such instead of "Unexpected end of JSON input".
+const CAMPAIGN = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['date', 'channel', 'title', 'type', 'audience', 'goal', 'subjectLines', 'previewText', 'heroHeadline', 'bodyCopy', 'cta', 'designBrief', 'bestPractice'],
+  properties: {
+    date: { type: 'string', description: 'YYYY-MM-DD' },
+    channel: { type: 'string', enum: ['Email', 'SMS'] },
+    title: { type: 'string', description: 'Internal campaign name' },
+    type: { type: 'string', enum: ['Launch', 'Promo', 'Value', 'Winback', 'Back in stock', 'Tease'] },
+    audience: { type: 'string' },
+    goal: { type: 'string' },
+    subjectLines: { type: 'array', items: { type: 'string' }, description: 'Email: 3 subject lines. SMS: 2-3 message variants under 160 chars' },
+    previewText: { type: 'string' },
+    heroHeadline: { type: 'string' },
+    bodyCopy: { type: 'string', description: '2-3 short paragraphs' },
+    cta: { type: 'string' },
+    designBrief: { type: 'string' },
+    bestPractice: { type: 'string', description: 'Why this send, one line' },
+  },
+} as const;
+const PLAN_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['monthOverview', 'campaigns'],
+  properties: {
+    monthOverview: { type: 'string', description: '2-3 sentence strategy summary' },
+    campaigns: { type: 'array', items: CAMPAIGN },
+  },
+} as const;
+
+
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // The retention plan can exceed a sheet cell — chunk it across KV keys.
@@ -143,12 +177,17 @@ For SMS, subjectLines holds the 2-3 message variants (with emoji, under 160 char
   try {
     const msg = await client.messages.stream({
       model: AI_FAST,
-      max_tokens: 20000,
+      max_tokens: 32000,
+      output_config: { format: { type: 'json_schema', schema: PLAN_SCHEMA } },
       messages: [{ role: 'user', content: prompt }],
     }).finalMessage();
+    if (msg.stop_reason === 'max_tokens') throw new Error('The plan was cut off before it finished (output limit reached). Try Regenerate again; if it repeats, the catalog and brief are too long for one plan.');
+    if (msg.stop_reason === 'refusal') throw new Error('The model declined to write this plan. Try Regenerate again.');
     const text = msg.content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('');
     const jsonStr = text.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim();
-    const parsed = JSON.parse(jsonStr.slice(jsonStr.indexOf('{')));
+    let parsed: unknown;
+    try { parsed = JSON.parse(jsonStr.slice(jsonStr.indexOf('{'))); }
+    catch { throw new Error(`The plan came back unreadable (${text.length.toLocaleString()} chars, stop reason ${msg.stop_reason}). Try Regenerate again.`); }
     const payload = { plan: parsed, generatedAt: new Date().toISOString() };
     await saveLarge('retention_plan', JSON.stringify(payload));
     return NextResponse.json(payload);

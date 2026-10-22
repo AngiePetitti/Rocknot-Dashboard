@@ -85,8 +85,12 @@ export default function RetentionContent() {
     setGenError(null);
     try {
       const res = await fetch('/api/retention/plan', { method: 'POST' });
-      const d = await res.json();
-      if (!res.ok || d.error) throw new Error(d.error || 'Generation failed');
+      // An empty or non-JSON body means the request was cut off (a timeout or
+      // a dropped connection) — say that instead of "Unexpected end of JSON input".
+      const raw = await res.text();
+      let d: { error?: string } & Record<string, unknown> = {};
+      try { d = raw ? JSON.parse(raw) : {}; } catch { throw new Error(`The plan request did not complete (HTTP ${res.status}). The page may have lost the connection while the plan was being written — try again.`); }
+      if (!res.ok || d.error) throw new Error(d.error || `Generation failed (HTTP ${res.status})`);
       setPlan(d);
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Generation failed');
