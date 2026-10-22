@@ -78,7 +78,9 @@ const TOOLBAR = `
        and keep headings attached to the content below them. (Containers
        taller than a page still break — the browser ignores avoid there.) */
     body { background: #fff !important; }
-    div, section, table, svg, figure, ul, ol { break-inside: avoid; page-break-inside: avoid; }
+    /* Cards flow across pages (forcing every card onto its own page turned a
+       12-page report into 31). Only tables, charts and stat tiles stay whole. */
+    table, svg, figure, .tiles, .chart, .grid, .note, .warn, .bad { break-inside: avoid; page-break-inside: avoid; }
     h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
     tr, li { break-inside: avoid; }
   }
@@ -173,7 +175,7 @@ table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0}th{text-al
 .bad{background:#fef2f2;border:1px solid #fee2e2;border-radius:12px;padding:10px 14px;font-size:13px;color:#991b1b;margin:10px 0}
 ul{margin:6px 0 6px 18px;padding:0}li{margin:4px 0}
 footer{color:#9ca3af;font-size:12px;text-align:center;margin-top:24px}
-@page{margin:12mm}@media print{body{background:#fff}.card{break-inside:avoid;page-break-inside:avoid}h1,h2,h3{break-after:avoid}tr,li{break-inside:avoid}.chart{overflow:visible}}
+@page{margin:12mm}@media print{body{background:#fff}h1,h2,h3{break-after:avoid}tr,li{break-inside:avoid}.chart{overflow:visible}}
 `;
 
 function baseContext(payload: ReportPayload, brandBrief: string): string {
@@ -206,7 +208,7 @@ You are PLANNING a shareable report that another process will build one section 
 
 Rules:
 - title: the report's name (what it's about; include the period and year). subtitle: "${brand.name} · Prepared ${prettyDate}".
-- 1 to 5 sections, in reading order (never more than 5; merge related areas into one section when the operator lists many). For a simple question, 1–2 sections. For an end-of-month / team report, one section per area the operator listed. For content deliverables (campaign copy, briefs), group the items into sections of at most 4 items each so every item gets full copy.
+- SHORT BY DEFAULT. The operator has said repeatedly that reports are too long, wordy and chart-heavy. Plan 2 to 4 sections (never more than 5) that a team member reads in under five minutes; merge related areas into one section. Put "KEEP IT SHORT: one visual at most, prose under 120 words, no background explanations" into every section focus unless the operator explicitly asked for a long or detailed report. For a simple question, 1–2 sections. For an end-of-month / team report, one section per area the operator listed. For content deliverables (campaign copy, briefs), group the items into sections of at most 4 items each so every item gets full copy.
 - Each focus is a COMPLETE brief (at most 2500 characters) for that section's builder, which does NOT see this conversation: what to cover, the exact date range(s) with years, which tools to call (get_metrics, get_ad_performance, get_ad_creatives, get_organic_content, get_marketplace_channel, get_top_products, get_customer_intel, get_retention, get_attribution, get_returns, get_product_catalog…), what to compare, which visuals (stat tiles / table / chart / image cards), and EVERY standing instruction or correction from the operator that applies to it.
 - End with a "Recommendations" section for data reports (focus: concrete next steps, drawn from the other sections' topics). Not for pure content deliverables.`;
   // The plan comes back as structured output (a JSON schema the model must
@@ -272,6 +274,8 @@ You are building ONE SECTION of a larger report: "${job?.title}". Other sections
 - Callouts: <div class="note">…</div>, <div class="warn">…</div>, <div class="bad">…</div>.
 - Lists: <ul><li>…</li></ul>.
 Section number for the chip: ${index + 1}.
+
+LENGTH BUDGET (hard rules — the operator has rejected long reports repeatedly): one or two cards for this section, at most ONE visual (a stat-tile row, OR one table, OR one chart — not several), prose under 120 words total, no callout that restates what a table already shows, no methodology or "why we judge it this way" paragraphs, no repeated numbers. Lead with the decision or number that matters; cut everything else. Only when the section brief explicitly says the operator asked for a detailed or long report may you exceed this.
 
 PRODUCT TRUTH — before writing any copy that mentions a product, call get_product_catalog and use ONLY what appears there; never feature anything marked sold out.
 CONTENT DELIVERABLES — when the brief asks for copy the team will use, write every item out in full (subject line, preview, body, CTA …), never "similar to above".`;
