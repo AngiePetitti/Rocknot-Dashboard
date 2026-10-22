@@ -195,7 +195,24 @@ If the operator asks for a report / PDF / shareable document, call create_report
       break;
     }
 
-    if (!answer) answer = 'I ran out of analysis steps before finishing — try asking a more specific question.';
+    // Out of data steps: never give up with a shrug. One last turn with the
+    // tools switched off makes Cleo write the answer from what it already
+    // pulled and say plainly what it could not check.
+    if (!answer) {
+      try {
+        const wrap = await client.messages.create({
+          model: AI_FAST,
+          max_tokens: 8000,
+          thinking: { type: 'adaptive' },
+          system: voiceSystem,
+          tools: [...ANALYST_TOOLS, CREATE_REPORT_TOOL],
+          tool_choice: { type: 'none' },
+          messages: [...messages, { role: 'user', content: 'You have used all your data-gathering steps for this question. Write your full answer now from the data you already have. If something important could not be checked, say so in one line at the end rather than asking the operator to narrow the question.' }],
+        });
+        answer = wrap.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+      } catch { /* fall through to the plain message */ }
+    }
+    if (!answer) answer = 'I gathered the data but could not finish writing the answer — ask again and I will pick up from here.';
 
     // Safety net: Cleo sometimes *says* the report is being built without
     // calling create_report. If the operator asked for a report and the
