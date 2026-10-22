@@ -242,6 +242,55 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'add_calendar_events',
+    description: "Add one or MANY entries to the dashboard's Marketing Calendar in ONE call (the same calendar the team sees on the Marketing Calendar tab). Use for launches, sales, email/SMS sends, content, photo shoots, influencer dates, deadlines. Call get_marketing_calendar first to avoid duplicates. Each entry needs a title, a start date, and a type; give an end_date for multi-day windows (a sale, early access) and put the full detail (offer, audience, collection link, copy notes) in description.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        events: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              date: { type: 'string', description: 'YYYY-MM-DD start' },
+              end_date: { type: 'string', description: 'YYYY-MM-DD end (optional, multi-day)' },
+              type: { type: 'string', enum: ['launch', 'sale', 'email', 'sms', 'content', 'photo_shoot', 'influencer', 'deadline', 'other'] },
+              channel: { type: 'string', description: 'Email / SMS / Paid / Organic / Other (free text, comma-separated allowed)' },
+              status: { type: 'string', enum: ['planned', 'live', 'done'], description: 'Default planned' },
+              description: { type: 'string', description: 'Details the team needs: offer, audience, products or collection, links, notes' },
+            },
+            required: ['title', 'date', 'type'],
+          },
+        },
+      },
+      required: ['events'],
+    },
+  },
+  {
+    name: 'update_calendar_event',
+    description: "Change an existing Marketing Calendar entry (move the date, rename, change type/status/channel/description). Needs the event id from get_marketing_calendar. Only the fields given are changed.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        title: { type: 'string' },
+        date: { type: 'string', description: 'YYYY-MM-DD' },
+        end_date: { type: 'string', description: 'YYYY-MM-DD, or empty string to clear' },
+        type: { type: 'string', enum: ['launch', 'sale', 'email', 'sms', 'content', 'photo_shoot', 'influencer', 'deadline', 'other'] },
+        channel: { type: 'string' },
+        status: { type: 'string', enum: ['planned', 'live', 'done'] },
+        description: { type: 'string' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'delete_calendar_event',
+    description: 'Remove a Marketing Calendar entry by id (from get_marketing_calendar). Only when the operator asked to remove or replace it.',
+    input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  {
     name: 'create_task',
     description: "Create one task — or MANY AT ONCE via the `tasks` array — on the team's Tasks board. For multiple tasks (a campaign calendar, a checklist) ALWAYS use ONE call with the `tasks` array, never repeated single calls. Never create duplicates — call get_tasks first if unsure.",
     input_schema: {
@@ -448,14 +497,18 @@ True bag stock: ${bags.slice(0, 40).map(b => `${b.product} ${b.currentStock}u ($
 
   if (name === 'get_marketing_calendar') {
     const d = await get('/api/calendar');
-    const events = (d?.events as { title: string; date: string; endDate?: string; type: string; status?: string; channel?: string }[]) ?? [];
+    const events = (d?.events as { id: string; title: string; date: string; endDate?: string; type: string; status?: string; channel?: string; description?: string }[]) ?? [];
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const cutoff = new Date(Date.now() - 14 * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const line = (e: typeof events[number]) => `- ${e.date}${e.endDate && e.endDate !== e.date ? ` → ${e.endDate}` : ''}: ${e.title} (${e.type}${e.channel ? ', ' + e.channel : ''}${e.status ? ', ' + e.status : ''}) [id ${e.id}]${e.description ? ` — ${e.description.replace(/\s+/g, ' ').slice(0, 160)}` : ''}`;
     const live = events.filter(e => e.date && e.date <= today && (e.endDate || e.date) >= today);
-    const upcoming = events.filter(e => e.date && e.date > today).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 30);
-    if (!live.length && !upcoming.length) return 'No live or upcoming events on the marketing calendar.';
-    return `Marketing calendar:
-Live now: ${live.map(e => `${e.title} (${e.type}, thru ${e.endDate || e.date})`).join(' | ') || 'nothing'}
-Upcoming: ${upcoming.map(e => `${e.date}: ${e.title} (${e.type}${e.channel ? ', ' + e.channel : ''}${e.status ? ', ' + e.status : ''})`).join(' | ') || 'nothing scheduled'}`;
+    const upcoming = events.filter(e => e.date && e.date > today).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 80);
+    const recent = events.filter(e => e.date && (e.endDate || e.date) < today && e.date >= cutoff).sort((a, b) => a.date.localeCompare(b.date));
+    if (!live.length && !upcoming.length && !recent.length) return 'The marketing calendar is empty for the last two weeks and everything ahead. You can add entries with add_calendar_events.';
+    return `Marketing calendar (ids are for update_calendar_event / delete_calendar_event):
+LIVE NOW:\n${live.map(line).join('\n') || '- nothing'}
+UPCOMING:\n${upcoming.map(line).join('\n') || '- nothing scheduled'}
+LAST 14 DAYS:\n${recent.map(line).join('\n') || '- nothing'}`;
   }
 
   if (name === 'get_financials') {
@@ -738,6 +791,50 @@ SMS: ${owned?.overview ? `${$(owned.overview.sms.revenue)} total · ` : ''}${own
     if (!id) return 'Error: id is required (from get_tasks).';
     const d = await get(`/api/tasks?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
     return d?.ok ? `Task ${id} deleted.` : `Error: could not delete task ${id} (does it still exist?).`;
+  }
+
+  if (name === 'add_calendar_events') {
+    const TYPES = ['launch', 'sale', 'email', 'sms', 'content', 'photo_shoot', 'influencer', 'deadline', 'other'];
+    const list = Array.isArray(input.events) ? (input.events as Array<Record<string, unknown>>) : [];
+    const events = list.map(e => ({
+      title: String(e.title ?? '').trim(),
+      date: String(e.date ?? ''),
+      endDate: DATE_RE.test(String(e.end_date ?? '')) ? String(e.end_date) : undefined,
+      type: TYPES.includes(String(e.type)) ? String(e.type) : 'other',
+      channel: e.channel ? String(e.channel) : undefined,
+      status: ['planned', 'live', 'done'].includes(String(e.status)) ? String(e.status) : 'planned',
+      description: e.description ? String(e.description) : undefined,
+    }));
+    const bad = events.find(e => !e.title || !DATE_RE.test(e.date));
+    if (!events.length || bad) return 'Error: every event needs a title and a date (YYYY-MM-DD).';
+    const d = await get('/api/calendar', { method: 'POST', body: { events } });
+    if (!d || d.error) return `Error: could not add to the calendar (${d?.error || 'no response'}).`;
+    return `Added ${events.length} calendar entr${events.length === 1 ? 'y' : 'ies'}: ${events.map(e => `${e.date}${e.endDate ? '→' + e.endDate : ''} ${e.title}`).join(' · ')}. They are on the Marketing Calendar tab now.`;
+  }
+
+  if (name === 'update_calendar_event') {
+    const id = String(input.id ?? '').trim();
+    if (!id) return 'Error: id is required (see get_marketing_calendar).';
+    const body: Record<string, unknown> = {};
+    if (input.title != null) body.title = String(input.title);
+    if (input.date != null) { if (!DATE_RE.test(String(input.date))) return 'Error: date must be YYYY-MM-DD.'; body.date = String(input.date); }
+    if (input.end_date != null) body.endDate = DATE_RE.test(String(input.end_date)) ? String(input.end_date) : undefined;
+    if (input.type != null) body.type = String(input.type);
+    if (input.channel != null) body.channel = String(input.channel);
+    if (input.status != null) body.status = String(input.status);
+    if (input.description != null) body.description = String(input.description);
+    const d = await get(`/api/calendar/${encodeURIComponent(id)}`, { method: 'PUT', body });
+    if (!d || d.error) return `Error: could not update ${id} (${d?.error || 'no response'}).`;
+    const ev = d.event as { date: string; title: string } | undefined;
+    return `Updated calendar entry ${id}${ev ? `: ${ev.date} ${ev.title}` : ''}.`;
+  }
+
+  if (name === 'delete_calendar_event') {
+    const id = String(input.id ?? '').trim();
+    if (!id) return 'Error: id is required (see get_marketing_calendar).';
+    const d = await get(`/api/calendar/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!d || d.error) return `Error: could not delete ${id} (${d?.error || 'no response'}).`;
+    return `Deleted calendar entry ${id}.`;
   }
 
   if (name === 'create_task') {
