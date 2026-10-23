@@ -198,7 +198,7 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
             const isOpen = openEvent === ev.id || (!tbd && openEvent === null && upcoming[0]?.id === ev.id && days <= 7);
             const allDone = done === template.length;
             return (
-              <div key={ev.id} className={`relative border rounded-xl ${allDone ? 'border-green-200 bg-green-50/30' : overdue ? 'border-red-200 bg-red-50/30' : 'border-gray-200'}`}>
+              <div key={ev.id} className={`border rounded-xl ${allDone ? 'border-green-200 bg-green-50/30' : overdue ? 'border-red-200 bg-red-50/30' : 'border-gray-200'}`}>
                 <button
                   onClick={() => setOpenEvent(isOpen ? '' : ev.id)}
                   className="w-full flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2.5 text-left"
@@ -215,14 +215,16 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
                       ⚠ {overdue} due now
                     </span>
                   )}
-                  <span className="ml-auto text-gray-300 text-sm">{isOpen ? '▾' : '▸'}</span>
-                </button>
-                <button
-                  onClick={e => { e.stopPropagation(); if (confirm(`Skip the checklist for “${ev.title}”? It moves to Skipped (restorable) and stops counting as due.`)) setSkip(ev.id, true); }}
-                  title="Skip this launch's checklist"
-                  className="absolute top-2 right-8 text-[11px] font-semibold text-gray-300 hover:text-red-500"
-                >
-                  Skip ✕
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={e => { e.stopPropagation(); if (confirm(`Skip the checklist for “${ev.title}”? It moves to Skipped (restorable) and stops counting as due.`)) setSkip(ev.id, true); }}
+                    title="Skip this launch's checklist"
+                    className="ml-auto text-[11px] font-semibold text-gray-400 border border-gray-200 rounded-lg px-2 py-1 hover:text-red-500 hover:border-red-300 whitespace-nowrap"
+                  >
+                    Skip ✕
+                  </span>
+                  <span className="text-gray-300 text-sm">{isOpen ? '▾' : '▸'}</span>
                 </button>
                 {isOpen && (
                   <div className="px-3 pb-3 space-y-1">
