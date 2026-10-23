@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 
 export interface TemplateItem { label: string; daysBefore: number }
 export interface EventChecks { [label: string]: { done: boolean; by?: string; at?: string } }
-interface Store { template: TemplateItem[]; byEvent: Record<string, EventChecks> }
+interface Store { template: TemplateItem[]; byEvent: Record<string, EventChecks>; skipped?: string[] }
 
 const DOC = 'launch_playbook';
 
@@ -44,7 +44,7 @@ async function loadStrict(): Promise<Store> {
   const raw = await loadDoc(DOC);
   if (raw) {
     const parsed = JSON.parse(raw) as Store;
-    if (Array.isArray(parsed.template) && parsed.template.length) return { template: parsed.template, byEvent: parsed.byEvent || {} };
+    if (Array.isArray(parsed.template) && parsed.template.length) return { template: parsed.template, byEvent: parsed.byEvent || {}, skipped: Array.isArray(parsed.skipped) ? parsed.skipped : [] };
   }
   return { template: DEFAULT_TEMPLATE, byEvent: {} };
 }
@@ -91,12 +91,22 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const eventId = String(body.eventId || '');
   const label = String(body.label || '').slice(0, 200);
-  if (!eventId || !label) return NextResponse.json({ error: 'eventId and label required' }, { status: 400 });
+  const skipOp = typeof body.skip === 'boolean';
+  if (!eventId || (!label && !skipOp)) return NextResponse.json({ error: 'eventId and label (or skip) required' }, { status: 400 });
   let store: Store;
   try {
     store = await loadStrict();
   } catch {
     return NextResponse.json({ error: 'Storage is busy (Sheets quota) — tap the box again in a few seconds.' }, { status: 503 });
+  }
+  // Skip / restore a whole launch's checklist — a launch that isn't
+  // happening shouldn't sit red forever.
+  if (skipOp) {
+    const set = new Set(store.skipped || []);
+    if (body.skip) set.add(eventId); else set.delete(eventId);
+    store.skipped = Array.from(set).slice(-200);
+    await saveDoc(DOC, JSON.stringify(store));
+    return NextResponse.json({ ok: true, skipped: store.skipped });
   }
   const checks = store.byEvent[eventId] || {};
   checks[label] = { done: Boolean(body.done), ...(by ? { by } : {}), at: new Date().toISOString() };

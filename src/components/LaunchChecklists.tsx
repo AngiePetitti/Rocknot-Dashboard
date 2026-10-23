@@ -20,6 +20,8 @@ function daysUntil(date: string): number {
 export default function LaunchChecklists({ events, isAdmin }: { events: MarketingEvent[]; isAdmin: boolean }) {
   const [template, setTemplate] = useState<TemplateItem[]>([]);
   const [byEvent, setByEvent] = useState<Record<string, EventChecks>>({});
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  const [showSkipped, setShowSkipped] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [openEvent, setOpenEvent] = useState<string | null>(null);
   const [editingTemplate, setEditingTemplate] = useState(false);
@@ -32,6 +34,7 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
       .then(d => {
         if (Array.isArray(d?.template)) setTemplate(d.template);
         if (d?.byEvent) setByEvent(d.byEvent);
+        if (Array.isArray(d?.skipped)) setSkipped(new Set(d.skipped));
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
@@ -74,10 +77,10 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
   const eligible = useMemo(() => events
     .filter(e => needsChecklist(e) && e.status !== 'done' && !isTbd(e) && daysUntil(e.date) >= -1 && daysUntil(e.date) <= 21), [events]);
   const upcoming = useMemo(() => eligible
-    .filter(e => !allChecked(e))
+    .filter(e => !allChecked(e) && !skipped.has(e.id))
     .sort((a, b) => a.date.localeCompare(b.date)),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [eligible, template, byEvent]);
+  [eligible, template, byEvent, skipped]);
   const completedCount = eligible.length - upcoming.length;
 
   // Undated launches wait in a compact holding list — checklist available,
@@ -85,7 +88,7 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
   // marked Live or Done has launched: it is no longer "waiting on a date".
   const awaitingDate = useMemo(() => {
     return events
-      .filter(e => needsChecklist(e) && isTbd(e) && e.status !== 'live' && e.status !== 'done' && daysUntil(e.date) >= -45)
+      .filter(e => needsChecklist(e) && !skipped.has(e.id) && isTbd(e) && e.status !== 'live' && e.status !== 'done' && daysUntil(e.date) >= -45)
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [events]);
   const [showAwaiting, setShowAwaiting] = useState(false);
@@ -94,6 +97,25 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
   // rapid checking fired parallel requests that overwrote each other and
   // silently dropped checks (8/11 after checking all 11).
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  function setSkip(eventId: string, skip: boolean) {
+    setSkipped(prev => {
+      const next = new Set(prev);
+      if (skip) next.add(eventId); else next.delete(eventId);
+      return next;
+    });
+    saveQueue.current = saveQueue.current.then(async () => {
+      try {
+        const res = await fetch('/api/launch/checklist', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId, skip }),
+        });
+        if (!res.ok) throw new Error('save failed');
+      } catch {
+        setError('Could not save the skip — check your connection and tap again.');
+      }
+    });
+  }
   function toggle(eventId: string, label: string, done: boolean) {
     setByEvent(prev => ({
       ...prev,
@@ -176,7 +198,7 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
             const isOpen = openEvent === ev.id || (!tbd && openEvent === null && upcoming[0]?.id === ev.id && days <= 7);
             const allDone = done === template.length;
             return (
-              <div key={ev.id} className={`border rounded-xl ${allDone ? 'border-green-200 bg-green-50/30' : overdue ? 'border-red-200 bg-red-50/30' : 'border-gray-200'}`}>
+              <div key={ev.id} className={`relative border rounded-xl ${allDone ? 'border-green-200 bg-green-50/30' : overdue ? 'border-red-200 bg-red-50/30' : 'border-gray-200'}`}>
                 <button
                   onClick={() => setOpenEvent(isOpen ? '' : ev.id)}
                   className="w-full flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2.5 text-left"
@@ -194,6 +216,13 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
                     </span>
                   )}
                   <span className="ml-auto text-gray-300 text-sm">{isOpen ? '▾' : '▸'}</span>
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); if (confirm(`Skip the checklist for “${ev.title}”? It moves to Skipped (restorable) and stops counting as due.`)) setSkip(ev.id, true); }}
+                  title="Skip this launch's checklist"
+                  className="absolute top-2 right-8 text-[11px] font-semibold text-gray-300 hover:text-red-500"
+                >
+                  Skip ✕
                 </button>
                 {isOpen && (
                   <div className="px-3 pb-3 space-y-1">
@@ -235,6 +264,25 @@ export default function LaunchChecklists({ events, isAdmin }: { events: Marketin
             {upcoming.length > 0 && (
               <div className="flex flex-col gap-2">{upcoming.map(ev => renderEvent(ev, false))}</div>
             )}
+
+            {skipped.size > 0 && (() => {
+              const skippedEvents = events.filter(e => skipped.has(e.id));
+              if (!skippedEvents.length) return null;
+              return (
+                <div className="mt-3 pt-2 border-t border-gray-100">
+                  <button onClick={() => setShowSkipped(v => !v)} className="text-[11px] font-semibold text-gray-400">
+                    {showSkipped ? '▾' : '▸'} Skipped ({skippedEvents.length})
+                  </button>
+                  {showSkipped && skippedEvents.map(e => (
+                    <div key={e.id} className="flex items-center gap-2 pl-4 py-1">
+                      <span className="text-xs text-gray-400 line-through flex-1 truncate">{e.title}</span>
+                      <button onClick={() => setSkip(e.id, false)} className="text-[11px] font-semibold text-violet-600">↺ Restore</button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
             {awaitingDate.length > 0 && (
               <div className={upcoming.length > 0 ? 'mt-3 pt-2 border-t border-gray-100' : ''}>
                 <button

@@ -161,6 +161,7 @@ export default function OverviewContent() {
       };
       const template = (play?.template || []) as { label: string; daysBefore: number }[];
       const byEvent = (play?.byEvent || {}) as Record<string, Record<string, { done: boolean }>>;
+      const skippedIds = new Set((Array.isArray(play?.skipped) ? play.skipped : []) as string[]);
       if (!Array.isArray(allEvents) || !allEvents.length) {
         setLaunchAlertNote(cal?.error ? `Launch alerts unavailable — calendar error: ${String(cal.error).slice(0, 120)}` : 'Launch alerts unavailable — calendar failed to load.');
         return;
@@ -171,7 +172,7 @@ export default function OverviewContent() {
       }
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
       const inWindow = allEvents
-        .filter(e => (e.type === 'launch' || e.type === 'sale') && !/email|sms/i.test(e.channel || '') && !/\b(email|sms|text)\b/i.test(e.title || ''))
+        .filter(e => (e.type === 'launch' || e.type === 'sale') && !/email|sms/i.test(e.channel || '') && !/\b(email|sms|text)\b/i.test(e.title || '') && !skippedIds.has(e.id))
         .map(e => ({ e, days: Math.round((Date.parse(e.date) - Date.parse(today)) / 86400000) }))
         .filter(x => x.days >= -1 && x.days <= 7);
       const tbdCount = inWindow.filter(x => isTbd(x.e)).length;
