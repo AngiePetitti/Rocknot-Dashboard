@@ -1,6 +1,6 @@
 import { runQuery, getDataset, dedupedOrdersCte, tableExists, dailyShopifySalesSql, shopifyOrdersFilter, googleSource, metaSource } from '@/src/lib/bigquery';
 import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
-import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees, storeOnlyWhere, salesWhere } from '@/src/lib/client';
+import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees, storeOnlyWhere, salesWhere, merBasis } from '@/src/lib/client';
 import { fetchHumanConversion } from '@/src/lib/traffic';
 import { fetchMarketplaceTotals, MarketplaceTotals } from '@/src/lib/channel';
 import { runShopifyQLRaw } from '@/src/lib/shopifyql';
@@ -11,6 +11,9 @@ export interface OverviewResult {
   metrics: {
     totalRevenue: number;
     netSales?: number;
+    /** The sales figure MER was divided from (net sales, or gross − discounts when the profile's merBasis says so). */
+    merNetSales?: number;
+    merBasis?: 'net' | 'gross_less_discounts';
     /** Return fees folded into netSales (only when the profile's includeReturnFees is on). */
     returnFees?: number;
     totalOrders: number;
@@ -608,7 +611,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const shopifyByDate: Record<string, ShopifyDay> = {};
   for (const s of shopifyDays) shopifyByDate[s.date] = s;
 
-  let totalRevenue = 0, totalNetSales = 0, totalReturnFees = 0, totalAovBasis = 0, totalOrders = 0;
+  let totalRevenue = 0, totalNetSales = 0, totalGld = 0, totalReturnFees = 0, totalAovBasis = 0, totalOrders = 0;
   let metaSpend = 0, googleSpend = 0, tiktokSpend = 0, snapchatSpend = 0, pinterestSpend = 0;
   let metaRevenue = 0, googleRevenue = 0, tiktokRevenue = 0, snapchatRevenue = 0, pinterestRevenue = 0;
 
@@ -629,6 +632,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
 
     totalRevenue += revenue;
     totalNetSales += s ? s.netSales : 0;
+    totalGld += s ? (s.grossLessDiscounts || 0) : 0;
     totalReturnFees += s ? s.returnFees : 0;
     totalAovBasis += s ? s.aovBasis : 0;
     totalOrders += orders;
@@ -688,11 +692,13 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   if (shopifyTotals) {
     totalRevenue = shopifyTotals.totalSales;
     totalNetSales = shopifyTotals.netSales;
+    totalGld = shopifyTotals.grossLessDiscounts || 0;
     totalReturnFees = shopifyTotals.returnFees;
     totalAovBasis = shopifyTotals.aovBasis;
     totalOrders = shopifyTotals.orders;
   }
 
+  const totalMerSales = merBasis() === 'gross_less_discounts' ? (totalGld || totalNetSales) : totalNetSales;
   return {
     metrics: {
       totalRevenue: Math.round(totalRevenue),
@@ -705,9 +711,12 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       aov: totalOrders > 0
         ? Math.round(((totalAovBasis > 0 ? totalAovBasis : totalNetSales - totalReturnFees) / totalOrders) * 100) / 100
         : 0,
-      // True MER: NET sales (after discounts/returns, excl. taxes+shipping)
-      // over net ad spend — total sales flattered the ratio by ~6%.
-      mer: netAdSpend > 0 ? Math.round((totalNetSales / netAdSpend) * 100) / 100 : 0,
+      // MER numerator per the client profile: net sales (after discounts and
+      // returns) by default, or gross − discounts (before returns) for clients
+      // whose merBasis says so. Total sales would flatter the ratio by ~6%.
+      merNetSales: Math.round(totalMerSales),
+      merBasis: merBasis(),
+      mer: netAdSpend > 0 ? Math.round((totalMerSales / netAdSpend) * 100) / 100 : 0,
       adCreditApplied: Math.round(adCreditApplied * 100) / 100,
       netAdSpend: Math.round(netAdSpend * 100) / 100,
       returns: 0,
