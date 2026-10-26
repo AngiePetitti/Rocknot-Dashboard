@@ -77,6 +77,7 @@ interface LiveMetrics {
   marketplaces?: Array<{ key: string; label: string; netSales: number; totalSales: number; orders: number; returnFees: number; inMer?: boolean; inSales?: boolean }>;
   /** MER numerator when marketplace sales count toward MER (all channels). */
   merNetSales?: number;
+  merBasis?: 'net' | 'gross_less_discounts';
 }
 
 interface PriorPeriod {
@@ -714,14 +715,19 @@ export default function OverviewContent() {
       {(() => {
         // MER's net sales can include marketplace channels for some clients (merNetSales).
         const netS = metrics.merNetSales ?? metrics.netSales ?? metrics.totalRevenue;
-        const allChannels = (metrics.merNetSales !== undefined && metrics.merNetSales !== (metrics.netSales ?? metrics.totalRevenue)) || Boolean(metrics.marketplaces?.some(m => m.inSales));
+        // Contribution margin is always on net sales (after returns) — returned
+        // money is gone whatever basis MER uses.
+        const contribBase = metrics.netSales ?? metrics.totalRevenue;
+        const gld = metrics.merBasis === 'gross_less_discounts';
+        const salesLabel = gld ? 'Gross sales less discounts' : 'Net sales';
+        const allChannels = Boolean(metrics.marketplaces?.some(m => m.inSales || m.inMer));
         const adS = metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend;
         const other = expenses ? expenses.range.nonAdMarketing : null;
         const cogsPct = profitBasis?.cogsPct ?? (client.finance.grossMarginPct != null ? 100 - client.finance.grossMarginPct : null);
         const totalMk = other != null ? adS + other : null;
         const flMer = totalMk && totalMk > 0 ? netS / totalMk : null;
-        const contrib = cogsPct != null && totalMk != null ? netS - netS * (cogsPct / 100) - totalMk : null;
-        const cmPct = contrib != null && netS > 0 ? (contrib / netS) * 100 : null;
+        const contrib = cogsPct != null && totalMk != null ? contribBase - contribBase * (cogsPct / 100) - totalMk : null;
+        const cmPct = contrib != null && contribBase > 0 ? (contrib / contribBase) * 100 : null;
         const flGoal = client.goals.targetFullyLoadedMer ?? null;
         const floor = client.goals.contributionFloorPct ?? null;
         const showLoaded = !isPartner && expenses !== null && tfRaw !== 'today';
@@ -750,12 +756,12 @@ export default function OverviewContent() {
             {/* Paid media */}
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Paid media MER</p>
-              <p className="text-[11px] text-gray-400 mb-1">Net sales{allChannels ? ' (all channels)' : ''} ÷ ad spend. The agency&apos;s number.</p>
+              <p className="text-[11px] text-gray-400 mb-1">{salesLabel}{allChannels ? ' (all channels)' : ''} ÷ ad spend. The agency&apos;s number.</p>
               <div className="flex items-end gap-3">
                 <span className="text-5xl sm:text-6xl font-black leading-none" style={{ color: merColor }}>{formatROAS(metrics.mer)}</span>
                 <Badge ok={metrics.mer >= MER_GOAL} goal={MER_GOAL} />
               </div>
-              <p className="text-sm text-gray-500 mt-2 tabular-nums">Net sales {formatCurrency(netS)} ÷ ad spend {formatCurrency(adS)}</p>
+              <p className="text-sm text-gray-500 mt-2 tabular-nums">{salesLabel} {formatCurrency(netS)} ÷ ad spend {formatCurrency(adS)}</p>
               {correctedMer !== null && metrics.mer > 0 && (
                 <p className="text-[11px] font-semibold text-amber-600 mt-1">⚠ Provisional — about {formatCurrency(missingSpend)} of ad spend is still syncing; true MER is likely closer to {correctedMer.toFixed(2)}x.</p>
               )}
@@ -785,7 +791,7 @@ export default function OverviewContent() {
             {showLoaded && (
               <div className="lg:pl-6 pt-5 lg:pt-0 border-t lg:border-t-0 border-gray-100">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Fully loaded MER</p>
-                <p className="text-[11px] text-gray-400 mb-1">Net sales ÷ total marketing. The business&apos;s number.</p>
+                <p className="text-[11px] text-gray-400 mb-1">{salesLabel} ÷ total marketing. The business&apos;s number.</p>
                 {expenses === undefined ? (
                   <p className="text-sm text-gray-400 py-6">Loading marketing costs…</p>
                 ) : (
@@ -794,13 +800,13 @@ export default function OverviewContent() {
                       <span className="text-5xl sm:text-6xl font-black leading-none" style={{ color: okFl == null ? '#1e293b' : okFl ? '#22c55e' : '#ef4444' }}>{flMer != null ? formatROAS(flMer) : '—'}</span>
                       <Badge ok={okFl} goal={flGoal} />
                     </div>
-                    <p className="text-sm text-gray-500 mt-2 tabular-nums">Net sales {formatCurrency(netS)} ÷ total marketing {formatCurrency(totalMk || 0)}</p>
+                    <p className="text-sm text-gray-500 mt-2 tabular-nums">{salesLabel} {formatCurrency(netS)} ÷ total marketing {formatCurrency(totalMk || 0)}</p>
                     <p className="text-[11px] text-gray-400 tabular-nums">Total marketing = ad spend {formatCurrency(adS)} + other marketing {formatCurrency(other || 0)}</p>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 mt-4 pt-3 border-t border-gray-100">
                       <Stat k="Contribution" v={cmPct != null ? `${cmPct.toFixed(1)}%` : '—'} tone={okCm == null ? undefined : okCm ? '#16a34a' : '#dc2626'} />
                       <Stat k={floor != null ? `Floor ${floor}%` : 'Contribution $'} v={contrib != null ? formatCurrency(contrib) : '—'} />
                       <Stat k="Marketing" v={totalMk != null ? formatCurrency(totalMk) : '—'} />
-                      <Stat k="Of net sales" v={netS > 0 && totalMk != null ? `${((totalMk / netS) * 100).toFixed(1)}%` : '—'} />
+                      <Stat k="Of net sales" v={contribBase > 0 && totalMk != null ? `${((totalMk / contribBase) * 100).toFixed(1)}%` : '—'} />
                     </div>
                   </>
                 )}
@@ -815,10 +821,11 @@ export default function OverviewContent() {
             </button>
             {showDefs && (
               <ul className="text-[11px] text-gray-500 mt-2 space-y-1 list-disc pl-4">
-                <li>Net sales = after discounts and returns, before taxes and shipping (total sales {formatCurrency(metrics.totalRevenue)}){(metrics.returnFees ?? 0) > 0 ? `; includes ${formatCurrency(metrics.returnFees!)} in return fees the store keeps` : ''}.</li>
-                <li>Paid media MER = net sales ÷ {metrics.adCreditApplied ? 'net ad spend' : 'ad spend'} on every platform{(metrics.adCreditApplied ?? 0) > 0 ? ` (${formatCurrency(metrics.adCreditApplied!)} Snapchat ad credit deducted; gross ${formatCurrency(metrics.totalAdSpend)})` : ''}. Goal {MER_GOAL}x is the agency&apos;s target.</li>
+                <li>Net sales = after discounts and returns, before taxes and shipping ({formatCurrency(metrics.netSales ?? metrics.totalRevenue)}; total sales {formatCurrency(metrics.totalRevenue)}){(metrics.returnFees ?? 0) > 0 ? `; includes ${formatCurrency(metrics.returnFees!)} in return fees the store keeps` : ''}.</li>
+                {gld && <li>Gross sales less discounts = what was sold at the price paid, before any returns ({formatCurrency(netS)}). Both MERs on this dashboard use it, so a return processed later does not lower the agency&apos;s number; returns show on their own line and in the Returns tab.</li>}
+                <li>Paid media MER = {gld ? 'gross sales less discounts' : 'net sales'} ÷ {metrics.adCreditApplied ? 'net ad spend' : 'ad spend'} on every platform{(metrics.adCreditApplied ?? 0) > 0 ? ` (${formatCurrency(metrics.adCreditApplied!)} Snapchat ad credit deducted; gross ${formatCurrency(metrics.totalAdSpend)})` : ''}. Goal {MER_GOAL}x is the agency&apos;s target.</li>
                 {returnsInfo && <li>Return rate = refunded sales ÷ gross sales for these days ({formatCurrency(returnsInfo.range.returns)} of {formatCurrency(returnsInfo.range.gross)}){returnsInfo.baseline.ratePct != null ? `; baseline is the ${returnsInfo.baseline.months} full month${returnsInfo.baseline.months === 1 ? '' : 's'} before this period (${returnsInfo.baseline.ratePct}%)` : ''}. Shopify counts a return in the period it is processed, so recent weeks rise as returns land. Paid MER stays on net sales; a jump here is a returns conversation, not a worse MER.</li>}
-                {showLoaded && <li>Fully loaded MER = net sales ÷ (ad spend + other marketing). Other marketing is agency, content, email/SMS, tools, photoshoots, SEO and partnerships from the budgeting sheet, prorated to these days{expenses?.range.includesPlan ? '; the current month is plan until actuals are entered' : ''}. Goal {flGoal ?? '—'}x is the business&apos;s target.</li>}
+                {showLoaded && <li>Fully loaded MER = {gld ? 'gross sales less discounts' : 'net sales'} ÷ (ad spend + other marketing). Other marketing is agency, content, email/SMS, tools, photoshoots, SEO and partnerships from the budgeting sheet, prorated to these days{expenses?.range.includesPlan ? '; the current month is plan until actuals are entered' : ''}. Goal {flGoal ?? '—'}x is the business&apos;s target.</li>}
                 {showLoaded && <li>Contribution margin = net sales − cost of goods ({cogsPct ?? '—'}%) − all marketing, as a share of net sales. Floor {floor ?? '—'}%. Rent, non-marketing payroll and other overhead are not included.</li>}
                 {!isPartner && metrics.marketplaces && metrics.marketplaces.length > 0 && metrics.marketplaces.map(m => (
                   <li key={m.key}>{m.label} ({m.orders.toLocaleString()} orders · {formatCurrency(m.netSales)} net) {m.inSales ? 'is included in sales, orders, AOV and MER, not in customers or CAC' : m.inMer ? 'is counted in MER only, not in sales, orders, AOV or customers' : 'is not in any figure on this page'} — see the <Link href={`/dashboard/channel/${m.key}?tf=${tfRaw}`} className="underline">{m.label} tab</Link>.</li>

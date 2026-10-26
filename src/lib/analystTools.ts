@@ -223,7 +223,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_return_rate',
-    description: "Return rate (refunded sales ÷ gross sales, Shopify) for a date range, with a trailing six-month baseline and a by-month series, and whether it is normal / elevated / high vs baseline. Use when asked about returns, refunds, or why paid MER (which is on net sales, after returns) moved. Shopify books a return when it is processed, so the newest weeks rise as returns land.",
+    description: "Return rate (refunded sales ÷ gross sales, Shopify) for a date range, with a trailing six-month baseline and a by-month series, and whether it is normal / elevated / high vs baseline. Use when asked about returns, refunds, or why paid MER moved. Shopify books a return when it is processed, so the newest weeks rise as returns land.",
     input_schema: { type: 'object', properties: { date_from: { type: 'string', description: 'YYYY-MM-DD' }, date_to: { type: 'string', description: 'YYYY-MM-DD' } }, required: ['date_from', 'date_to'] },
   },
   {
@@ -393,7 +393,7 @@ async function execToolInner(get: Getter, name: string, input: Record<string, un
   if (name === 'get_metrics') {
     const d = await get(`/api/windsor?${params}`);
     if (!d?.metrics) return `No data returned for ${from} → ${to}.`;
-    const m = d.metrics as Record<string, number>;
+    const m = d.metrics as Record<string, number> & { merBasis?: string };
     const daily = (d.revenueData as { date: string; revenue: number; orders: number; adSpend: number; newCustomers?: number; totalCustomers?: number }[]) ?? [];
 
     let granularity = String(input.granularity ?? (daysBetween(from, to) > 92 ? 'monthly' : 'daily'));
@@ -414,7 +414,7 @@ async function execToolInner(get: Getter, name: string, input: Record<string, un
     }
 
     return `Metrics ${from} → ${to}:
-Total sales $${(m.totalRevenue ?? 0).toLocaleString()} · Net sales $${(m.netSales ?? m.totalRevenue ?? 0).toLocaleString()} · Orders ${(m.totalOrders ?? 0).toLocaleString()} · AOV $${(m.aov ?? 0).toFixed(2)} · Ad spend $${(m.totalAdSpend ?? 0).toLocaleString()} · MER ${m.mer?.toFixed?.(2) ?? 'N/A'}x (net sales ÷ net ad spend; goal ${getClient().goals.targetMer}x)
+Total sales $${(m.totalRevenue ?? 0).toLocaleString()} · Net sales $${(m.netSales ?? m.totalRevenue ?? 0).toLocaleString()} · Orders ${(m.totalOrders ?? 0).toLocaleString()} · AOV $${(m.aov ?? 0).toFixed(2)} · Ad spend $${(m.totalAdSpend ?? 0).toLocaleString()} · MER ${m.mer?.toFixed?.(2) ?? 'N/A'}x (${m.merBasis === 'gross_less_discounts' ? 'gross sales less discounts, before returns' : 'net sales'} ÷ net ad spend; goal ${getClient().goals.targetMer}x)
 Meta $${(m.metaSpend ?? 0).toLocaleString()} · Google $${(m.googleSpend ?? 0).toLocaleString()}${m.tiktokSpend ? ` · TikTok $${m.tiktokSpend.toLocaleString()}` : ''}${m.snapchatSpend ? ` · Snapchat $${m.snapchatSpend.toLocaleString()}` : ''}${m.pinterestSpend ? ` · Pinterest $${m.pinterestSpend.toLocaleString()}` : ''}
 New customers ${m.newCustomers ?? 'N/A'} (${m.pctNew ?? '?'}%) · Returning ${m.returningCustomers ?? 'N/A'} · Conversion rate ${m.conversionRate ?? 'N/A'}%${series}`;
   }

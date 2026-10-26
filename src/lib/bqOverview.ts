@@ -84,6 +84,8 @@ export interface ShopifyDay {
   netSales: number;
   /** Return fees included in netSales; 0 unless the profile's includeReturnFees is on. */
   returnFees: number;
+  /** Gross sales minus discounts, before returns (the merBasis 'gross_less_discounts' numerator). */
+  grossLessDiscounts: number;
   /**
    * Shopify's AOV basis for the day: net sales BEFORE returns (gross −
    * discounts), i.e. Shopify's average_order_value × orders. AOV = Σ aovBasis ÷ Σ orders.
@@ -116,8 +118,8 @@ export async function fetchShopifyDaily(from: string, to: string): Promise<Shopi
 
 async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean): Promise<ShopifyDay[]> {
   const fields = withFees
-    ? 'orders, net_sales, return_fees, total_sales, average_order_value'
-    : 'orders, net_sales, total_sales, average_order_value';
+    ? 'orders, net_sales, return_fees, total_sales, average_order_value, gross_sales, discounts'
+    : 'orders, net_sales, total_sales, average_order_value, gross_sales, discounts';
   const ql = `FROM sales SHOW ${fields} TIMESERIES day ${salesWhere()} SINCE ${from} UNTIL ${to}`;
   const q = { tableData: await runShopifyQLRaw(ql) };
   const cols: { name: string }[] = q?.tableData?.columns || [];
@@ -141,6 +143,7 @@ async function fetchShopifyDailyOnce(from: string, to: string, withFees: boolean
       // The fee the store keeps on a returned order is revenue it earned.
       netSales: (parseFloat(cell(r, 'net_sales') || '0') || 0) + returnFees,
       returnFees,
+      grossLessDiscounts: (parseFloat(cell(r, 'gross_sales') || '0') || 0) - Math.abs(parseFloat(cell(r, 'discounts') || '0') || 0),
       aovBasis: aov * orders,
       totalSales: parseFloat(cell(r, 'total_sales') || '0'),
     };
@@ -157,8 +160,8 @@ export async function fetchShopifyTotals(from: string, to: string): Promise<Shop
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     const fields = withFees
-      ? 'orders, net_sales, return_fees, total_sales, average_order_value'
-      : 'orders, net_sales, total_sales, average_order_value';
+      ? 'orders, net_sales, return_fees, total_sales, average_order_value, gross_sales, discounts'
+      : 'orders, net_sales, total_sales, average_order_value, gross_sales, discounts';
     try {
       const q = { tableData: await runShopifyQLRaw(`FROM sales SHOW ${fields} ${salesWhere()} SINCE ${from} UNTIL ${to}`, { timeoutMs: 15000 }) };
       const cols: { name: string }[] = q?.tableData?.columns || [];
@@ -176,6 +179,7 @@ export async function fetchShopifyTotals(from: string, to: string): Promise<Shop
         date: from,
         netSales: parseFloat(cell('net_sales') || '0') + returnFees,
         returnFees,
+        grossLessDiscounts: (parseFloat(cell('gross_sales') || '0') || 0) - Math.abs(parseFloat(cell('discounts') || '0') || 0),
         aovBasis: aov * orders,
         orders,
         totalSales: parseFloat(cell('total_sales') || '0'),
@@ -478,6 +482,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
         netSales: Number(r.net_sales || 0),
         returnFees: 0, // Windsor's order rows carry no return-fee data
         aovBasis: Number(r.net_sales_placed || 0),
+        grossLessDiscounts: Number(r.net_sales_placed || 0), // net sales as placed = gross − discounts, before returns
       })))
       .catch(() => null),
     runQuery<AdsRow>(adsSql, params)

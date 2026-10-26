@@ -184,6 +184,14 @@ export interface ClientProfile {
      * Only affects the ShopifyQL path (BigQuery order rows carry no fee data).
      */
     includeReturnFees: boolean;
+    /**
+     * What the Overview's MER numerators (paid and fully loaded) are built on.
+     * 'net' (default): Shopify net sales — after discounts AND returns.
+     * 'gross_less_discounts': gross sales minus discounts, BEFORE returns —
+     * Kailee P's choice (Oct 2026): the agency is judged on what was sold, not on
+     * returns processed later. Contribution margin stays on net sales either way.
+     */
+    merBasis?: 'net' | 'gross_less_discounts';
   };
   windsor: {
     /**
@@ -363,7 +371,7 @@ const KAILEEP: ClientProfile = {
     // "2026 Marketing Budgeting Sheet - SHOPIFY ONLY", tab FOR DASHBOARD (Oct 2026, per Angie).
     expensesSheet: { id: '1Zl7XNRfsruSxyGoPDcTGPYr3z7Pabu4E5qYdnbQkjDg', tab: 'FOR DASHBOARD', year: 2026 },
   },
-  revenue: { includeReturnFees: true }, // Kailee P charges a return fee and keeps it
+  revenue: { includeReturnFees: true, merBasis: 'gross_less_discounts' }, // Kailee P charges a return fee and keeps it; MER on gross − discounts (before returns)
   windsor: {
     accounts: {
       facebook: '449159425278819',
@@ -658,6 +666,10 @@ export function windsorPinterestOptions(profile: ClientProfile = getClient()): s
 /** Whether Shopify return fees count toward net sales for MER (see ClientProfile.revenue). */
 export function includeReturnFees(profile: ClientProfile = getClient()): boolean {
   return profile.revenue.includeReturnFees;
+}
+/** The sales basis for the Overview's MER numerators (see ClientProfile.revenue.merBasis). */
+export function merBasis(profile: ClientProfile = getClient()): 'net' | 'gross_less_discounts' {
+  return profile.revenue.merBasis ?? 'net';
 }
 
 /** Product lines for this client ([] when the brand reports as one line). */
