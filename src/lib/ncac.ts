@@ -74,13 +74,13 @@ const toRow = (x: Record<string, unknown>): SourceRow => ({
  * referrer), so per platform the larger of the two counts is used: the best
  * available last-click evidence of that platform's first-time buyers.
  */
-async function fetchSourceRows(from: string, to: string): Promise<{ referrer: SourceRow[]; utm: SourceRow[]; totals: { customers: number; returning: number; orders: number } }> {
+async function fetchSourceRows(from: string, to: string): Promise<{ referrer: SourceRow[]; utm: SourceRow[]; totals: { customers: number; returning: number; newCustomers: number; orders: number } }> {
   const where = storeOnlyWhere();
   const range = `SINCE ${from} UNTIL ${to}`;
   const [referrer, utm, totals] = await Promise.all([
     shopifyql(`FROM sales SHOW orders, customers, returning_customers GROUP BY order_referrer_source, order_referrer_name ${where} ${range} ORDER BY orders DESC LIMIT 400`, { timeoutMs: 20000 }).then(r => r.map(toRow)),
     shopifyql(`FROM sales SHOW orders, customers, returning_customers GROUP BY utm_campaign_source, utm_campaign_medium ${where} ${range} ORDER BY orders DESC LIMIT 400`, { timeoutMs: 20000 }).then(r => r.map(toRow)).catch(() => [] as SourceRow[]),
-    shopifyql(`FROM sales SHOW orders, customers, returning_customers ${where} ${range}`, { timeoutMs: 15000 }).then(r => ({ customers: num(r[0]?.customers), returning: num(r[0]?.returning_customers), orders: num(r[0]?.orders) })).catch(() => ({ customers: 0, returning: 0, orders: 0 })),
+    shopifyql(`FROM sales SHOW orders, customers, returning_customers, new_customers ${where} ${range}`, { timeoutMs: 15000 }).then(r => ({ customers: num(r[0]?.customers), returning: num(r[0]?.returning_customers), newCustomers: num(r[0]?.new_customers), orders: num(r[0]?.orders) })).catch(() => ({ customers: 0, returning: 0, newCustomers: 0, orders: 0 })),
   ]);
   return { referrer, utm, totals };
 }
@@ -111,9 +111,12 @@ export async function fetchNcac(from: string, to: string): Promise<NcacSummary> 
   };
   const byRef = tally(referrer);
   const byUtm = tally(utm);
-  // Store-wide first-time buyers from Shopify's own total (exact; matches the
-  // Overview's New Customers card), not a sum of the source rows.
-  const allNew = Math.max(0, totals.customers - totals.returning) || referrer.reduce((s, r) => s + Math.max(0, r.customers - r.returning), 0);
+  // Store-wide first-time buyers: Shopify's own new_customers figure — the
+  // same one the Overview and Ad Performance cards use — so the blended row
+  // and the New Customer CAC card agree. (customers − returning differs by a
+  // few percent: a buyer who was new and then bought again inside the range
+  // counts in both Shopify columns.) Fallbacks keep older stores working.
+  const allNew = totals.newCustomers || Math.max(0, totals.customers - totals.returning) || referrer.reduce((s, r) => s + Math.max(0, r.customers - r.returning), 0);
   const newShare = totals.customers > 0 ? allNew / totals.customers : 0;
   const adByLabel = new Map(ads.platforms.map(p => [p.platform.toLowerCase(), p as { spend: number; conversions?: number; viewConversions?: number }]));
   const platforms: NcacPlatform[] = clientPlatforms().map(p => {
