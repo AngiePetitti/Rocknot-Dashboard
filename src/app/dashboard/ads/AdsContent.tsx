@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Timeframe } from '@/src/lib/mockData';
 import { cachedJson } from '@/src/lib/clientCache';
 import { formatCurrency, formatROAS, formatPercent, TIMEFRAME_LABELS } from '@/src/lib/utils';
+import { timeframeRange, priorRangeFor, parseCompareMode } from '@/src/lib/timeframes';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import MetricCard from '@/src/components/ui/MetricCard';
@@ -90,8 +91,14 @@ export default function AdsContent() {
   const tf = (tfRaw === 'custom' ? '30d' : tfRaw) as Timeframe;
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
+  const compareOn = searchParams.get('compare') === 'true';
+  const compareTo = parseCompareMode(searchParams.get('compare_to'));
+  const deltaLabel = compareTo === 'month' ? 'vs last month' : compareTo === 'year' ? 'vs last year' : 'vs prior period';
 
   const [platforms, setPlatforms] = useState<PlatformData[]>([]);
+  // Same numbers for the comparison window (prior period / last month / last year).
+  const [priorPlatforms, setPriorPlatforms] = useState<PlatformData[] | null>(null);
+  const [priorCac, setPriorCac] = useState<{ newCustomers: number; returningCustomers: number; totalAdSpend: number } | null>(null);
   const [snapVerified, setSnapVerified] = useState(true);
   const [dailySpend, setDailySpend] = useState<DaySpend[]>([]);
   const [creatives, setCreatives] = useState<CreativeRow[]>([]);
@@ -151,6 +158,21 @@ export default function AdsContent() {
     );
   }, [tfRaw, dateFrom, dateTo]);
 
+  // Comparison window: the same two calls for the prior range, so every card
+  // can say whether it moved up or down against the basis the operator picked.
+  useEffect(() => {
+    setPriorPlatforms(null); setPriorCac(null);
+    if (!compareOn || tfRaw === 'today') return;
+    const cur = timeframeRange(tfRaw as Timeframe | 'custom', dateFrom, dateTo);
+    const pr = priorRangeFor(compareTo, tfRaw as Timeframe | 'custom', cur.from, cur.to);
+    const p = new URLSearchParams({ tf: 'custom', date_from: pr.from, date_to: pr.to });
+    cachedJson<{ platforms?: PlatformData[] }>(`/api/windsor/ads?${p}`, d => setPriorPlatforms(d.platforms || []), () => setPriorPlatforms(null));
+    cachedJson<{ metrics?: { newCustomers?: number; returningCustomers?: number; totalAdSpend?: number; netAdSpend?: number } }>(`/api/windsor?${p}`, d => {
+      const m = d?.metrics;
+      setPriorCac(m && m.newCustomers !== undefined ? { newCustomers: m.newCustomers ?? 0, returningCustomers: m.returningCustomers ?? 0, totalAdSpend: (m.netAdSpend ?? m.totalAdSpend) ?? 0 } : null);
+    }, () => setPriorCac(null));
+  }, [compareOn, compareTo, tfRaw, dateFrom, dateTo]);
+
   // Reconciliation self-check runs over its own trailing window of complete
   // days (independent of the selected timeframe), so it loads once on mount.
   useEffect(() => {
@@ -164,6 +186,14 @@ export default function AdsContent() {
   const totalRevenue = platforms.reduce((s, p) => s + p.revenue, 0);
   const blendedROAS = totalSpend > 0 ? totalRevenue / totalSpend : 0;
   const bestPlatform = platforms.length > 0 ? platforms.reduce((b, p) => p.roas > b.roas ? p : b) : null;
+  const priorSpend = priorPlatforms ? priorPlatforms.reduce((s, p) => s + p.spend, 0) : null;
+  const priorRevenue = priorPlatforms ? priorPlatforms.reduce((s, p) => s + p.revenue, 0) : null;
+  const priorROAS = priorSpend && priorRevenue != null && priorSpend > 0 ? priorRevenue / priorSpend : null;
+  const priorBest = bestPlatform && priorPlatforms ? priorPlatforms.find(p => p.platform === bestPlatform.platform) : null;
+  const cmp = (current: number, prior: number | null | undefined, lowerIsBetter = false) =>
+    compareOn && prior != null && prior > 0 ? { current, prior, label: deltaLabel, lowerIsBetter } : undefined;
+  const priorNewCac = priorCac && priorCac.newCustomers > 0 ? priorCac.totalAdSpend / priorCac.newCustomers : null;
+  const priorBlendedCac = priorCac && priorCac.newCustomers + priorCac.returningCustomers > 0 ? priorCac.totalAdSpend / (priorCac.newCustomers + priorCac.returningCustomers) : null;
 
   const sortedCreatives = [...creatives]
     .filter(ad => adPlatformFilter === 'All' || ad.platform === adPlatformFilter)
@@ -260,12 +290,14 @@ export default function AdsContent() {
               value={formatCurrency(totalSpend)}
               subtitle="All platforms combined"
               accentColor="#f9a8d4"
+              comparison={cmp(totalSpend, priorSpend)}
             />
             <MetricCard
               title="Ad-Attributed Revenue"
               value={formatCurrency(totalRevenue)}
               subtitle="ROAS × Spend (Meta) + Conv. Value (Google)"
               accentColor="#c4b5fd"
+              comparison={cmp(totalRevenue, priorRevenue)}
             />
             <MetricCard
               title="Blended ROAS"
@@ -273,12 +305,14 @@ export default function AdsContent() {
               subtitle="Revenue / Spend"
               accentColor="#86efac"
               valueColor={blendedROAS >= ROAS_GOAL ? '#22c55e' : '#ef4444'}
+              comparison={cmp(blendedROAS, priorROAS)}
             />
             <MetricCard
               title="Best Platform"
               value={bestPlatform ? formatROAS(bestPlatform.roas) : '—'}
               subtitle={bestPlatform?.platform || 'No data'}
               accentColor="#fde68a"
+              comparison={bestPlatform ? cmp(bestPlatform.roas, priorBest?.roas) : undefined}
             />
           </div>
 
@@ -294,6 +328,7 @@ export default function AdsContent() {
                 valueColor={cac.newCustomers
                   ? (cac.totalAdSpend / cac.newCustomers > TARGET_CAC ? '#ef4444' : '#22c55e')
                   : undefined}
+                comparison={cac.newCustomers ? cmp(cac.totalAdSpend / cac.newCustomers, priorNewCac, true) : undefined}
               />
               <MetricCard
                 title="Blended CAC"
@@ -302,10 +337,11 @@ export default function AdsContent() {
                   : '—'}
                 subtitle={`Ad spend ÷ ${cac.newCustomers + cac.returningCustomers} all buyers`}
                 accentColor="#bbf7d0"
+                comparison={cac.newCustomers + cac.returningCustomers > 0 ? cmp(cac.totalAdSpend / (cac.newCustomers + cac.returningCustomers), priorBlendedCac, true) : undefined}
               />
             </div>
           )}
-          {tfRaw !== 'today' && <NcacBreakdown tf={tfRaw} dateFrom={dateFrom} dateTo={dateTo} compare={false} targetCac={TARGET_CAC} />}
+          {tfRaw !== 'today' && <NcacBreakdown tf={tfRaw} dateFrom={dateFrom} dateTo={dateTo} compare={compareOn} compareTo={compareTo} targetCac={TARGET_CAC} />}
 
           {/* Platform cards */}
           {/* One card per row on phones: a six-metric grid needs the full width. */}

@@ -6,15 +6,17 @@ interface MetricCardProps {
   subtitle?: string;
   accentColor: string;
   trend?: { value: string; positive: boolean };
-  comparison?: { current: number; prior: number; label?: string };
+  /** lowerIsBetter: a drop is the good direction (CAC, cost per result). */
+  comparison?: { current: number; prior: number; label?: string; lowerIsBetter?: boolean };
   large?: boolean;
   valueColor?: string;
 }
 
-function calcDelta(current: number, prior: number): { pct: number; positive: boolean } | null {
+function calcDelta(current: number, prior: number, lowerIsBetter = false): { pct: number; positive: boolean; up: boolean } | null {
   if (!prior || prior === 0) return null;
   const pct = Math.round(((current - prior) / prior) * 1000) / 10;
-  return { pct, positive: pct >= 0 };
+  const up = pct >= 0;
+  return { pct, up, positive: lowerIsBetter ? !up : up };
 }
 
 export default function MetricCard({
@@ -27,7 +29,7 @@ export default function MetricCard({
   large = false,
   valueColor,
 }: MetricCardProps) {
-  const delta = comparison ? calcDelta(comparison.current, comparison.prior) : null;
+  const delta = comparison ? calcDelta(comparison.current, comparison.prior, comparison.lowerIsBetter) : null;
 
   return (
     <div
@@ -46,7 +48,7 @@ export default function MetricCard({
       {/* Comparison delta — shown when compare mode is on */}
       {delta !== null && (
         <span className={`text-xs font-semibold mt-1 ${delta.positive ? 'text-green-500' : 'text-red-500'}`}>
-          {delta.positive ? '▲' : '▼'} {Math.abs(delta.pct)}% {comparison?.label || 'vs prior period'}
+          {delta.up ? '▲' : '▼'} {Math.abs(delta.pct)}% {comparison?.label || 'vs prior period'}
         </span>
       )}
 
