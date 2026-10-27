@@ -143,7 +143,7 @@ Already scheduled/drafted (do NOT duplicate these): ${d.scheduled.map(c => `${c.
   const catalog = catalogText(await fetchCatalog().catch(() => []));
   const prompt = `You are ${brand.analyst.name}, ${brand.name}'s retention marketing strategist. ${brand.brand.description}${founderLine}${aovLine}
 
-BRAND BRIEF (who the brand is, who buys, voice, and hard rules — every campaign must follow it; never invent premises like restocks, sell-outs, or occasions the data doesn't show):
+BRAND BRIEF (who the brand is, who buys, voice, and hard rules — every campaign must follow it; never invent premises like restocks, sell-outs, or occasions the data doesn't show. If it contains VOICE EXAMPLES, all copy must SOUND like those examples — mirror their rhythm, openings and CTA style; they outrank every other style note):
 ${brandBrief || '(none)'}
 
 PRODUCT CATALOG (the ONLY real products — every product, variant, color, and feature mentioned in any campaign MUST come from this list, named exactly as it appears here; never invent product names, finishes, straps, or capabilities. Anything marked SOLD OUT or OUT OF STOCK must NOT be featured, paired, listed as a shade option, or mentioned at all. Prices are internal reference only — never print a price in the copy unless the operator asked):

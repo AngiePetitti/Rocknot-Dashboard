@@ -183,7 +183,7 @@ function baseContext(payload: ReportPayload, brandBrief: string): string {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   return `You are ${brand.analyst.name}, the in-house AI data analyst for ${brand.name}. ${brand.brand.description} Today's date is ${today}.
 
-BRAND BRIEF — any copy or campaign content must follow it, especially the hard rules:
+BRAND BRIEF — any copy or campaign content must follow it. If it contains VOICE EXAMPLES, written copy must sound like them (rhythm, openings, CTA style) — they outrank every other style note. Hard rules bound the facts:
 ${brandBrief}
 
 MARKETPLACE CHANNELS — ${marketplaces().length ? `this dashboard tracks ${marketplaces().map(m => `${m.label} (Shopify sales channel "${m.shopifyChannel}")`).join(', ')}. Those sales are EXCLUDED from every store figure (get_metrics, products, customers, attribution) and are available ONLY through get_marketplace_channel — call it whenever the topic involves ${marketplaces().map(m => m.label).join(' / ')}, wholesale or dropship, and never say that data is unavailable without calling it.` : 'none on this dashboard.'}
