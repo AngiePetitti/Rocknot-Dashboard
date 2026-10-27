@@ -346,6 +346,19 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'save_voice_example',
+    description: "Save a piece of copy (an email the operator approved as ON-BRAND) into the brand brief's VOICE EXAMPLES section, where it becomes the canonical voice reference for all future copy. Use when the operator says a specific email/copy was good and should be the standard. Pass the COMPLETE copy, not a summary.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: "Short name, e.g. 'Chocolate drop email (Oct 2026)'" },
+        subject: { type: 'string', description: 'The email subject line' },
+        body: { type: 'string', description: 'The complete body copy, verbatim' },
+      },
+      required: ['label', 'body'],
+    },
+  },
+  {
     name: 'get_month_notes',
     description: "The team's monthly performance log (Goals tab): free-form notes on what happened each month — launches, stockouts, promos, ad account issues. ALWAYS check this when explaining why performance rose or fell in a given month.",
     input_schema: { type: 'object', properties: {} },
@@ -870,6 +883,22 @@ SMS: ${owned?.overview ? `${$(owned.overview.sms.revenue)} total · ` : ''}${own
     });
     if (!d?.ok) return 'Error: could not create the task (are you signed in with task access?).';
     return `Created task "${title}"${input.assignee ? ` assigned to ${input.assignee}` : ''}${due ? `, due ${due}` : ''} — it's on the Tasks tab in To Do.`;
+  }
+
+  if (name === 'save_voice_example') {
+    const label = String(input.label ?? '').trim();
+    const body = String(input.body ?? '').trim();
+    if (!label || !body) return 'Error: label and body are required.';
+    const subject = String(input.subject ?? '').trim();
+    const { getBrandBrief, setBrandBrief } = await import('@/src/lib/brandBrief');
+    const brief = await getBrandBrief();
+    const example = `\n--- EXAMPLE: ${label} ---\n${subject ? `SUBJECT: ${subject}\n` : ''}BODY:\n${body}\n`;
+    const marker = 'VOICE EXAMPLES:';
+    const updated = brief.includes(marker)
+      ? brief.replace(marker, `${marker}${example}`)
+      : `${brief}\n\nVOICE EXAMPLES:${example}`;
+    await setBrandBrief(updated);
+    return `Saved "${label}" as a voice example in the brand brief — all future copy will be written to match its voice. The operator can review/edit it on the AI Insights page.`;
   }
 
   if (name === 'get_month_notes') {
