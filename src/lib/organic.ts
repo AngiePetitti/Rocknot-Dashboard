@@ -596,7 +596,7 @@ export async function fetchBlogPerformance(from: string, to: string): Promise<So
   try {
     // Blog articles sit in the long tail of landing pages, so pull wide;
     // fall back to a smaller page if Shopify refuses the limit.
-    const landingQl = (limit: number) => `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY landing_page_path SINCE ${from} UNTIL ${to} ORDER BY sessions DESC LIMIT ${limit}`;
+    const landingQl = (limit: number) => `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY landing_page_path WHERE human_or_bot_session = 'human' SINCE ${from} UNTIL ${to} ORDER BY sessions DESC LIMIT ${limit}`;
     const [rows, adminArticles, gaLanding] = await Promise.all([
       shopifyql(landingQl(5000), { timeoutMs: 25000 }).catch(() => shopifyql(landingQl(1000), { timeoutMs: 20000 })),
       fetchArticles(),
@@ -670,7 +670,7 @@ export async function fetchSocialTraffic(from: string, to: string): Promise<Reco
   const out: Record<OrganicPlatform, SocialTraffic> = { Pinterest: empty(), Instagram: empty() };
   if (!shopifyConfigured()) return out;
   try {
-    const rows = await shopifyql(`FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY referrer_name, utm_medium SINCE ${from} UNTIL ${to} ORDER BY sessions DESC LIMIT 500`, { timeoutMs: 20000 });
+    const rows = await shopifyql(`FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY referrer_name, utm_medium WHERE human_or_bot_session = 'human' SINCE ${from} UNTIL ${to} ORDER BY sessions DESC LIMIT 500`, { timeoutMs: 20000 });
     for (const r of rows) {
       const name = str(r.referrer_name).toLowerCase();
       const medium = str(r.utm_medium);

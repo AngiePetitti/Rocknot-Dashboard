@@ -1031,7 +1031,7 @@ export default function OverviewContent() {
             title="Website Conversion Rate"
             value={metrics.conversionRate ? `${metrics.conversionRate.toFixed(1)}%` : '—'}
             subtitle={metrics.botSessions
-              ? `Human sessions that checked out · ${metrics.botSessions.toLocaleString()} suspected bot sessions removed (raw ${(metrics.conversionRateRaw ?? 0).toFixed(1)}%)`
+              ? `Human sessions that checked out, as Shopify Analytics counts it · ${metrics.botSessions.toLocaleString()} bot sessions excluded (all sessions: ${(metrics.conversionRateRaw ?? 0).toFixed(1)}%)`
               : 'Human sessions that checked out · no bot traffic detected'}
             accentColor="#a7f3d0"
           />
