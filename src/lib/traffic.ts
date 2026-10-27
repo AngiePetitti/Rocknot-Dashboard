@@ -174,6 +174,22 @@ export interface HumanConversion {
   completed: number;
 }
 
+// Shopify classifies every session as human or bot (its Analytics UI has shown
+// human-only sessions since Sept 21, 2026). Every sessions query here keeps the
+// same filter so the dashboard's sessions and conversion match Shopify's own.
+export const HUMAN_WHERE = "WHERE human_or_bot_session = 'human'";
+const HUMAN_AND = " AND human_or_bot_session = 'human'";
+/** Run a sessions query with the human filter; if the store's API version rejects the dimension, run it without. */
+export async function shopifyqlHuman(ql: string, timeoutMs = 20000): Promise<Row[]> {
+  try { return await shopifyql(ql, timeoutMs); }
+  catch (e) {
+    if (!/human_or_bot_session/i.test(String(e instanceof Error ? e.message : e)) && !ql.includes('human_or_bot_session')) throw e;
+    const stripped = ql.replace(`${HUMAN_WHERE} `, '').replace(HUMAN_AND, '');
+    if (stripped === ql) throw e;
+    return shopifyql(stripped, timeoutMs);
+  }
+}
+
 const SOURCES_QL = 'FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY referrer_source, referrer_name, utm_medium';
 const TOTALS_QL = 'FROM sessions SHOW sessions, online_store_visitors, sessions_with_cart_additions, sessions_that_reached_checkout, sessions_that_completed_checkout';
 
@@ -184,9 +200,20 @@ function sourceRows(rows: Row[]): SourceRow[] {
   }));
 }
 
-/** Website conversion rate with suspected-bot sessions removed. Null when Shopify is not connected. */
+/** Website conversion rate on Shopify's human sessions — the figure Shopify Analytics shows. Null when Shopify is not connected. */
 export async function fetchHumanConversion(from: string, to: string): Promise<HumanConversion | null> {
   if (!trafficConfigured()) return null;
+  const pct1 = (a: number, b: number) => Math.round((a / b) * 1000) / 10;
+  try {
+    const rows = await shopifyql(`FROM sessions SHOW sessions, sessions_that_completed_checkout GROUP BY human_or_bot_session SINCE ${from} UNTIL ${to}`, 10000);
+    const human = rows.find(r => String(r.human_or_bot_session || '').toLowerCase() === 'human');
+    const bot = rows.find(r => String(r.human_or_bot_session || '').toLowerCase() === 'bot');
+    const humanSessions = num(human?.sessions), botSessions = num(bot?.sessions);
+    const sessions = humanSessions + botSessions;
+    const completed = num(human?.sessions_that_completed_checkout);
+    const allCompleted = completed + num(bot?.sessions_that_completed_checkout);
+    if (humanSessions > 0) return { rate: pct1(completed, humanSessions), rawRate: pct1(allCompleted, sessions), sessions, humanSessions, botSessions, completed };
+  } catch { /* older API version without the classification — fall back to the behaviour heuristic */ }
   const [totals, sources] = await Promise.all([
     shopifyql(`${TOTALS_QL} SINCE ${from} UNTIL ${to}`, 10000),
     shopifyql(`${SOURCES_QL} SINCE ${from} UNTIL ${to} ORDER BY sessions DESC LIMIT 400`, 10000),
@@ -196,50 +223,50 @@ export async function fetchHumanConversion(from: string, to: string): Promise<Hu
   if (sessions <= 0) return null;
   const botSessions = sourceRows(sources).filter(isBotSource).reduce((a, s) => a + s.sessions, 0);
   const humanSessions = Math.max(1, sessions - botSessions);
-  const pct1 = (a: number, b: number) => Math.round((a / b) * 1000) / 10;
   return { rate: pct1(completed, humanSessions), rawRate: pct1(completed, sessions), sessions, humanSessions, botSessions, completed };
 }
 
-// ── Main fetch ────────────────────────────────────────────────────────────
 export async function fetchTraffic(from: string, to: string, prior?: { from: string; to: string } | null): Promise<TrafficData> {
   const errors: string[] = [];
   const range = `SINCE ${from} UNTIL ${to}`;
+  // Sessions queries: human sessions only (Shopify's own classification).
+  const hrange = `${HUMAN_WHERE} ${range}`;
   const q = async <T,>(label: string, ql: string, map: (rows: Row[]) => T, empty: T): Promise<T> => {
-    try { return map(await shopifyql(ql)); } catch (e) { errors.push(`${label}: ${e instanceof Error ? e.message : String(e)}`); return empty; }
+    try { return map(await shopifyqlHuman(ql)); } catch (e) { errors.push(`${label}: ${e instanceof Error ? e.message : String(e)}`); return empty; }
   };
   const totalsOf = (rows: Row[]): Totals => ({
     sessions: num(rows[0]?.sessions), visitors: num(rows[0]?.online_store_visitors),
     addedToCart: num(rows[0]?.sessions_with_cart_additions), reachedCheckout: num(rows[0]?.sessions_that_reached_checkout),
     completed: num(rows[0]?.sessions_that_completed_checkout),
   });
-  const aiWhere = `WHERE ${['chatgpt', 'openai', 'perplexity', 'gemini', 'copilot', 'claude', 'grok'].map(a => `referrer_name = '${a}'`).join(' OR ')}`;
+  const aiWhere = `WHERE (${['chatgpt', 'openai', 'perplexity', 'gemini', 'copilot', 'claude', 'grok'].map(a => `referrer_name = '${a}'`).join(' OR ')})${HUMAN_AND}`;
 
   const [totals, daily, sources, campaigns, referrers, aiPages, landing, orderSources, devices, countries, priorTotals, priorSources, adLookup] = await Promise.all([
-    q('totals', `${TOTALS_QL} ${range}`, totalsOf, { sessions: 0, visitors: 0, addedToCart: 0, reachedCheckout: 0, completed: 0 }),
-    q('daily', `FROM sessions SHOW sessions, sessions_that_completed_checkout TIMESERIES day ${range}`, rows => rows.map(r => {
+    q('totals', `${TOTALS_QL} ${hrange}`, totalsOf, { sessions: 0, visitors: 0, addedToCart: 0, reachedCheckout: 0, completed: 0 }),
+    q('daily', `FROM sessions SHOW sessions, sessions_that_completed_checkout TIMESERIES day ${hrange}`, rows => rows.map(r => {
       const dateKey = Object.keys(r).find(k => !['sessions', 'sessions_that_completed_checkout'].includes(k)) || 'day';
       return { date: String(r[dateKey] || '').slice(0, 10), sessions: num(r.sessions), completed: num(r.sessions_that_completed_checkout) };
     }), [] as DayRow[]),
-    q('sources', `${SOURCES_QL} ${range} ORDER BY sessions DESC LIMIT 400`, sourceRows, [] as SourceRow[]),
-    q('campaigns', `FROM sessions SHOW sessions, sessions_that_completed_checkout GROUP BY utm_medium, utm_campaign, utm_content ${range} ORDER BY sessions DESC LIMIT 400`, rows => rows.map(r => ({
+    q('sources', `${SOURCES_QL} ${hrange} ORDER BY sessions DESC LIMIT 400`, sourceRows, [] as SourceRow[]),
+    q('campaigns', `FROM sessions SHOW sessions, sessions_that_completed_checkout GROUP BY utm_medium, utm_campaign, utm_content ${hrange} ORDER BY sessions DESC LIMIT 400`, rows => rows.map(r => ({
       medium: r.utm_medium || '', campaign: r.utm_campaign || '', content: r.utm_content || '', sessions: num(r.sessions), completed: num(r.sessions_that_completed_checkout),
     })), [] as CampaignRow[]),
-    q('referrers', `FROM sessions SHOW sessions, sessions_that_completed_checkout GROUP BY referrer_url ${range} ORDER BY sessions DESC LIMIT 300`, rows => rows.map(r => ({
+    q('referrers', `FROM sessions SHOW sessions, sessions_that_completed_checkout GROUP BY referrer_url ${hrange} ORDER BY sessions DESC LIMIT 300`, rows => rows.map(r => ({
       url: r.referrer_url || '', sessions: num(r.sessions), completed: num(r.sessions_that_completed_checkout),
     })), [] as ReferrerRow[]),
     q('ai', `FROM sessions SHOW sessions, sessions_that_completed_checkout GROUP BY referrer_name, landing_page_path ${aiWhere} ${range} ORDER BY sessions DESC LIMIT 100`, rows => rows.map(r => ({
       assistant: r.referrer_name || '', landingPage: r.landing_page_path || '/', sessions: num(r.sessions), completed: num(r.sessions_that_completed_checkout),
     })), [] as AiRow[]),
-    q('landing', `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY landing_page_path ${range} ORDER BY sessions DESC LIMIT 500`, rows => rows.map(r => ({
+    q('landing', `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY landing_page_path ${hrange} ORDER BY sessions DESC LIMIT 500`, rows => rows.map(r => ({
       path: r.landing_page_path || '/', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout),
     })), [] as LandingRow[]),
     q('orders', `FROM sales SHOW orders, net_sales GROUP BY order_referrer_source, order_referrer_name ${storeOnlyWhere()} ${range} ORDER BY orders DESC LIMIT 40`, rows => rows.map(r => ({
       source: r.order_referrer_source || '', name: r.order_referrer_name || '', orders: num(r.orders), netSales: num(r.net_sales),
     })), [] as OrderSourceRow[]),
-    q('devices', `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY session_device_type ${range} ORDER BY sessions DESC LIMIT 6`, rows => rows.map(r => ({ device: r.session_device_type || 'Unknown', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout) })), [] as TrafficData['devices']),
-    q('countries', `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY session_country ${range} ORDER BY sessions DESC LIMIT 40`, rows => rows.map(r => ({ country: r.session_country || 'Unknown', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout) })), [] as TrafficData['countries']),
+    q('devices', `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY session_device_type ${hrange} ORDER BY sessions DESC LIMIT 6`, rows => rows.map(r => ({ device: r.session_device_type || 'Unknown', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout) })), [] as TrafficData['devices']),
+    q('countries', `FROM sessions SHOW sessions, sessions_with_cart_additions, sessions_that_completed_checkout GROUP BY session_country ${hrange} ORDER BY sessions DESC LIMIT 40`, rows => rows.map(r => ({ country: r.session_country || 'Unknown', sessions: num(r.sessions), cartAdds: num(r.sessions_with_cart_additions), completed: num(r.sessions_that_completed_checkout) })), [] as TrafficData['countries']),
     prior ? q('prior totals', `${TOTALS_QL} SINCE ${prior.from} UNTIL ${prior.to}`, totalsOf, null as Totals | null) : Promise.resolve(null),
-    prior ? q('prior sources', `${SOURCES_QL} SINCE ${prior.from} UNTIL ${prior.to} ORDER BY sessions DESC LIMIT 400`, sourceRows, [] as SourceRow[]) : Promise.resolve([] as SourceRow[]),
+    prior ? q('prior sources', `${SOURCES_QL} ${HUMAN_WHERE} SINCE ${prior.from} UNTIL ${prior.to} ORDER BY sessions DESC LIMIT 400`, sourceRows, [] as SourceRow[]) : Promise.resolve([] as SourceRow[]),
     fetchAdLookup(from, to),
   ]);
 
