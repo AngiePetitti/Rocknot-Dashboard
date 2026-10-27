@@ -162,7 +162,7 @@ If the operator asks for a report / PDF / shareable document, call create_report
         // load-modify-save, so parallel writes clobber each other (15 task
         // creates in one turn once collapsed to 5 — every call "succeeded").
         // Reads stay parallel for speed.
-        const WRITE_TOOLS = new Set(['create_task', 'update_task', 'delete_task', 'add_calendar_events', 'update_calendar_event', 'delete_calendar_event']);
+        const WRITE_TOOLS = new Set(['create_task', 'update_task', 'delete_task', 'add_calendar_events', 'update_calendar_event', 'delete_calendar_event', 'save_voice_example']);
         const runOne = async (tu: Anthropic.ToolUseBlock): Promise<Anthropic.ToolResultBlockParam> => {
           if (tu.name === 'create_report') {
             const focus = String((tu.input as { focus?: string })?.focus || '').trim();
