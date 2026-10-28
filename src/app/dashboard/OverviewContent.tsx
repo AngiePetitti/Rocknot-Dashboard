@@ -427,6 +427,42 @@ export default function OverviewContent() {
     }
   }, [tfRaw, dateFrom, dateTo, client.lines]);
 
+  // ── Today's spend lag ─────────────────────────────────────────────────────
+  // Meta and Snapchat are read live from their APIs; Google, TikTok and
+  // Pinterest arrive through the feed, which can run hours behind intraday.
+  // Compare today's reported spend with each platform's pace (last 7 complete
+  // days, scaled to the hour) and treat a big shortfall as "still syncing" so
+  // the MER is shown as provisional with the likely spend included.
+  const [spendPace, setSpendPace] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    setSpendPace(null);
+    if (tfRaw !== 'today') return;
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const d = (n: number) => { const t = new Date(`${today}T12:00:00`); t.setDate(t.getDate() - n); return t.toISOString().slice(0, 10); };
+    cachedJson<{ metrics?: Record<string, number> }>(`/api/windsor?tf=custom&date_from=${d(7)}&date_to=${d(1)}&lite=1`, r => {
+      const m = r?.metrics; if (!m) return;
+      setSpendPace({ google: (m.googleSpend ?? 0) / 7, tiktok: (m.tiktokSpend ?? 0) / 7, pinterest: (m.pinterestSpend ?? 0) / 7 });
+    }, () => setSpendPace(null));
+  }, [tfRaw]);
+  const spendLag = useMemo(() => {
+    if (tfRaw !== 'today' || !spendPace) return [] as Array<{ key: string; label: string; reported: number; expected: number; gap: number }>;
+    const hour = Number(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hour12: false })) || 0;
+    const elapsed = Math.max(0.15, Math.min(1, (hour + 0.5) / 24));
+    const rows = [
+      { key: 'google', label: 'Google', reported: metrics.googleSpend ?? 0 },
+      { key: 'tiktok', label: 'TikTok', reported: metrics.tiktokSpend ?? 0 },
+      { key: 'pinterest', label: 'Pinterest', reported: metrics.pinterestSpend ?? 0 },
+    ];
+    return rows.flatMap(r => {
+      const expected = (spendPace[r.key] ?? 0) * elapsed;
+      if (expected < 20) return [];
+      if (r.reported >= expected * 0.6) return [];
+      return [{ ...r, expected: Math.round(expected), gap: Math.round(expected - r.reported) }];
+    });
+  }, [tfRaw, spendPace, metrics.googleSpend, metrics.tiktokSpend, metrics.pinterestSpend]);
+  const lagGap = spendLag.reduce((s, l) => s + l.gap, 0);
+  const lagNote = spendLag.length ? spendLag.map(l => `${l.label} ${formatCurrency(l.reported)} so far, about ${formatCurrency(l.expected)} expected by now`).join('; ') : '';
+
   // ── Month-end forecast (MTD pace, independent of the selected timeframe) ──
   const [mtdSnap, setMtdSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
   const [lastMonthSnap, setLastMonthSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
@@ -739,7 +775,7 @@ export default function OverviewContent() {
         // "estimated" 0.39x on a 4x day).
         const missing7d = health && !health.allOk ? health.platforms.reduce((s, p) => s + (p.status === 'warn' && p.diff !== null && p.diff < 0 ? -p.diff : 0), 0) : 0;
         const viewDays = tfRaw === 'today' || tfRaw === 'yesterday' ? 1 : Math.max(1, revenueData.length);
-        const missingSpend = (missing7d / 7) * Math.min(viewDays, 7) * (tfRaw === 'today' ? Math.max(0.2, new Date().getHours() / 24) : 1);
+        const missingSpend = (missing7d / 7) * Math.min(viewDays, 7) * (tfRaw === 'today' ? Math.max(0.2, new Date().getHours() / 24) : 1) + lagGap;
         const correctedMer = missingSpend > 0 && adS + missingSpend > 0 ? netS / (adS + missingSpend) : null;
         const Badge = ({ ok, goal }: { ok: boolean | null; goal: number | null }) => (goal == null || ok == null ? null : (
           <div className="pb-1.5 sm:pb-2">
@@ -764,7 +800,7 @@ export default function OverviewContent() {
               </div>
               <p className="text-sm text-gray-500 mt-2 tabular-nums">{salesLabel} {formatCurrency(netS)} ÷ ad spend {formatCurrency(adS)}</p>
               {correctedMer !== null && metrics.mer > 0 && (
-                <p className="text-[11px] font-semibold text-amber-600 mt-1">⚠ Provisional — about {formatCurrency(missingSpend)} of ad spend is still syncing; true MER is likely closer to {correctedMer.toFixed(2)}x.</p>
+                <p className="text-[11px] font-semibold text-amber-600 mt-1">⚠ Provisional — {lagNote ? `${lagNote}. ` : ''}About {formatCurrency(missingSpend)} of ad spend is still syncing; with it, MER is likely closer to {correctedMer.toFixed(2)}x.</p>
               )}
               {returnsInfo && returnsInfo.range.ratePct != null && (() => {
                 const st = returnsInfo.status;
@@ -975,14 +1011,16 @@ export default function OverviewContent() {
                 <MetricCard
                   title="Google Spend"
                   value={formatCurrency(metrics.googleSpend ?? 0)}
-                  subtitle={platSub(metrics.googleSpend ?? 0, metrics.googleRevenue ?? 0)}
+                  subtitle={`${spendLag.find(l => l.key === 'google') ? `⏳ Still syncing — about ${formatCurrency(spendLag.find(l => l.key === 'google')!.expected)} expected by now · ` : ''}${platSub(metrics.googleSpend ?? 0, metrics.googleRevenue ?? 0)}`}
                   accentColor="#fef08a"
+                  valueColor={spendLag.some(l => l.key === 'google') ? '#d97706' : undefined}
                 />
                 {(runs('tiktok') || (metrics.tiktokSpend ?? 0) > 0) && (
                   <MetricCard
                     title="TikTok Spend"
                     value={formatCurrency(metrics.tiktokSpend ?? 0)}
-                    subtitle={platSub(metrics.tiktokSpend ?? 0, metrics.tiktokRevenue ?? 0)}
+                    subtitle={`${spendLag.find(l => l.key === 'tiktok') ? `⏳ Still syncing — about ${formatCurrency(spendLag.find(l => l.key === 'tiktok')!.expected)} expected by now · ` : ''}${platSub(metrics.tiktokSpend ?? 0, metrics.tiktokRevenue ?? 0)}`}
+                    valueColor={spendLag.some(l => l.key === 'tiktok') ? '#d97706' : undefined}
                     accentColor="#fbcfe8"
                   />
                 )}
@@ -990,7 +1028,8 @@ export default function OverviewContent() {
                   <MetricCard
                     title="Pinterest Spend"
                     value={formatCurrency(metrics.pinterestSpend ?? 0)}
-                    subtitle={platSub(metrics.pinterestSpend ?? 0, metrics.pinterestRevenue ?? 0)}
+                    subtitle={`${spendLag.find(l => l.key === 'pinterest') ? `⏳ Still syncing — about ${formatCurrency(spendLag.find(l => l.key === 'pinterest')!.expected)} expected by now · ` : ''}${platSub(metrics.pinterestSpend ?? 0, metrics.pinterestRevenue ?? 0)}`}
+                    valueColor={spendLag.some(l => l.key === 'pinterest') ? '#d97706' : undefined}
                     accentColor="#fecdd3"
                   />
                 )}
