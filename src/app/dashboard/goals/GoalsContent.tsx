@@ -203,24 +203,26 @@ export default function GoalsContent() {
     // months get redistributed.
     let pinnedMonths = remainingMonths.filter(k => goals[k]?.pinned);
     let openMonths = remainingMonths.filter(k => !goals[k]?.pinned);
-    // When EVERY remaining month is pinned (a fully hand-entered plan),
-    // tapping Auto-plan used to do literally nothing. Now it asks, then
-    // replans the whole remainder.
-    if (!openMonths.length) {
-      if (!interactive) {
-        // Silent rebalance after a hand edit: the months AFTER the edited one
-        // absorb the change even if they were pinned earlier, so changing
-        // October always re-plans November and December. Months before and
-        // including the edited one keep their numbers.
-        if (!editedKey) return;
-        openMonths = remainingMonths.filter(k => k > editedKey);
-        pinnedMonths = remainingMonths.filter(k => k <= editedKey);
-        if (!openMonths.length) return;
-      } else {
-        if (!confirm('Every remaining month is pinned from hand edits. Replan ALL remaining months from the annual target (your current numbers will be replaced)?')) return;
-        openMonths = remainingMonths;
-        pinnedMonths = [];
-      }
+    if (!interactive) {
+      // Silent rebalance after a hand edit: ONLY the months AFTER the edited
+      // one move. The edited month and every month before it keep their
+      // numbers, pinned or not — typing a December goal must never rewrite
+      // October and November. Later unpinned months absorb the change; if
+      // every later month is pinned, all later months do. Editing the last
+      // month changes nothing else.
+      if (!editedKey) return;
+      const later = remainingMonths.filter(k => k > editedKey);
+      if (!later.length) return;
+      const laterOpen = later.filter(k => !goals[k]?.pinned);
+      openMonths = laterOpen.length ? laterOpen : later;
+      pinnedMonths = remainingMonths.filter(k => !openMonths.includes(k));
+    } else if (!openMonths.length) {
+      // When EVERY remaining month is pinned (a fully hand-entered plan),
+      // tapping Auto-plan used to do literally nothing. Now it asks, then
+      // replans the whole remainder.
+      if (!confirm('Every remaining month is pinned from hand edits. Replan ALL remaining months from the annual target (your current numbers will be replaced)?')) return;
+      openMonths = remainingMonths;
+      pinnedMonths = [];
     }
     const pinnedSum = pinnedMonths.reduce((s, k) => s + (goals[k]?.revenueGoal || 0), 0);
     const remaining = Math.max(0, target - done - pinnedSum);
@@ -428,8 +430,8 @@ export default function GoalsContent() {
           )}
           <p className="text-[11px] text-gray-400 sm:ml-auto sm:max-w-[260px]">
             Splits what&apos;s left of the target across {MONTH_NAMES[curMonth - 1]}–December, weighted by last year&apos;s
-            seasonality. Months you edit by hand get 📌 pinned — run auto-plan again and the other months
-            re-balance around them so the total still hits the target. Ad budgets assume {TARGET_MER}x MER.
+            seasonality. Typing a goal pins that month 📌 and only the months AFTER it re-balance; earlier
+            months never move on their own. Tap Auto-plan to re-balance everything that is not pinned. Ad budgets assume {TARGET_MER}x MER.
           </p>
         </div>
       </Card>
