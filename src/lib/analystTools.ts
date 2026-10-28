@@ -153,7 +153,7 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     input_schema: {
       type: 'object',
       properties: {
-        timeframe: { type: 'string', enum: ['today', 'yesterday', '7d', '14d', '30d', 'mtd', 'last_month', '6m', 'ytd'], description: 'Period preset (default 30d). Ignored when date_from/date_to are given.' },
+        timeframe: { type: 'string', enum: ['today', 'yesterday', '7d', '14d', '30d', 'mtd', 'last_month', '3m', '6m', 'ytd'], description: 'Period preset (default 30d). Ignored when date_from/date_to are given.' },
         date_from: { type: 'string', description: 'Optional exact start, YYYY-MM-DD (e.g. a specific month)' },
         date_to: { type: 'string', description: 'Optional exact end, YYYY-MM-DD' },
       },

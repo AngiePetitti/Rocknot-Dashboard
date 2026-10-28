@@ -15,6 +15,8 @@ import MetricCard from '@/src/components/ui/MetricCard';
 import Card from '@/src/components/ui/Card';
 import TimeframeSelector from '@/src/components/ui/TimeframeSelector';
 import RevenueChart from '@/src/components/charts/RevenueChart';
+import MonthlyHistory from '@/src/components/MonthlyHistory';
+import { timeframeRange as tfRange } from '@/src/lib/timeframes';
 import CACChart from '@/src/components/charts/CACChart';
 import SpendDonut from '@/src/components/charts/SpendDonut';
 import { useClient } from '@/src/components/ClientProvider';
@@ -1359,6 +1361,14 @@ export default function OverviewContent() {
       )}
 
       {/* Charts Row */}
+      {/* Month-by-month history for 3-month-and-longer ranges */}
+      {isLive && (() => {
+        const r = tfRange(tfRaw as Timeframe | 'custom', dateFrom, dateTo);
+        const days = Math.round((Date.parse(r.to) - Date.parse(r.from)) / 86400000) + 1;
+        if (days < 85) return null;
+        return <MonthlyHistory from={r.from} to={r.to} targetMer={MER_GOAL} targetCac={TARGET_CAC} />;
+      })()}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
         {(tfRaw === 'today' || tfRaw === 'yesterday') && !isPartner ? (
           /* Single-day view: New vs Returning customer revenue breakdown */

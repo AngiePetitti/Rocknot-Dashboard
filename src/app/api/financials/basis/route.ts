@@ -42,6 +42,7 @@ export async function GET(req: NextRequest) {
       if (tf === '7d') return { from: addDays(today, -7), to: today };
       if (tf === '14d') return { from: addDays(today, -14), to: today };
       if (tf === '30d') return { from: addDays(today, -30), to: today };
+      if (tf === '3m') return { from: addDays(today, -90), to: today };
       if (tf === '6m') return { from: addDays(today, -180), to: today };
       if (tf === 'ytd') return { from: `${today.slice(0, 4)}-01-01`, to: today };
       if (tf === 'last_month') {

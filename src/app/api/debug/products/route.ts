@@ -18,6 +18,7 @@ function rangeForTf(tfRaw: string): { from: string; to: string } {
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   if (tfRaw === '7d') return { from: addDays(todayStr, -7), to: todayStr };
   if (tfRaw === '30d') return { from: addDays(todayStr, -30), to: todayStr };
+  if (tfRaw === '3m') return { from: addDays(todayStr, -90), to: todayStr };
   if (tfRaw === '6m') return { from: addDays(todayStr, -180), to: todayStr };
   if (tfRaw === 'ytd') return { from: `${todayStr.split('-')[0]}-01-01`, to: todayStr };
   return { from: addDays(todayStr, -30), to: todayStr };

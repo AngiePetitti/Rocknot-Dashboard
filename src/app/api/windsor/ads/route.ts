@@ -236,6 +236,8 @@ export async function GET(request: NextRequest) {
     params = { date_from: r.from, date_to: r.to };
   } else if (tfRaw === 'last_month') {
     params = { date_from: firstOfMonth(1), date_to: lastOfPrevMonth() };
+  } else if (tfRaw === '3m') {
+    params = rangeParams(90);
   } else if (tfRaw === '6m') {
     params = rangeParams(180);
   } else if (tfRaw === 'ytd') {

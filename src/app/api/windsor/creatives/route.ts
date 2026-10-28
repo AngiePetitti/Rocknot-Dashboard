@@ -30,6 +30,7 @@ function buildDateParams(tfRaw: string, dateFrom = '', dateTo = ''): Record<stri
   if (tfRaw === '7d') return { date_from: addDays(todayStr, -7), date_to: todayStr };
   if (tfRaw === '14d') return { date_from: addDays(todayStr, -14), date_to: todayStr };
   if (tfRaw === '30d') return { date_from: addDays(todayStr, -30), date_to: todayStr };
+  if (tfRaw === '3m') return { date_from: addDays(todayStr, -90), date_to: todayStr };
   if (tfRaw === '6m') return { date_from: addDays(todayStr, -180), date_to: todayStr };
   if (tfRaw === 'ytd') {
     const year = todayStr.split('-')[0];
