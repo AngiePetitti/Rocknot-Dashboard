@@ -26,6 +26,7 @@ function getDateRange(tf: string, dateFrom?: string, dateTo?: string): { from: s
   }
   if (tf === '30d') return { from: addDays(todayStr, -30), to: todayStr, label: 'Last 30 days' };
   if (tf === '90d') return { from: addDays(todayStr, -90), to: todayStr, label: 'Last 90 days' };
+  if (tf === '3m')  return { from: addDays(todayStr, -90), to: todayStr, label: 'Last 3 months' };
   if (tf === '6m')  return { from: addDays(todayStr, -180), to: todayStr, label: 'Last 6 months' };
   if (tf === 'ytd') return { from: `${y}-01-01`, to: todayStr, label: `Year to date (${y})` };
   if (tf === 'q4_last') {

@@ -13,6 +13,7 @@ const DATE_PRESETS: Record<Timeframe, string> = {
   '30d':      'last_30d',
   mtd:        'this_month',
   last_month: 'last_month',
+  '3m':       'last_90d',
   '6m':       'last_6_months',
   ytd:        'this_year',
 };

@@ -40,6 +40,7 @@ function buildCurrentParams(tf: Timeframe, todayStr: string, yesterdayStr: strin
     const r = mtdRange(todayStr, yesterdayStr);
     return { date_from: r.from, date_to: r.to };
   }
+  if (tf === '3m') return { date_from: addDays(todayStr, -90), date_to: todayStr };
   if (tf === '6m') return { date_from: addDays(todayStr, -180), date_to: todayStr };
   if (tf === 'ytd') {
     const year = todayStr.split('-')[0];
@@ -73,6 +74,10 @@ function buildPriorParams(tf: Timeframe, todayStr: string, yesterdayStr: string)
   }
   if (tf === '30d') {
     const from = addDays(todayStr, -61); const to = addDays(todayStr, -31);
+    return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
+  }
+  if (tf === '3m') {
+    const from = addDays(todayStr, -181); const to = addDays(todayStr, -91);
     return { params: { date_from: from, date_to: to }, label: `${from} – ${to}` };
   }
   if (tf === '6m') {

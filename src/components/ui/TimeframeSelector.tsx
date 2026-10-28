@@ -82,6 +82,7 @@ export default function TimeframeSelector() {
       '30d': 'Prior 30 days',
       mtd: 'Same days last month',
       last_month: 'Month before',
+      '3m': 'Prior 3 months',
       '6m': 'Prior 6 months',
       ytd: 'Prior year',
     };

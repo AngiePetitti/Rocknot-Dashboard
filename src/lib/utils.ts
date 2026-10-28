@@ -37,6 +37,7 @@ export const TIMEFRAME_LABELS: Record<string, string> = {
   '30d': 'Last 30 Days',
   mtd: 'Month to Date',
   last_month: 'Last Month',
+  '3m': 'Last 3 Months',
   '6m': 'Last 6 Months',
   ytd: 'Year to Date',
 };
@@ -50,6 +51,7 @@ export const TIMEFRAME_SHORT_LABELS: Record<string, string> = {
   '30d': '30 Days',
   mtd: 'MTD',
   last_month: 'Last Mo.',
+  '3m': '3 Months',
   '6m': '6 Months',
   ytd: 'YTD',
 };

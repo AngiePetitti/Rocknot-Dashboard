@@ -73,6 +73,7 @@ function rangeForTf(tfRaw: string, dateFrom: string, dateTo: string): { from: st
   if (tfRaw === '7d') return { from: addDays(todayStr, -7), to: todayStr };
   if (tfRaw === '14d') return { from: addDays(todayStr, -14), to: todayStr };
   if (tfRaw === '30d') return { from: addDays(todayStr, -30), to: todayStr };
+  if (tfRaw === '3m') return { from: addDays(todayStr, -90), to: todayStr };
   if (tfRaw === '6m') return { from: addDays(todayStr, -180), to: todayStr };
   if (tfRaw === 'ytd') return { from: `${todayStr.split('-')[0]}-01-01`, to: todayStr };
   if (tfRaw === 'mtd') {

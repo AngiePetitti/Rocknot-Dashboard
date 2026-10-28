@@ -15,6 +15,7 @@ const SINCE_MAP: Record<Timeframe, string> = {
   '30d':      '-30d',
   mtd:        '-30d',
   last_month: '-60d',
+  '3m':       '-90d',
   '6m':       '-180d',
   ytd:        '-365d',
 };
@@ -27,6 +28,7 @@ const UNTIL_MAP: Record<Timeframe, string> = {
   '30d':      'today',
   mtd:        'yesterday',
   last_month: '-30d',
+  '3m':       'today',
   '6m':       'today',
   ytd:        'today',
 };

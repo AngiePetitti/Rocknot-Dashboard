@@ -22,6 +22,7 @@ export function timeframeRange(tf: Timeframe | 'custom', dateFrom?: string | nul
   if (tf === '14d') return { from: addDays(todayStr, -14), to: todayStr };
   if (tf === '30d') return { from: addDays(todayStr, -30), to: todayStr };
   if (tf === 'mtd') return mtdRange(todayStr, yesterdayStr);
+  if (tf === '3m') return { from: addDays(todayStr, -90), to: todayStr };
   if (tf === '6m') return { from: addDays(todayStr, -180), to: todayStr };
   if (tf === 'ytd') return { from: `${todayStr.split('-')[0]}-01-01`, to: todayStr };
   if (tf === 'last_month') {
