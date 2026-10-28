@@ -176,6 +176,11 @@ export interface ClientProfile {
      */
     expensesSheet: { id: string; tab: string; year: number } | null;
   };
+  /**
+   * Extra campaign-name words for the funnel split on Ad Performance (lower
+   * case phrases). Checked before the built-in rules in src/lib/funnel.ts.
+   */
+  funnelRules?: { tof?: string[]; mof?: string[]; bof?: string[] };
   revenue: {
     /**
      * Shopify's net sales subtracts the FULL refund on a return. A store that
