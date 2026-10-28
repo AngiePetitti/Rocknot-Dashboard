@@ -93,6 +93,11 @@ export const ANALYST_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: { query: { type: 'string', description: 'GraphQL query document' }, variables: { type: 'object', description: 'Optional variables' } }, required: ['query'] },
   },
   {
+    name: 'get_funnel_split',
+    description: "Ad budget by funnel stage per platform for a date range: how much of Meta / Google / TikTok / Snapchat / Pinterest spend went to top of funnel (prospecting, awareness, broad, lookalike), middle (consideration, engagement, traffic, non-brand search) and bottom (retargeting, brand search, shopping, catalog), read from campaign names and Google campaign types, with the unclassified campaigns named. Use for 'how much are we spending on prospecting vs retargeting', funnel mix, budget allocation questions.",
+    input_schema: { type: 'object', properties: { date_from: { type: 'string', description: 'YYYY-MM-DD' }, date_to: { type: 'string', description: 'YYYY-MM-DD' } }, required: ['date_from', 'date_to'] },
+  },
+  {
     name: 'get_ad_performance',
     description: 'Per-platform ad performance (every paid platform the store runs) for a date range: spend, attributed revenue, ROAS, clicks, conversions — plus new-customer CAC by platform (platform spend ÷ Shopify first-time buyers whose order came from that platform) and the blended new-customer CAC. Use it for any CAC / nCAC / cost-per-new-customer question.',
     input_schema: {
@@ -461,6 +466,13 @@ New customers ${m.newCustomers ?? 'N/A'} (${m.pctNew ?? '?'}%) · Returning ${m.
     const rr = d as { returnRate?: number; totalReturns?: number; topReturnedProducts?: { name: string; returnRate: number }[] } | null;
     if (rr?.returnRate == null) return `No returns data for ${from} → ${to}.`;
     return `Returns ${from} → ${to}: rate ${rr.returnRate}% · $${(rr.totalReturns ?? 0).toLocaleString()} returned\nTop returned: ${(rr.topReturnedProducts ?? []).slice(0, 6).map(p => `${p.name} (${p.returnRate}%)`).join(', ') || 'N/A'}`;
+  }
+
+  if (name === 'get_funnel_split') {
+    if (!(DATE_RE.test(from) && DATE_RE.test(to) && from <= to)) return 'date_from and date_to (YYYY-MM-DD) are required.';
+    const { fetchFunnel, funnelText } = await import('@/src/lib/funnel');
+    try { return funnelText(await fetchFunnel(from, to)); }
+    catch (e) { return `Funnel split unavailable: ${e instanceof Error ? e.message : String(e)}`; }
   }
 
   if (name === 'get_collections' || name === 'get_collection_products' || name === 'search_shopify_products' || name === 'get_discounts' || name === 'shopify_admin_query') {
