@@ -464,8 +464,18 @@ export default function OverviewContent() {
   const lagNote = spendLag.length ? spendLag.map(l => `${l.label} ${formatCurrency(l.reported)} so far, about ${formatCurrency(l.expected)} expected by now`).join('; ') : '';
 
   // ── Month-end forecast (MTD pace, independent of the selected timeframe) ──
-  const [mtdSnap, setMtdSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
-  const [lastMonthSnap, setLastMonthSnap] = useState<{ revenue: number; adSpend: number } | null>(null);
+  type Snap = { revenue: number; adSpend: number; byPlatform?: Record<string, number> };
+  const PLATFORM_KEYS: Array<{ key: string; label: string; field: string }> = [
+    { key: 'meta', label: 'Meta', field: 'metaSpend' }, { key: 'google', label: 'Google', field: 'googleSpend' },
+    { key: 'tiktok', label: 'TikTok', field: 'tiktokSpend' }, { key: 'snapchat', label: 'Snapchat', field: 'snapchatSpend' },
+    { key: 'pinterest', label: 'Pinterest', field: 'pinterestSpend' },
+  ];
+  const snapOf = (m: Record<string, number | undefined>): Snap => ({
+    revenue: m.totalRevenue ?? 0, adSpend: m.totalAdSpend ?? 0,
+    byPlatform: Object.fromEntries(PLATFORM_KEYS.map(p => [p.key, m[p.field] ?? 0])),
+  });
+  const [mtdSnap, setMtdSnap] = useState<Snap | null>(null);
+  const [lastMonthSnap, setLastMonthSnap] = useState<Snap | null>(null);
   // Same days of LAST month (1st → same day-of-month as yesterday) — the
   // honest pace comparison. Comparing a projected month against last month's
   // FULL total hides being ahead day-for-day when last month finished strong.
@@ -484,12 +494,10 @@ export default function OverviewContent() {
     if (td > 1) {
       const first = `${ty}-${String(tm).padStart(2, '0')}-01`;
       const yest = new Date(Date.UTC(ty, tm - 1, td - 1)).toISOString().slice(0, 10);
-      cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
+      cachedJson<{ source?: string; metrics?: Record<string, number | undefined> }>(
         `/api/windsor?tf=custom&date_from=${first}&date_to=${yest}&lite=1`,
         d => {
-          if (isLiveOverviewSource(d.source) && d.metrics) {
-            setMtdSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
-          }
+          if (isLiveOverviewSource(d.source) && d.metrics) setMtdSnap(snapOf(d.metrics));
         }
       );
       // Last month, same day span (capped at that month's length).
@@ -506,12 +514,10 @@ export default function OverviewContent() {
         }
       );
     }
-    cachedJson<{ source?: string; metrics?: { totalRevenue?: number; totalAdSpend?: number } }>(
+    cachedJson<{ source?: string; metrics?: Record<string, number | undefined> }>(
       '/api/windsor?tf=last_month&lite=1',
       d => {
-        if (isLiveOverviewSource(d.source) && d.metrics) {
-          setLastMonthSnap({ revenue: d.metrics.totalRevenue ?? 0, adSpend: d.metrics.totalAdSpend ?? 0 });
-        }
+        if (isLiveOverviewSource(d.source) && d.metrics) setLastMonthSnap(snapOf(d.metrics));
       }
     );
   }, [liveSource]);
@@ -528,12 +534,19 @@ export default function OverviewContent() {
     const spendPace = mtdSnap.adSpend / daysElapsed;
     const revF = revPace * daysInMonth;
     const spendF = spendPace * daysInMonth;
+    // Per-platform projection on the same pace rule.
+    const platforms = PLATFORM_KEYS
+      .map(p => ({ key: p.key, label: p.label, mtd: mtdSnap.byPlatform?.[p.key] ?? 0 }))
+      .filter(p => p.mtd > 0)
+      .map(p => ({ ...p, projected: (p.mtd / daysElapsed) * daysInMonth }))
+      .sort((a, b) => b.projected - a.projected);
     return {
       daysElapsed,
       daysInMonth,
       revPace,
       revF,
       spendF,
+      platforms,
       merF: spendF > 0 ? revF / spendF : 0,
       monthName: new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long' }),
     };
@@ -1213,8 +1226,30 @@ export default function OverviewContent() {
               );
             })}
           </div>
+          {forecast.platforms.length > 0 && (
+            <div className="mt-4">
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Projected ad spend by platform</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                {forecast.platforms.map(p => {
+                  const prior = lastMonthSnap?.byPlatform?.[p.key] ?? 0;
+                  const delta = prior > 0 ? ((p.projected - prior) / prior) * 100 : null;
+                  const share = forecast.spendF > 0 ? (p.projected / forecast.spendF) * 100 : 0;
+                  return (
+                    <div key={p.key} className="bg-white border border-blue-100 rounded-xl px-3 py-2.5">
+                      <p className="text-[11px] font-semibold text-gray-500">{p.label} <span className="text-gray-400 font-normal">· {share.toFixed(0)}%</span></p>
+                      <p className="text-lg font-bold text-gray-800 tabular-nums">{formatCurrency(p.projected)}</p>
+                      <p className="text-[11px] text-gray-400 tabular-nums">{formatCurrency(p.mtd)} so far</p>
+                      {delta !== null && (
+                        <p className={`text-[11px] font-semibold ${delta <= 0 ? 'text-green-600' : 'text-red-500'}`}>{delta >= 0 ? '+' : ''}{delta.toFixed(0)}% vs last month&apos;s {formatCurrency(prior)}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <p className="text-[11px] text-gray-400 mt-3">
-            Simple pace projection: month-to-date ÷ days elapsed × days in month. Doesn&apos;t account for planned launches or seasonal swings — check the calendar for what&apos;s ahead.
+            Simple pace projection: month-to-date ÷ days elapsed × days in month, for the total and for each platform. Doesn&apos;t account for planned launches or seasonal swings — check the calendar for what&apos;s ahead.
           </p>
         </Card>
       )}
