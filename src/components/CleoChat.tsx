@@ -195,6 +195,10 @@ export default function CleoChat() {
     rec.start();
   }
   const [reportMenu, setReportMenu] = useState(false);
+  // Past conversations ("New chat" archives the live one; History brings one back).
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<Array<{ id: string; title: string; savedAt: string; count: number; preview: string }> | null>(null);
+  const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   const [reportLink, setReportLink] = useState<string | null>(null);
   // Pinned banner for a report Cleo kicked off: always visible (not buried in
   // the scrollback), polls the server-side job so it shows building → ready
@@ -438,16 +442,54 @@ export default function CleoChat() {
     }
   }
 
-  function clearChat() {
-    if (!confirm('Clear this conversation everywhere? It syncs across your devices, so this deletes it on all of them.')) return;
-    setChat([]);
+  // Replace the live conversation locally and mark it as synced so the
+  // background sync does not push the old one back to the server.
+  function replaceLocal(next: ChatMsg[]) {
+    setChat(next);
     setAskError(null);
-    try { localStorage.removeItem(chatKey); localStorage.removeItem(`${chatKey}:pending`); } catch { /* ignore */ }
-    fetch('/api/insights/chat', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: [] }),
-    }).catch(() => {});
+    const str = JSON.stringify(stripImages(next).slice(-24));
+    try { localStorage.setItem(chatKey, str); localStorage.setItem(`${chatKey}:synced`, str); localStorage.removeItem(`${chatKey}:pending`); } catch { /* ignore */ }
+  }
+
+  async function loadHistory() {
+    try {
+      const r = await fetch('/api/insights/chat/history', { cache: 'no-store' });
+      const d = await r.json();
+      setHistory(Array.isArray(d?.conversations) ? d.conversations : []);
+    } catch { setHistory([]); }
+  }
+
+  /** Start a fresh conversation; the current one is kept under History. */
+  async function newChat() {
+    if (asking) return;
+    if (!chat.length) { setHistoryOpen(false); return; }
+    setHistoryBusy('new');
+    try {
+      await fetch('/api/insights/chat/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'new' }) });
+    } catch { /* the local reset still happens; the server copy stays in Chats until the next sync */ }
+    replaceLocal([]);
+    setHistoryBusy(null);
+    setHistoryOpen(false);
+    if (history) loadHistory();
+  }
+
+  async function openPast(id: string) {
+    setHistoryBusy(id);
+    try {
+      const r = await fetch('/api/insights/chat/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'open', id }) });
+      const d = await r.json();
+      if (Array.isArray(d?.messages)) { replaceLocal(d.messages); setHistoryOpen(false); }
+    } catch { /* ignore */ }
+    setHistoryBusy(null);
+    loadHistory();
+  }
+
+  async function deletePast(id: string) {
+    if (!confirm('Delete this past conversation? This cannot be undone.')) return;
+    setHistoryBusy(id);
+    try { await fetch('/api/insights/chat/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id }) }); } catch { /* ignore */ }
+    setHistoryBusy(null);
+    loadHistory();
   }
 
   // Turn the current conversation into a shareable visual report. Opens a
@@ -568,8 +610,9 @@ export default function CleoChat() {
                 )}
               </div>
             )}
+            <button onClick={() => { setHistoryOpen(v => !v); if (!history) loadHistory(); }} title="Past conversations" className={`text-xs font-medium px-1.5 py-1 rounded-lg ${historyOpen ? 'bg-gray-100 text-gray-700' : 'text-gray-400 hover:text-gray-600'}`}>🕘</button>
             {chat.length > 0 && (
-              <button onClick={clearChat} className="text-xs text-gray-400 hover:text-gray-600 font-medium px-1">Clear</button>
+              <button onClick={newChat} disabled={historyBusy === 'new'} title="Start a new conversation (this one is kept under 🕘)" className="text-xs text-violet-600 hover:text-violet-800 font-semibold px-1 disabled:opacity-50">＋ New</button>
             )}
             <button
               onClick={() => setOpen(false)}
@@ -615,6 +658,32 @@ export default function CleoChat() {
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+            {historyOpen && (
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-2">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-bold text-gray-700">Past conversations</p>
+                  <button onClick={() => setHistoryOpen(false)} className="text-xs text-gray-400">Close</button>
+                </div>
+                {history === null ? <p className="text-xs text-gray-400">Loading…</p> : history.length === 0 ? (
+                  <p className="text-xs text-gray-400">Nothing saved yet. Tap ＋ New to start a fresh chat — the current one is kept here.</p>
+                ) : (
+                  <ul className="space-y-1.5 max-h-64 overflow-y-auto">
+                    {history.map(h => (
+                      <li key={h.id} className="bg-white border border-gray-100 rounded-lg px-2.5 py-2">
+                        <p className="text-xs font-semibold text-gray-800 truncate">{h.title}</p>
+                        <p className="text-[10px] text-gray-400">{new Date(h.savedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · {h.count} messages</p>
+                        {h.preview && <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-2">{h.preview}</p>}
+                        <div className="flex gap-3 mt-1.5">
+                          <button onClick={() => openPast(h.id)} disabled={historyBusy === h.id} className="text-[11px] font-semibold text-violet-600 disabled:opacity-50">Open & continue</button>
+                          <button onClick={() => deletePast(h.id)} disabled={historyBusy === h.id} className="text-[11px] text-gray-400 disabled:opacity-50">Delete</button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="text-[10px] text-gray-400 mt-2">Opening a past conversation brings it back as the live chat; the one you were in is saved here. Conversations are kept with your login, across devices.</p>
               </div>
             )}
             <ConversationView chat={chat} asking={asking} endRef={endRef} />
