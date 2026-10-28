@@ -610,8 +610,8 @@ export default function CleoChat() {
                 )}
               </div>
             )}
+            <button onClick={() => { setHistoryOpen(v => !v); if (!history) loadHistory(); }} title="Past conversations" className={`text-xs font-medium px-1.5 py-1 rounded-lg ${historyOpen ? 'bg-gray-100 text-gray-700' : 'text-gray-400 hover:text-gray-600'}`}>🕘</button>
             {chat.length > 0 && (
-              <button onClick={() => { setHistoryOpen(v => !v); if (!history) loadHistory(); }} title="Past conversations" className={`text-xs font-medium px-1.5 py-1 rounded-lg ${historyOpen ? 'bg-gray-100 text-gray-700' : 'text-gray-400 hover:text-gray-600'}`}>🕘</button>
               <button onClick={newChat} disabled={historyBusy === 'new'} title="Start a new conversation (this one is kept under 🕘)" className="text-xs text-violet-600 hover:text-violet-800 font-semibold px-1 disabled:opacity-50">＋ New</button>
             )}
             <button
