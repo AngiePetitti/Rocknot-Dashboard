@@ -90,6 +90,8 @@ interface PriorPeriod {
   mer: number;
   metaSpend: number;
   googleSpend: number;
+  newCustomers?: number;
+  returningCustomers?: number;
 }
 
 export default function OverviewContent() {
@@ -968,16 +970,16 @@ export default function OverviewContent() {
               <MetricCard
                 title="New Customers"
                 value={String(metrics.newCustomers)}
-                subtitle={`${metrics.pctNew?.toFixed(1) ?? 0}% of customers`}
+                subtitle={`${metrics.pctNew?.toFixed(1) ?? 0}% of customers${metrics.newCustomerRevenue ? ` · ${formatCurrency(metrics.newCustomerRevenue)} revenue` : ''}`}
                 accentColor="#a5f3fc"
-                trend={metrics.newCustomerRevenue ? { value: formatCurrency(metrics.newCustomerRevenue) + ' revenue', positive: true } : undefined}
+                comparison={compareOn && priorPeriod?.newCustomers ? { current: metrics.newCustomers, prior: priorPeriod.newCustomers, label: `${deltaLabel} (${priorPeriod.newCustomers.toLocaleString()} customers)` } : undefined}
               />
               <MetricCard
                 title="Returning Customers"
                 value={String(metrics.returningCustomers ?? 0)}
-                subtitle={`${metrics.pctReturning?.toFixed(1) ?? 0}% of customers`}
+                subtitle={`${metrics.pctReturning?.toFixed(1) ?? 0}% of customers${metrics.returningCustomerRevenue ? ` · ${formatCurrency(metrics.returningCustomerRevenue)} revenue` : ''}`}
                 accentColor="#bbf7d0"
-                trend={metrics.returningCustomerRevenue ? { value: formatCurrency(metrics.returningCustomerRevenue) + ' revenue', positive: true } : undefined}
+                comparison={compareOn && priorPeriod?.returningCustomers ? { current: metrics.returningCustomers ?? 0, prior: priorPeriod.returningCustomers, label: `${deltaLabel} (${priorPeriod.returningCustomers.toLocaleString()} customers)` } : undefined}
               />
               </>)}
               <MetricCard

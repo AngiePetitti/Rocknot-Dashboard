@@ -594,7 +594,7 @@ export async function GET(request: NextRequest) {
         }
         const prior = await directPeriod(pr.from, pr.to);
         const m = prior.metrics;
-        priorPeriod = { totalRevenue: m.totalRevenue, totalAdSpend: m.totalAdSpend, totalOrders: m.totalOrders, aov: m.aov, mer: m.mer, metaSpend: m.metaSpend, googleSpend: m.googleSpend };
+        priorPeriod = { totalRevenue: m.totalRevenue, totalAdSpend: m.totalAdSpend, totalOrders: m.totalOrders, aov: m.aov, mer: m.mer, metaSpend: m.metaSpend, googleSpend: m.googleSpend, newCustomers: m.newCustomers, returningCustomers: m.returningCustomers };
         priorLabel = pr.label;
       }
       const hasSales = current.metrics.totalRevenue > 0 || current.metrics.totalOrders > 0;
@@ -1009,6 +1009,8 @@ export async function GET(request: NextRequest) {
         mer: priorAgg.metrics.mer,
         metaSpend: priorAgg.metrics.metaSpend,
         googleSpend: priorAgg.metrics.googleSpend,
+        newCustomers: priorAgg.metrics.newCustomers,
+        returningCustomers: priorAgg.metrics.returningCustomers,
       };
     }
 
