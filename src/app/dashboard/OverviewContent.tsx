@@ -1428,11 +1428,11 @@ export default function OverviewContent() {
           <Card accentColor="#c4b5fd" className="lg:col-span-2">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h2 className="text-sm font-bold text-gray-700">Revenue & Ad Spend Trend</h2>
-                <p className="text-xs text-gray-400">Purple = Revenue · Pink = Ad Spend</p>
+                <h2 className="text-sm font-bold text-gray-700">Revenue, Ad Spend & MER Trend</h2>
+                <p className="text-xs text-gray-400">Purple = Revenue · Pink = Ad Spend · Indigo = MER (own panel below)</p>
               </div>
             </div>
-            <RevenueChart data={revenueData} />
+            <RevenueChart data={revenueData} merGoal={MER_GOAL} />
           </Card>
         )}
 
