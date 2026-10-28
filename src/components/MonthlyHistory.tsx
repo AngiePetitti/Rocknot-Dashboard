@@ -33,9 +33,17 @@ export default function MonthlyHistory({ from, to, targetMer, targetCac }: { fro
   const months = useMemo(() => monthsInRange(from, to), [from, to]);
   const [rows, setRows] = useState<Record<string, MonthPoint>>({});
   const [failed, setFailed] = useState(0);
+  // Other marketing per month from the budgeting sheet (admin-only endpoint;
+  // when it is not available the fully loaded panel simply does not show).
+  const [other, setOther] = useState<Record<string, number>>({});
+  const [otherOk, setOtherOk] = useState(false);
   useEffect(() => {
-    setRows({}); setFailed(0);
+    setRows({}); setFailed(0); setOther({}); setOtherOk(false);
     months.forEach(mo => {
+      fetch(`/api/expenses?tf=custom&date_from=${mo.from}&date_to=${mo.to}`, { cache: 'no-store' })
+        .then(async r => (r.ok ? r.json() : null))
+        .then(d => { if (d && !d.error && d.range) { setOther(prev => ({ ...prev, [mo.key]: Number(d.range.nonAdMarketing) || 0 })); setOtherOk(true); } })
+        .catch(() => {});
       cachedJson<{ metrics?: Record<string, number | undefined> }>(`/api/windsor?tf=custom&date_from=${mo.from}&date_to=${mo.to}`, d => {
         const m = d?.metrics; if (!m) return;
         const spend = m.totalAdSpend ?? 0; const newC = m.newCustomers ?? 0;
@@ -46,7 +54,11 @@ export default function MonthlyHistory({ from, to, targetMer, targetCac }: { fro
   }, [months]);
 
   if (months.length < 3) return null;
-  const data = months.map(mo => rows[mo.key]).filter(Boolean) as MonthPoint[];
+  const data = (months.map(mo => rows[mo.key]).filter(Boolean) as MonthPoint[]).map(d => {
+    const o = other[d.month];
+    const fl = o != null && d.newCustomers > 0 ? (d.adSpend + o) / d.newCustomers : null;
+    return { ...d, otherMarketing: o ?? null, flCac: fl };
+  });
   const loading = data.length + failed < months.length;
   const skippedStart = from.slice(8) !== '01';
   const totals = data.reduce((s, d) => ({ revenue: s.revenue + d.revenue, spend: s.spend + d.adSpend, newC: s.newC + d.newCustomers }), { revenue: 0, spend: 0, newC: 0 });
@@ -65,8 +77,8 @@ export default function MonthlyHistory({ from, to, targetMer, targetCac }: { fro
           </p>
         )}
       </div>
-      {data.length === 0 ? <p className="text-xs text-gray-400 py-8 text-center">Loading month-by-month history…</p> : <MonthlyHistoryChart data={data} targetMer={targetMer} targetCac={targetCac} />}
-      <p className="text-[11px] text-gray-400 mt-3">Each month on the Overview&apos;s own basis: revenue is total sales, MER uses this dashboard&apos;s MER basis, new-customer CAC is ad spend ÷ Shopify first-time buyers. The current month is month to date.</p>
+      {data.length === 0 ? <p className="text-xs text-gray-400 py-8 text-center">Loading month-by-month history…</p> : <MonthlyHistoryChart data={data} targetMer={targetMer} targetCac={targetCac} showFullyLoaded={otherOk} />}
+      <p className="text-[11px] text-gray-400 mt-3">Each month on the Overview&apos;s own basis: revenue is total sales, MER uses this dashboard&apos;s MER basis, new-customer CAC is ad spend ÷ Shopify first-time buyers{otherOk ? '; fully loaded CAC adds the month\'s other marketing from the budgeting sheet (agency, content, email/SMS, tools, photoshoots, SEO) before dividing' : ''}. The current month is month to date.</p>
     </Card>
   );
 }

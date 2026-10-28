@@ -2,7 +2,7 @@
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts';
 
-export interface MonthPoint { month: string; label: string; partial: boolean; revenue: number; adSpend: number; mer: number | null; ncac: number | null; newCustomers: number }
+export interface MonthPoint { month: string; label: string; partial: boolean; revenue: number; adSpend: number; mer: number | null; ncac: number | null; newCustomers: number; otherMarketing?: number | null; flCac?: number | null }
 
 const fmtK = (v: number) => (v >= 1000 ? `$${(v / 1000).toFixed(v >= 100000 ? 0 : 1)}K` : `$${Math.round(v)}`);
 
@@ -34,13 +34,16 @@ function Panel({ title, data, dataKey, color, fmt, goal, goalLabel }: { title: s
   );
 }
 
-export default function MonthlyHistoryChart({ data, targetMer, targetCac }: { data: MonthPoint[]; targetMer?: number; targetCac?: number }) {
+export default function MonthlyHistoryChart({ data, targetMer, targetCac, showFullyLoaded }: { data: MonthPoint[]; targetMer?: number; targetCac?: number; showFullyLoaded?: boolean }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
       <Panel title="Revenue" data={data} dataKey="revenue" color="#8b5cf6" fmt={fmtK} />
       <Panel title="Ad spend" data={data} dataKey="adSpend" color="#f9a8d4" fmt={fmtK} />
       <Panel title="MER" data={data} dataKey="mer" color="#818cf8" fmt={v => `${v.toFixed(2)}x`} goal={targetMer} goalLabel={targetMer ? `goal ${targetMer}x` : undefined} />
       <Panel title="New-customer CAC" data={data} dataKey="ncac" color="#86efac" fmt={v => `$${Math.round(v)}`} goal={targetCac} goalLabel={targetCac ? `target $${targetCac}` : undefined} />
+      {showFullyLoaded && (
+        <Panel title="Fully loaded CAC" data={data} dataKey="flCac" color="#fde68a" fmt={v => `$${Math.round(v)}`} goal={1} goalLabel="ad spend + other marketing ÷ new customers" />
+      )}
     </div>
   );
 }
