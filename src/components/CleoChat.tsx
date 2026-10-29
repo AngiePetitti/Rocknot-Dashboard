@@ -137,6 +137,10 @@ function ConversationView({ chat, asking, endRef }: { chat: ChatMsg[]; asking: b
 
 export default function CleoChat() {
   const [open, setOpen] = useState(false);
+  // Desktop: docked panel by default, or a large centred window (remembered).
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => { try { setExpanded(localStorage.getItem('cleo_expanded') === '1'); } catch { /* ignore */ } }, []);
+  function toggleExpanded() { setExpanded(v => { const n = !v; try { localStorage.setItem('cleo_expanded', n ? '1' : '0'); } catch { /* ignore */ } return n; }); }
   const [chat, setChat] = useState<ChatMsg[]>([]);
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
@@ -574,7 +578,11 @@ export default function CleoChat() {
 
       {/* Chat panel — fullscreen on mobile, docked card on desktop */}
       {open && (
-        <div className="fixed z-50 bg-white flex flex-col inset-x-0 top-0 h-[100dvh] md:inset-auto md:bottom-5 md:right-5 md:top-auto md:h-[min(640px,calc(100dvh-3rem))] md:w-[400px] md:rounded-2xl md:border md:border-gray-200 md:shadow-2xl md:overflow-hidden">
+        <>
+        {expanded && <div className="hidden md:block fixed inset-0 z-40 bg-gray-900/30" onClick={() => setOpen(false)} />}
+        <div className={`fixed z-50 bg-white flex flex-col inset-x-0 top-0 h-[100dvh] md:rounded-2xl md:border md:border-gray-200 md:shadow-2xl md:overflow-hidden ${expanded
+          ? 'md:inset-x-[max(1.5rem,calc(50vw-32rem))] md:top-6 md:bottom-6 md:h-auto md:w-auto'
+          : 'md:inset-auto md:bottom-5 md:right-5 md:top-auto md:h-[min(640px,calc(100dvh-3rem))] md:w-[400px]'}`}>
           {/* Header */}
           <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 shrink-0">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-100 to-pink-100 flex items-center justify-center text-base shrink-0">💬</div>
@@ -615,6 +623,16 @@ export default function CleoChat() {
               <button onClick={newChat} disabled={historyBusy === 'new'} title="Start a new conversation (this one is kept under 🕘)" className="text-xs text-violet-600 hover:text-violet-800 font-semibold px-1 disabled:opacity-50">＋ New</button>
             )}
             <button
+              onClick={toggleExpanded}
+              aria-label={expanded ? 'Shrink chat' : 'Expand chat'}
+              title={expanded ? 'Back to the small panel' : 'Expand to a large window'}
+              className="hidden md:inline-flex p-2 rounded-lg hover:bg-gray-100 text-gray-500"
+            >
+              {expanded
+                ? <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 2v4H2M10 14v-4h4M2 10h4v4M14 6h-4V2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                : <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M9 2h5v5M7 14H2V9M14 2L9 7M2 14l5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+            </button>
+            <button
               onClick={() => setOpen(false)}
               aria-label="Close chat"
               className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"
@@ -643,7 +661,7 @@ export default function CleoChat() {
               <button onClick={() => setReportJob(null)} className="shrink-0 text-xs opacity-60 hover:opacity-100" aria-label="Dismiss">✕</button>
             </div>
           )}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-3 space-y-3">
+          <div className={`flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-3 space-y-3 ${expanded ? 'md:px-8 md:py-5 md:text-[15px]' : ''}`}>
             {chat.length === 0 && !asking && (
               <div className="pt-6">
                 <p className="text-xs text-gray-400 mb-3 text-center">Ask Cleo anything about your sales, ads, inventory, or calendar — any time period.</p>
@@ -765,6 +783,7 @@ export default function CleoChat() {
             </button>
           </form>
         </div>
+        </>
       )}
     </>
   );
