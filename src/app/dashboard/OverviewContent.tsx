@@ -1386,7 +1386,7 @@ export default function OverviewContent() {
         const r = tfRange(tfRaw as Timeframe | 'custom', dateFrom, dateTo);
         const days = Math.round((Date.parse(r.to) - Date.parse(r.from)) / 86400000) + 1;
         if (days < 85) return null;
-        return <MonthlyHistory from={r.from} to={r.to} targetMer={MER_GOAL} targetCac={TARGET_CAC} />;
+        return <MonthlyHistory from={r.from} to={r.to} targetMer={MER_GOAL} targetCac={TARGET_CAC} defaultYoY={compareOn && compareTo === 'year'} />;
       })()}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
