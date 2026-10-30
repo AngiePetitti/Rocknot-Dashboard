@@ -403,6 +403,48 @@ export default function GoalsContent() {
       )}
 
       {/* ── Annual target + auto-plan ── */}
+      {/* Seasonal guardrails agreed with the client — the targets the Overview badges follow */}
+      {client.goals.seasons && client.goals.seasons.length > 0 && (() => {
+        const seasons = client.goals.seasons!;
+        const now = effectiveGoals(client);
+        const fmtMonths = (ms: number[]) => { const a = [...ms].sort((x, y) => x - y); const n = (m: number) => MONTH_NAMES[m - 1].slice(0, 3); return a.every((v, i) => i === 0 || v === a[i - 1] + 1) ? `${n(a[0])}–${n(a[a.length - 1])}` : a.map(n).join(', '); };
+        const rows: Array<{ label: string; cell: (sn: typeof seasons[number]) => string }> = [
+          { label: 'Paid media MER', cell: sn => `${sn.merLabel ?? `${sn.targetMer}x`} target${sn.merFloor != null ? ` · ${sn.merFloor}x floor` : ''}` },
+          { label: 'Fully loaded MER (incl. all marketing)', cell: sn => sn.targetFullyLoadedMer != null ? `${sn.fullyLoadedLabel ?? `${sn.targetFullyLoadedMer}x`} target${sn.fullyLoadedFloor != null ? ` · ${sn.fullyLoadedFloor}x floor` : ''}` : '—' },
+          { label: 'New-customer CAC (ads only)', cell: sn => `${sn.cacLabel ?? `$${sn.targetCac}`} target${sn.cacCeiling != null ? ` · $${sn.cacCeiling} ceiling` : ''}` },
+          { label: 'Budget posture', cell: sn => sn.posture || '—' },
+        ];
+        return (
+          <Card accentColor="#a5b4fc" className="mb-5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+              <h2 className="text-sm font-bold text-gray-700">Guardrails by season</h2>
+              {now.season && <span className="text-[11px] font-semibold bg-indigo-50 text-indigo-700 rounded-full px-2 py-0.5">Now: {now.season.name} ({now.season.months})</span>}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr>
+                    <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4">Guardrail</th>
+                    {seasons.map(sn => <th key={sn.name} className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4 whitespace-nowrap">{sn.name} <span className="normal-case font-normal text-gray-400">({fmtMonths(sn.months)})</span></th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(r => (
+                    <tr key={r.label} className="border-t border-gray-50 align-top">
+                      <td className="py-2 pr-4 text-gray-600 whitespace-nowrap">{r.label}</td>
+                      {seasons.map(sn => <td key={sn.name} className={`py-2 pr-4 ${now.season?.name === sn.name ? 'text-gray-800 font-semibold' : 'text-gray-600'}`}>{r.cell(sn)}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-gray-400 mt-2">
+              These are the targets the Overview badges and CAC cards grade against; the season follows the end date of the selected range. Fully loaded MER counts ad spend plus every other marketing cost. Peak and slow months were set from 2024–2025 monthly sales. Review: paid MER and CAC weekly, fully loaded MER on a rolling four weeks. One miss is a conversation; two in a row means cut the weakest platform 15% and reallocate.
+            </p>
+          </Card>
+        );
+      })()}
+
       <Card accentColor="#c4b5fd" className="mb-5">
         <div className="flex flex-col sm:flex-row sm:items-end gap-4">
           <div>
@@ -620,6 +662,7 @@ export default function GoalsContent() {
                     <td className="py-2.5 pr-4 font-semibold text-gray-800 whitespace-nowrap">
                       {MONTH_NAMES[i].slice(0, 3)}
                       {isCurrent && <span className="ml-1.5 text-[10px] bg-blue-100 text-blue-700 rounded-full px-1.5 py-0.5 font-semibold">now</span>}
+                      {client.goals.seasons?.length ? (() => { const eg = effectiveGoals(client, `${k.slice(0, 7)}-15`); return eg.season ? <span className="block text-[10px] font-medium text-gray-400 mt-0.5" title={`Ad budget planned at ${eg.targetMer}x MER`}>{eg.season.name.replace(' season', '')} · {eg.targetMer}x</span> : null; })() : null}
                       {monthNotes[k]?.text && (
                         <button
                           onClick={() => setNoteOpen(prev => ({ ...prev, [k]: true }))}
