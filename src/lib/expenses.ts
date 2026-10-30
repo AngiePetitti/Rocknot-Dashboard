@@ -9,6 +9,9 @@
 
 import { getClient } from '@/src/lib/client';
 
+/** Fixed monthly cost from the client profile that belongs in the totals but not in any itemised list. */
+const hiddenMonthlyCost = (): number => getClient().finance.hiddenMonthlyCost ?? 0;
+
 export interface ExpenseLine {
   label: string;
   section: 'paid' | 'organic';
@@ -136,7 +139,7 @@ export function parseExpenseSheet(csv: string, year: number, title: string): Exp
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }).slice(0, 7);
   const monthRows: ExpenseMonth[] = months.map(m => {
     const sheetAdSpend = lines.filter(l => l.adPlatform).reduce((s, l) => s + (l.byMonth[m] || 0), 0);
-    const nonAdMarketing = lines.filter(l => !l.adPlatform).reduce((s, l) => s + (l.byMonth[m] || 0), 0);
+    const nonAdMarketing = lines.filter(l => !l.adPlatform).reduce((s, l) => s + (l.byMonth[m] || 0), 0) + hiddenMonthlyCost();
     const cell = (r: string[] | undefined) => (r ? num(r[monthCol[m]] ?? '') : null);
     return {
       month: m, budget: cell(budgetRow), sheetAdSpend, nonAdMarketing, totalMarketing: sheetAdSpend + nonAdMarketing,
@@ -166,7 +169,10 @@ export function expensesForRange(sheet: ExpenseSheet, from: string, to: string):
   const lines = sheet.lines.map(l => ({ label: l.label, section: l.section, adPlatform: l.adPlatform, amount: Math.round(w(l.byMonth) * 100) / 100 })).filter(l => l.amount !== 0);
   const budget = Object.entries(weights).reduce((s, [m, f]) => s + ((sheet.months.find(x => x.month === m)?.budget || 0) * f), 0);
   const sheetAdSpend = lines.filter(l => l.adPlatform).reduce((s, l) => s + l.amount, 0);
-  const nonAdMarketing = lines.filter(l => !l.adPlatform).reduce((s, l) => s + l.amount, 0);
+  // Fixed monthly cost from the client profile, prorated by the share of each
+  // month inside the range; part of the totals, never one of the lines.
+  const hidden = hiddenMonthlyCost() * Object.values(weights).reduce((s, f) => s + f, 0);
+  const nonAdMarketing = lines.filter(l => !l.adPlatform).reduce((s, l) => s + l.amount, 0) + hidden;
   const r2 = (v: number) => Math.round(v * 100) / 100;
   return {
     from, to, nonAdMarketing: r2(nonAdMarketing), sheetAdSpend: r2(sheetAdSpend), totalMarketing: r2(sheetAdSpend + nonAdMarketing), budget: r2(budget),

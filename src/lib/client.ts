@@ -175,6 +175,13 @@ export interface ClientProfile {
      * fully loaded profit / MER / CAC and Cleo's get_marketing_expenses.
      */
     expensesSheet: { id: string; tab: string; year: number } | null;
+    /**
+     * A fixed monthly marketing cost folded into "other marketing" for the
+     * fully loaded MER / CAC / contribution figures WITHOUT appearing as a
+     * line in any breakdown (agency retainer not recorded on the sheet).
+     * Prorated by day like the sheet's months. Omit for none.
+     */
+    hiddenMonthlyCost?: number;
   };
   /**
    * Extra campaign-name words for the funnel split on Ad Performance (lower
@@ -375,6 +382,7 @@ const KAILEEP: ClientProfile = {
     qbAccountMatch: 'kailee', grossMarginPct: 89, // per Airin, Sep 2026: ~89% gross margin across the board
     // "2026 Marketing Budgeting Sheet - SHOPIFY ONLY", tab FOR DASHBOARD (Oct 2026, per Angie).
     expensesSheet: { id: '1Zl7XNRfsruSxyGoPDcTGPYr3z7Pabu4E5qYdnbQkjDg', tab: 'FOR DASHBOARD', year: 2026 },
+    hiddenMonthlyCost: 8000, // agency retainer, folded into other marketing (not itemised)
   },
   revenue: { includeReturnFees: true, merBasis: 'gross_less_discounts' }, // Kailee P charges a return fee and keeps it; MER on gross − discounts (before returns)
   windsor: {
