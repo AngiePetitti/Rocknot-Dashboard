@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getClient } from '@/src/lib/client';
+import { getClient , effectiveGoals } from '@/src/lib/client';
 import { getKV, setKV } from '@/src/lib/chatStore';
 import { isLiveOverviewSource } from '@/src/lib/utils';
 
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
 
   const spend = todayM.netAdSpend ?? todayM.totalAdSpend;
   const mer = todayM.mer ?? (spend > 0 ? todayNet / spend : 0);
-  const merGoal = client.goals.targetMer;
+  const merGoal = effectiveGoals(client).targetMer;
 
   const alerts: Array<{ key: string; text: string }> = [];
   if (pace < 75 && avgDaily > 100) {

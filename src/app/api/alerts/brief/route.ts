@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getClient } from '@/src/lib/client';
+import { getClient , effectiveGoals } from '@/src/lib/client';
 import { getGoals } from '@/src/lib/chatStore';
 import { isLiveOverviewSource } from '@/src/lib/utils';
 
@@ -72,8 +72,8 @@ export async function GET(req: NextRequest) {
   }
 
   const monthGoal = goals.find(g => g.month === today.slice(0, 7))?.revenueGoal || 0;
-  const merGoal = client.goals.targetMer;
-  const cacTarget = client.goals.targetCac;
+  const merGoal = effectiveGoals(client).targetMer;
+  const cacTarget = effectiveGoals(client).targetCac;
 
   // Block Kit layout — compact, scannable on a phone.
   const blocks: Array<Record<string, unknown>> = [
