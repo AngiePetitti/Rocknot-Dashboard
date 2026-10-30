@@ -23,6 +23,39 @@ export type ClientId = 'rocknot' | 'kaileep' | 'skimpies';
 // it actually runs; queries and UI for the rest are skipped.
 export type PlatformKey = 'meta' | 'google' | 'tiktok' | 'snapchat' | 'pinterest';
 
+export interface GoalSeason {
+  name: string;
+  /** Calendar months (1–12) the season covers. */
+  months: number[];
+  targetMer: number;
+  merFloor?: number | null;
+  targetFullyLoadedMer?: number | null;
+  fullyLoadedFloor?: number | null;
+  targetCac: number;
+  cacCeiling?: number | null;
+  /** Display labels when the agreed target is a range, e.g. '6.5–7.5x', '$25–28'. */
+  merLabel?: string;
+  fullyLoadedLabel?: string;
+  cacLabel?: string;
+  /** Budget posture in words, shown in the calculation notes. */
+  posture?: string;
+}
+
+export interface EffectiveGoals {
+  targetMer: number;
+  merFloor: number | null;
+  targetFullyLoadedMer: number | null;
+  fullyLoadedFloor: number | null;
+  targetCac: number;
+  cacCeiling: number | null;
+  contributionFloorPct: number | null;
+  targetRoas: number;
+  merLabel: string;
+  fullyLoadedLabel: string | null;
+  cacLabel: string;
+  season: { name: string; months: string; posture?: string } | null;
+}
+
 export interface PlatformDef {
   key: PlatformKey;
   label: string;          // display name used across the UI and API payloads
@@ -240,6 +273,12 @@ export interface ClientProfile {
     targetRoas: number;
     /** New-customer CAC (ad spend ÷ new customers) flagged red when exceeded. */
     targetCac: number;
+    /**
+     * Seasonal targets. When the selected range ends in one of a season's
+     * months, its numbers replace the base targets above (see effectiveGoals).
+     * Lets a seasonal business hold peak-season and slow-season guardrails.
+     */
+    seasons?: GoalSeason[];
   };
   inventory: {
     /**
@@ -442,7 +481,17 @@ const KAILEEP: ClientProfile = {
   },
   // $4M 2026 net-sales target set Sep 2026. Paid MER 5x is the agency's number;
   // fully loaded MER and the contribution floor are the business's (Airin, Oct 2026).
-  goals: { defaultAnnualTarget: 4_000_000, targetMer: 5, targetRoas: 6, targetCac: 30, targetFullyLoadedMer: 3.5, contributionFloorPct: 50 },
+  goals: {
+    defaultAnnualTarget: 4_000_000, targetMer: 5, targetRoas: 6, targetCac: 30, targetFullyLoadedMer: 3.5, contributionFloorPct: 50,
+    // Seasonal guardrails agreed with Airin (Oct 30, 2026). Peak and slow
+    // months come from 2024–2025 online-store sales: Jan–Aug averages ~30%
+    // more per month than Sep–Dec; July is the biggest month. Fully loaded
+    // figures include the agency retainer (finance.hiddenMonthlyCost).
+    seasons: [
+      { name: 'Peak season', months: [1, 2, 3, 4, 5, 6, 7, 8], targetMer: 6.5, merFloor: 6.0, merLabel: '6.5–7.5x', targetFullyLoadedMer: 4.25, fullyLoadedFloor: 3.8, fullyLoadedLabel: '4.25–4.5x', targetCac: 28, cacCeiling: 30, cacLabel: '$25–28', posture: 'Scale 10–15% a week when performance supports it; no increases while a floor is breached.' },
+      { name: 'Slow season', months: [9, 10, 11, 12], targetMer: 5.5, merFloor: 5.0, merLabel: '5.5x', targetFullyLoadedMer: 3.5, fullyLoadedFloor: 3.3, fullyLoadedLabel: '3.5–3.8x', targetCac: 30, cacCeiling: 35, cacLabel: '$28–30', posture: 'Hold: budget changes at most 10–15% a week, no increases while performance is below a floor. BFCM (Nov 25–30) is judged on its own.' },
+    ],
+  },
   inventory: { mode: 'standard' },
   creatives: {
     founderTrack: { label: 'Kailee', personName: 'Kailee' },
@@ -677,6 +726,40 @@ export function windsorPinterestOptions(profile: ClientProfile = getClient()): s
 
 /** Case-insensitive QuickBooks entity matcher (null = keep every account). */
 /** Whether Shopify return fees count toward net sales for MER (see ClientProfile.revenue). */
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function monthsLabel(months: number[]): string {
+  const m = [...months].sort((a, b) => a - b);
+  if (!m.length) return '';
+  const contiguous = m.every((v, i) => i === 0 || v === m[i - 1] + 1);
+  return contiguous && m.length > 1 ? `${MONTH_ABBR[m[0] - 1]}–${MONTH_ABBR[m[m.length - 1] - 1]}` : m.map(v => MONTH_ABBR[v - 1]).join(', ');
+}
+
+/**
+ * The targets in force for a date (default: today, store time). A season
+ * whose months include that date's month overrides the base goals; fields
+ * the season leaves unset fall back to the base goals.
+ */
+export function effectiveGoals(profile: ClientProfile = getClient(), dateStr?: string): EffectiveGoals {
+  const d = dateStr || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const month = Number(d.slice(5, 7)) || new Date().getMonth() + 1;
+  const g = profile.goals;
+  const s = (g.seasons || []).find(x => x.months.includes(month)) || null;
+  return {
+    targetMer: s?.targetMer ?? g.targetMer,
+    merFloor: s?.merFloor ?? null,
+    targetFullyLoadedMer: s?.targetFullyLoadedMer ?? g.targetFullyLoadedMer ?? null,
+    fullyLoadedFloor: s?.fullyLoadedFloor ?? null,
+    targetCac: s?.targetCac ?? g.targetCac,
+    cacCeiling: s?.cacCeiling ?? null,
+    contributionFloorPct: g.contributionFloorPct ?? null,
+    targetRoas: g.targetRoas,
+    merLabel: s?.merLabel ?? `${s?.targetMer ?? g.targetMer}x`,
+    fullyLoadedLabel: s?.fullyLoadedLabel ?? ((s?.targetFullyLoadedMer ?? g.targetFullyLoadedMer) != null ? `${s?.targetFullyLoadedMer ?? g.targetFullyLoadedMer}x` : null),
+    cacLabel: s?.cacLabel ?? `$${s?.targetCac ?? g.targetCac}`,
+    season: s ? { name: s.name, months: monthsLabel(s.months), posture: s.posture } : null,
+  };
+}
+
 export function includeReturnFees(profile: ClientProfile = getClient()): boolean {
   return profile.revenue.includeReturnFees;
 }

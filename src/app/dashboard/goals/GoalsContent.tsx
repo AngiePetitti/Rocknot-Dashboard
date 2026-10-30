@@ -7,6 +7,7 @@ import { formatCurrency, isLiveOverviewSource } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import { useClient } from '@/src/components/ClientProvider';
+import { effectiveGoals } from '@/src/lib/client';
 
 interface MonthGoal { month: string; revenueGoal: number; adBudget: number; pinned?: boolean }
 interface MonthActual { revenue: number; adSpend: number }
@@ -46,7 +47,8 @@ function byMonth(daily: { date: string; revenue: number; netSales?: number; adSp
 
 export default function GoalsContent() {
   const client = useClient();
-  const TARGET_MER = client.goals.targetMer; // net-sales MER target; ad budgets are derived from this when auto-planning
+  const TARGET_MER = client.goals.targetMer; // base MER target; per-month planning uses the month's season (merFor)
+  const merFor = (monthKey: string) => effectiveGoals(client, `${monthKey.slice(0, 7)}-15`).targetMer;
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === 'admin';
   const { y: year, m: curMonth, d: today } = pstToday();
@@ -238,7 +240,7 @@ export default function GoalsContent() {
     openMonths.forEach((k, i) => {
       const share = weightSum > 0 ? weights[i] / weightSum : 1 / (openMonths.length || 1);
       const goal = Math.round((remaining * share) / 1000) * 1000;
-      next[k] = { month: k, revenueGoal: goal, adBudget: Math.round(goal / TARGET_MER / 100) * 100, pinned: false };
+      next[k] = { month: k, revenueGoal: goal, adBudget: Math.round(goal / merFor(k) / 100) * 100, pinned: false };
     });
     setGoals(next);
     setDirty(true);
@@ -431,7 +433,7 @@ export default function GoalsContent() {
           <p className="text-[11px] text-gray-400 sm:ml-auto sm:max-w-[260px]">
             Splits what&apos;s left of the target across {MONTH_NAMES[curMonth - 1]}–December, weighted by last year&apos;s
             seasonality. Typing a goal pins that month 📌 and only the months AFTER it re-balance; earlier
-            months never move on their own. Tap Auto-plan to re-balance everything that is not pinned. Ad budgets assume {TARGET_MER}x MER.
+            months never move on their own. Tap Auto-plan to re-balance everything that is not pinned. Ad budgets assume each month&apos;s MER target{client.goals.seasons?.length ? ` (${client.goals.seasons.map(s => `${s.name}: ${s.targetMer}x`).join(', ')})` : ` (${TARGET_MER}x)`}.
           </p>
         </div>
       </Card>

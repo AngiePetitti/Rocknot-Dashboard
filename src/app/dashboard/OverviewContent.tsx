@@ -17,6 +17,7 @@ import TimeframeSelector from '@/src/components/ui/TimeframeSelector';
 import RevenueChart from '@/src/components/charts/RevenueChart';
 import MonthlyHistory from '@/src/components/MonthlyHistory';
 import { timeframeRange as tfRange } from '@/src/lib/timeframes';
+import { effectiveGoals } from '@/src/lib/client';
 import CACChart from '@/src/components/charts/CACChart';
 import SpendDonut from '@/src/components/charts/SpendDonut';
 import { useClient } from '@/src/components/ClientProvider';
@@ -97,8 +98,15 @@ interface PriorPeriod {
 export default function OverviewContent() {
   const searchParams = useSearchParams();
   const client = useClient();
-  const MER_GOAL = client.goals.targetMer;
-  const TARGET_CAC = client.goals.targetCac; // New Customer CAC flagged red when exceeded
+  // Targets in force for the selected range (seasonal clients switch by the range's end month).
+  const rangeEndForGoals = (() => { try { return tfRange((searchParams.get('tf') || '30d') as Timeframe | 'custom', searchParams.get('date_from') || '', searchParams.get('date_to') || '').to; } catch { return undefined; } })();
+  const goalsNow = effectiveGoals(client, rangeEndForGoals);
+  const MER_GOAL = goalsNow.targetMer;
+  const MER_FLOOR = goalsNow.merFloor;
+  const TARGET_CAC = goalsNow.targetCac; // New Customer CAC: green at/under target, amber up to the ceiling, red above
+  const CAC_CEILING = goalsNow.cacCeiling;
+  // Green at/under target, amber between target and ceiling, red above the ceiling.
+  const cacTone = (v: number) => (v <= TARGET_CAC ? '#22c55e' : CAC_CEILING != null && v <= CAC_CEILING ? '#d97706' : '#ef4444');
   const runs = (k: keyof typeof PLATFORMS) => client.ads.platforms.includes(k);
   const tfRaw = searchParams.get('tf') || '30d';
   const isCustom = tfRaw === 'custom';
@@ -782,8 +790,9 @@ export default function OverviewContent() {
         const flMer = totalMk && totalMk > 0 ? netS / totalMk : null;
         const contrib = cogsPct != null && totalMk != null ? contribBase - contribBase * (cogsPct / 100) - totalMk : null;
         const cmPct = contrib != null && contribBase > 0 ? (contrib / contribBase) * 100 : null;
-        const flGoal = client.goals.targetFullyLoadedMer ?? null;
-        const floor = client.goals.contributionFloorPct ?? null;
+        const flGoal = goalsNow.targetFullyLoadedMer;
+        const flFloor = goalsNow.fullyLoadedFloor;
+        const floor = goalsNow.contributionFloorPct;
         const showLoaded = !isPartner && expenses !== null && tfRaw !== 'today';
         const okFl = flMer != null && flGoal != null ? flMer >= flGoal : null;
         const okCm = cmPct != null && floor != null ? cmPct >= floor : null;
@@ -794,12 +803,21 @@ export default function OverviewContent() {
         const viewDays = tfRaw === 'today' || tfRaw === 'yesterday' ? 1 : Math.max(1, revenueData.length);
         const missingSpend = (missing7d / 7) * Math.min(viewDays, 7) * (tfRaw === 'today' ? Math.max(0.2, new Date().getHours() / 24) : 1) + lagGap;
         const correctedMer = missingSpend > 0 && adS + missingSpend > 0 ? netS / (adS + missingSpend) : null;
-        const Badge = ({ ok, goal }: { ok: boolean | null; goal: number | null }) => (goal == null || ok == null ? null : (
-          <div className="pb-1.5 sm:pb-2">
-            <span className="text-xs sm:text-sm font-bold px-2 py-1 rounded-lg whitespace-nowrap" style={{ backgroundColor: ok ? '#dcfce7' : '#fee2e2', color: ok ? '#22c55e' : '#ef4444' }}>{ok ? '✓ Above goal' : '✗ Below goal'}</span>
-            <p className="text-[11px] text-gray-400 mt-1">Goal {goal}x</p>
-          </div>
-        ));
+        // Three states when a floor exists: at goal (green), between floor and
+        // goal (amber), below floor (red). Two states without one.
+        const Badge = ({ value, goal, floor: fl, label }: { value: number | null; goal: number | null; floor?: number | null; label?: string | null }) => {
+          if (goal == null || value == null) return null;
+          const state = value >= goal ? 'ok' : fl != null && value >= fl ? 'warn' : 'bad';
+          const bg = state === 'ok' ? '#dcfce7' : state === 'warn' ? '#fef3c7' : '#fee2e2';
+          const fg = state === 'ok' ? '#22c55e' : state === 'warn' ? '#d97706' : '#ef4444';
+          const text = state === 'ok' ? '✓ At goal' : state === 'warn' ? '◐ Above floor, below goal' : fl != null ? '✗ Below floor' : '✗ Below goal';
+          return (
+            <div className="pb-1.5 sm:pb-2">
+              <span className="text-xs sm:text-sm font-bold px-2 py-1 rounded-lg whitespace-nowrap" style={{ backgroundColor: bg, color: fg }}>{text}</span>
+              <p className="text-[11px] text-gray-400 mt-1">Goal {label || `${goal}x`}{fl != null ? ` · floor ${fl}x` : ''}{goalsNow.season ? ` · ${goalsNow.season.name}` : ''}</p>
+            </div>
+          );
+        };
         const Stat = ({ k, v, tone }: { k: string; v: string; tone?: string }) => (
           <div className="min-w-0"><p className="text-[10px] text-gray-400 uppercase tracking-wider truncate">{k}</p><p className="text-base sm:text-lg font-bold tabular-nums truncate" style={{ color: tone || '#1e293b' }}>{v}</p></div>
         );
@@ -813,7 +831,7 @@ export default function OverviewContent() {
               <p className="text-[11px] text-gray-400 mb-1">{salesLabel}{allChannels ? ' (all channels)' : ''} ÷ ad spend. The agency&apos;s number.</p>
               <div className="flex items-end gap-3">
                 <span className="text-5xl sm:text-6xl font-black leading-none" style={{ color: merColor }}>{formatROAS(metrics.mer)}</span>
-                <Badge ok={metrics.mer >= MER_GOAL} goal={MER_GOAL} />
+                <Badge value={metrics.mer} goal={MER_GOAL} floor={MER_FLOOR} label={goalsNow.merLabel} />
               </div>
               <p className="text-sm text-gray-500 mt-2 tabular-nums">{salesLabel} {formatCurrency(netS)} ÷ ad spend {formatCurrency(adS)}</p>
               {correctedMer !== null && metrics.mer > 0 && (
@@ -852,7 +870,7 @@ export default function OverviewContent() {
                   <>
                     <div className="flex items-end gap-3">
                       <span className="text-5xl sm:text-6xl font-black leading-none" style={{ color: okFl == null ? '#1e293b' : okFl ? '#22c55e' : '#ef4444' }}>{flMer != null ? formatROAS(flMer) : '—'}</span>
-                      <Badge ok={okFl} goal={flGoal} />
+                      <Badge value={flMer} goal={flGoal} floor={flFloor} label={goalsNow.fullyLoadedLabel} />
                     </div>
                     <p className="text-sm text-gray-500 mt-2 tabular-nums">{salesLabel} {formatCurrency(netS)} ÷ total marketing {formatCurrency(totalMk || 0)}</p>
                     <p className="text-[11px] text-gray-400 tabular-nums">Total marketing = ad spend {formatCurrency(adS)} + other marketing {formatCurrency(other || 0)}</p>
@@ -877,7 +895,8 @@ export default function OverviewContent() {
               <ul className="text-[11px] text-gray-500 mt-2 space-y-1 list-disc pl-4">
                 <li>Net sales = after discounts and returns, before taxes and shipping ({formatCurrency(metrics.netSales ?? metrics.totalRevenue)}; total sales {formatCurrency(metrics.totalRevenue)}){(metrics.returnFees ?? 0) > 0 ? `; includes ${formatCurrency(metrics.returnFees!)} in return fees the store keeps` : ''}.</li>
                 {gld && <li>Gross sales less discounts = what was sold at the price paid, before any returns ({formatCurrency(netS)}). Both MERs on this dashboard use it, so a return processed later does not lower the agency&apos;s number; returns show on their own line and in the Returns tab.</li>}
-                <li>Paid media MER = {gld ? 'gross sales less discounts' : 'net sales'} ÷ {metrics.adCreditApplied ? 'net ad spend' : 'ad spend'} on every platform{(metrics.adCreditApplied ?? 0) > 0 ? ` (${formatCurrency(metrics.adCreditApplied!)} Snapchat ad credit deducted; gross ${formatCurrency(metrics.totalAdSpend)})` : ''}. Goal {MER_GOAL}x is the agency&apos;s target.</li>
+                <li>Paid media MER = {gld ? 'gross sales less discounts' : 'net sales'} ÷ {metrics.adCreditApplied ? 'net ad spend' : 'ad spend'} on every platform{(metrics.adCreditApplied ?? 0) > 0 ? ` (${formatCurrency(metrics.adCreditApplied!)} Snapchat ad credit deducted; gross ${formatCurrency(metrics.totalAdSpend)})` : ''}. Goal {goalsNow.merLabel}{MER_FLOOR != null ? `, floor ${MER_FLOOR}x` : ''} is the agency&apos;s target.</li>
+                {goalsNow.season && <li>Targets shown are for <b>{goalsNow.season.name}</b> ({goalsNow.season.months}), agreed with the client: paid MER {goalsNow.merLabel}{MER_FLOOR != null ? ` (floor ${MER_FLOOR}x)` : ''}{goalsNow.fullyLoadedLabel ? `, fully loaded MER ${goalsNow.fullyLoadedLabel}${flFloor != null ? ` (floor ${flFloor}x)` : ''}` : ''}, new-customer CAC {goalsNow.cacLabel}{CAC_CEILING != null ? ` (ceiling $${CAC_CEILING})` : ''}.{goalsNow.season.posture ? ` ${goalsNow.season.posture}` : ''} The season follows the end date of the selected range.</li>}
                 {returnsInfo && <li>Return rate = refunded sales ÷ gross sales for these days ({formatCurrency(returnsInfo.range.returns)} of {formatCurrency(returnsInfo.range.gross)}){returnsInfo.baseline.ratePct != null ? `; baseline is the ${returnsInfo.baseline.months} full month${returnsInfo.baseline.months === 1 ? '' : 's'} before this period (${returnsInfo.baseline.ratePct}%)` : ''}. Shopify counts a return in the period it is processed, so recent weeks rise as returns land. Paid MER stays on net sales; a jump here is a returns conversation, not a worse MER.</li>}
                 {showLoaded && <li>Fully loaded MER = {gld ? 'gross sales less discounts' : 'net sales'} ÷ (ad spend + other marketing). Other marketing is agency, content, email/SMS, tools, photoshoots, SEO and partnerships from the budgeting sheet, prorated to these days{expenses?.range.includesPlan ? '; the current month is plan until actuals are entered' : ''}. Goal {flGoal ?? '—'}x is the business&apos;s target.</li>}
                 {showLoaded && <li>Contribution margin = net sales − cost of goods ({cogsPct ?? '—'}%) − all marketing, as a share of net sales. Floor {floor ?? '—'}%. Rent, non-marketing payroll and other overhead are not included.</li>}
@@ -986,11 +1005,9 @@ export default function OverviewContent() {
               <MetricCard
                 title="New Customer CAC"
                 value={metrics.newCustomers ? formatCurrency((metrics.netAdSpend ?? metrics.totalAdSpend) / metrics.newCustomers) : '—'}
-                subtitle={`${metrics.adCreditApplied ? 'Net ad spend (credits deducted)' : 'Ad spend'} ÷ new customers · target $${TARGET_CAC}`}
+                subtitle={`${metrics.adCreditApplied ? 'Net ad spend (credits deducted)' : 'Ad spend'} ÷ new customers · target ${goalsNow.cacLabel}${CAC_CEILING != null ? ` · ceiling $${CAC_CEILING}` : ''}`}
                 accentColor="#c7d2fe"
-                valueColor={metrics.newCustomers
-                  ? ((metrics.netAdSpend ?? metrics.totalAdSpend) / metrics.newCustomers > TARGET_CAC ? '#ef4444' : '#22c55e')
-                  : undefined}
+                valueColor={metrics.newCustomers ? cacTone((metrics.netAdSpend ?? metrics.totalAdSpend) / metrics.newCustomers) : undefined}
               />
               <MetricCard
                 title="Blended CAC"

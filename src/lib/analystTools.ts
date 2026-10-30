@@ -1,4 +1,4 @@
-import { getClient, marketplaces } from '@/src/lib/client';
+import { getClient, marketplaces , effectiveGoals } from '@/src/lib/client';
 import type Anthropic from '@anthropic-ai/sdk';
 
 // ── Internal data access ─────────────────────────────────────────────────
@@ -432,7 +432,7 @@ async function execToolInner(get: Getter, name: string, input: Record<string, un
     }
 
     return `Metrics ${from} → ${to}:
-Total sales $${(m.totalRevenue ?? 0).toLocaleString()} · Net sales $${(m.netSales ?? m.totalRevenue ?? 0).toLocaleString()} · Orders ${(m.totalOrders ?? 0).toLocaleString()} · AOV $${(m.aov ?? 0).toFixed(2)} · Ad spend $${(m.totalAdSpend ?? 0).toLocaleString()} · MER ${m.mer?.toFixed?.(2) ?? 'N/A'}x (${m.merBasis === 'gross_less_discounts' ? 'gross sales less discounts, before returns' : 'net sales'} ÷ net ad spend; goal ${getClient().goals.targetMer}x)
+Total sales $${(m.totalRevenue ?? 0).toLocaleString()} · Net sales $${(m.netSales ?? m.totalRevenue ?? 0).toLocaleString()} · Orders ${(m.totalOrders ?? 0).toLocaleString()} · AOV $${(m.aov ?? 0).toFixed(2)} · Ad spend $${(m.totalAdSpend ?? 0).toLocaleString()} · MER ${m.mer?.toFixed?.(2) ?? 'N/A'}x (${m.merBasis === 'gross_less_discounts' ? 'gross sales less discounts, before returns' : 'net sales'} ÷ net ad spend; goal ${effectiveGoals(getClient(), to).merLabel}${effectiveGoals(getClient(), to).season ? `, ${effectiveGoals(getClient(), to).season!.name}` : ''})
 Meta $${(m.metaSpend ?? 0).toLocaleString()} · Google $${(m.googleSpend ?? 0).toLocaleString()}${m.tiktokSpend ? ` · TikTok $${m.tiktokSpend.toLocaleString()}` : ''}${m.snapchatSpend ? ` · Snapchat $${m.snapchatSpend.toLocaleString()}` : ''}${m.pinterestSpend ? ` · Pinterest $${m.pinterestSpend.toLocaleString()}` : ''}
 New customers ${m.newCustomers ?? 'N/A'} (${m.pctNew ?? '?'}%) · Returning ${m.returningCustomers ?? 'N/A'} · Conversion rate ${m.conversionRate ?? 'N/A'}%${series}`;
   }

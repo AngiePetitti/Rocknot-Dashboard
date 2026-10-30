@@ -13,7 +13,7 @@ import TimeframeSelector from '@/src/components/ui/TimeframeSelector';
 import PlatformBadge from '@/src/components/ui/PlatformBadge';
 import ROASChart from '@/src/components/charts/ROASChart';
 import { useClient } from '@/src/components/ClientProvider';
-import { PLATFORMS } from '@/src/lib/client';
+import { PLATFORMS, effectiveGoals } from '@/src/lib/client';
 import NcacBreakdown from '@/src/components/NcacBreakdown';
 import FunnelSplit from '@/src/components/FunnelSplit';
 import {
@@ -87,7 +87,10 @@ export default function AdsContent() {
   const searchParams = useSearchParams();
   const client = useClient();
   const ROAS_GOAL = client.goals.targetRoas;
-  const TARGET_CAC = client.goals.targetCac;
+  const goalsNow = effectiveGoals(client, (() => { try { return timeframeRange((searchParams.get('tf') || '30d') as Timeframe | 'custom', searchParams.get('date_from') || '', searchParams.get('date_to') || '').to; } catch { return undefined; } })());
+  const TARGET_CAC = goalsNow.targetCac;
+  const CAC_CEILING = goalsNow.cacCeiling;
+  const cacTone = (v: number) => (v <= TARGET_CAC ? '#22c55e' : CAC_CEILING != null && v <= CAC_CEILING ? '#d97706' : '#ef4444');
   const tfRaw = searchParams.get('tf') || '30d';
   const tf = (tfRaw === 'custom' ? '30d' : tfRaw) as Timeframe;
   const dateFrom = searchParams.get('date_from') || '';
@@ -324,11 +327,9 @@ export default function AdsContent() {
               <MetricCard
                 title="New Customer CAC"
                 value={cac.newCustomers ? formatCurrency(cac.totalAdSpend / cac.newCustomers) : '—'}
-                subtitle={`${cac.creditApplied ? 'Net ad spend (credits deducted)' : 'Ad spend'} ÷ ${cac.newCustomers} new customers · target $${TARGET_CAC}`}
+                subtitle={`${cac.creditApplied ? 'Net ad spend (credits deducted)' : 'Ad spend'} ÷ ${cac.newCustomers} new customers · target ${goalsNow.cacLabel}${CAC_CEILING != null ? ` · ceiling $${CAC_CEILING}` : ''}${goalsNow.season ? ` · ${goalsNow.season.name}` : ''}`}
                 accentColor="#c7d2fe"
-                valueColor={cac.newCustomers
-                  ? (cac.totalAdSpend / cac.newCustomers > TARGET_CAC ? '#ef4444' : '#22c55e')
-                  : undefined}
+                valueColor={cac.newCustomers ? cacTone(cac.totalAdSpend / cac.newCustomers) : undefined}
                 comparison={cac.newCustomers ? cmp(cac.totalAdSpend / cac.newCustomers, priorNewCac, true) : undefined}
               />
               <MetricCard
