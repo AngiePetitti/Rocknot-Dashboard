@@ -286,7 +286,7 @@ export async function GET(request: NextRequest) {
     try {
       const result = await getAdsOverview(params.date_from, params.date_to);
       const { platforms, dailySpend } = result;
-      return NextResponse.json({ source: 'bigquery_live', platforms, dailySpend, snapVerified: result.snapVerified !== false }, { headers: cacheHeaders(false) });
+      return NextResponse.json({ source: 'bigquery_live', platforms, dailySpend, snapVerified: result.snapVerified !== false }, { headers: cacheHeaders(false, params.date_to < new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })) });
     } catch {
       // fall through to Windsor REST
     }

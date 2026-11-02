@@ -56,10 +56,22 @@ export async function GET(req: NextRequest) {
   }
 
   const fwd = { cookie: req.headers.get('cookie') || '', authorization: req.headers.get('authorization') || '' };
-  const [todayM, trailing] = await Promise.all([
+  // The trailing-7-complete-days baseline only changes once a day; computing
+  // it on every 2-hour check multiplied BigQuery scan costs for no benefit.
+  const baseKey = `pace_baseline_${today}`;
+  let trailing: Metrics | null = null;
+  try {
+    const cached = await getKV(baseKey);
+    if (cached) trailing = JSON.parse(cached) as Metrics;
+  } catch { /* recompute */ }
+  const [todayM, freshTrailing] = await Promise.all([
     getMetrics(req.nextUrl.origin, fwd, 'tf=today'),
-    getMetrics(req.nextUrl.origin, fwd, `tf=custom&date_from=${addDays(today, -7)}&date_to=${addDays(today, -1)}`),
+    trailing ? Promise.resolve(null) : getMetrics(req.nextUrl.origin, fwd, `tf=custom&date_from=${addDays(today, -7)}&date_to=${addDays(today, -1)}`),
   ]);
+  if (!trailing && freshTrailing) {
+    trailing = freshTrailing;
+    await setKV(baseKey, JSON.stringify({ totalRevenue: freshTrailing.totalRevenue, netSales: freshTrailing.netSales, totalAdSpend: freshTrailing.totalAdSpend, totalOrders: freshTrailing.totalOrders })).catch(() => {});
+  }
   if (!todayM || !trailing) {
     // A blind watchdog must say so (once per day) — silence has to mean
     // "healthy", never "broken".

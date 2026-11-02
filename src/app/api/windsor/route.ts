@@ -609,7 +609,7 @@ export async function GET(request: NextRequest) {
         metrics: current.metrics,
         revenueData: current.revenueData,
         ...(priorPeriod ? { priorPeriod, priorLabel, compareMode } : {}),
-      }, await partnerSession()), { headers: cacheHeaders(cur.date_to >= todayStr) });
+      }, await partnerSession()), { headers: cacheHeaders(cur.date_to >= todayStr, cur.date_to < todayStr) });
     } catch (err) {
       return NextResponse.json({ source: 'error', error: err instanceof Error ? err.message : 'Unknown error', timeframe: tf, metrics: null, revenueData: [] });
     }
@@ -668,7 +668,7 @@ export async function GET(request: NextRequest) {
         revenueData: overview.revenueData,
         ...(overview.adsError ? { adsError: overview.adsError } : {}),
         ...(bqPrior ? { priorPeriod: bqPrior, priorLabel: bqPriorLabel, compareMode } : {}),
-      }, await partnerSession()), { headers: cacheHeaders(false) });
+      }, await partnerSession()), { headers: cacheHeaders(false, params.date_to < new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })) });
     }
 
     if (debug) {
