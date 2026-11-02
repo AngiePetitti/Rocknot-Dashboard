@@ -18,6 +18,7 @@ import RevenueChart from '@/src/components/charts/RevenueChart';
 import MonthlyHistory from '@/src/components/MonthlyHistory';
 import { timeframeRange as tfRange } from '@/src/lib/timeframes';
 import { effectiveGoals } from '@/src/lib/client';
+import { otherMarketingFor } from '@/src/lib/expenses';
 import CACChart from '@/src/components/charts/CACChart';
 import SpendDonut from '@/src/components/charts/SpendDonut';
 import { useClient } from '@/src/components/ClientProvider';
@@ -783,7 +784,7 @@ export default function OverviewContent() {
         const salesLabel = gld ? 'Gross sales less discounts' : 'Net sales';
         const allChannels = Boolean(metrics.marketplaces?.some(m => m.inSales || m.inMer));
         const adS = metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend;
-        const other = expenses ? expenses.range.nonAdMarketing : null;
+        const other = expenses ? otherMarketingFor(expenses.range, adS) : null;
         const cogsPct = profitBasis?.cogsPct ?? (client.finance.grossMarginPct != null ? 100 - client.finance.grossMarginPct : null);
         const totalMk = other != null ? adS + other : null;
         const flMer = totalMk && totalMk > 0 ? netS / totalMk : null;
@@ -1385,7 +1386,7 @@ export default function OverviewContent() {
         const r = tfRange(tfRaw as Timeframe | 'custom', dateFrom, dateTo);
         const days = Math.round((Date.parse(r.to) - Date.parse(r.from)) / 86400000) + 1;
         if (days < 85) return null;
-        return <MonthlyHistory from={r.from} to={r.to} targetMer={MER_GOAL} targetCac={TARGET_CAC} defaultYoY={compareOn && compareTo === 'year'} />;
+        return <MonthlyHistory from={r.from} to={r.to} targetMer={MER_GOAL} targetCac={TARGET_CAC} targetFullyLoadedMer={goalsNow.targetFullyLoadedMer ?? undefined} defaultYoY={compareOn && compareTo === 'year'} />;
       })()}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">

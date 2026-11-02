@@ -2,14 +2,14 @@
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList, Legend } from 'recharts';
 
-export interface MonthPoint { month: string; label: string; partial: boolean; revenue: number; adSpend: number; mer: number | null; ncac: number | null; newCustomers: number; otherMarketing?: number | null; flCac?: number | null; /** Same month last year (same day span for a partial month). */ ly?: Partial<Pick<MonthPoint, 'revenue' | 'adSpend' | 'mer' | 'ncac' | 'flCac' | 'newCustomers'>> | null }
+export interface MonthPoint { month: string; label: string; partial: boolean; revenue: number; adSpend: number; mer: number | null; ncac: number | null; newCustomers: number; otherMarketing?: number | null; flCac?: number | null; flMer?: number | null; /** Same month last year (same day span for a partial month). */ ly?: Partial<Pick<MonthPoint, 'revenue' | 'adSpend' | 'mer' | 'ncac' | 'flCac' | 'flMer' | 'newCustomers'>> | null }
 
 const fmtK = (v: number) => (v >= 1000 ? `$${(v / 1000).toFixed(v >= 100000 ? 0 : 1)}K` : `$${Math.round(v)}`);
 
 // Four small single-series bar charts (one axis each; value labels on every bar
 // so the numbers read on a phone). Colours: revenue violet, spend pink, MER
 // indigo, CAC green — each panel is titled, so colour never carries meaning alone.
-function Panel({ title, data, dataKey, color, fmt, goal, goalLabel, compareYoY, lowerIsBetter }: { title: string; data: MonthPoint[]; dataKey: 'revenue' | 'adSpend' | 'mer' | 'ncac' | 'flCac'; color: string; fmt: (v: number) => string; goal?: number | null; goalLabel?: string; compareYoY?: boolean; lowerIsBetter?: boolean }) {
+function Panel({ title, data, dataKey, color, fmt, goal, goalLabel, compareYoY, lowerIsBetter }: { title: string; data: MonthPoint[]; dataKey: 'revenue' | 'adSpend' | 'mer' | 'ncac' | 'flCac' | 'flMer'; color: string; fmt: (v: number) => string; goal?: number | null; goalLabel?: string; compareYoY?: boolean; lowerIsBetter?: boolean }) {
   const rows = data.map(d => ({ ...d, v: d[dataKey] == null ? null : Number(d[dataKey]), ly: compareYoY && d.ly && d.ly[dataKey] != null ? Number(d.ly[dataKey]) : null }));
   const hasAny = rows.some(r => r.v != null && r.v > 0);
   const hasLy = compareYoY && rows.some(r => r.ly != null && r.ly > 0);
@@ -50,13 +50,16 @@ function Panel({ title, data, dataKey, color, fmt, goal, goalLabel, compareYoY, 
   );
 }
 
-export default function MonthlyHistoryChart({ data, targetMer, targetCac, showFullyLoaded, compareYoY }: { data: MonthPoint[]; targetMer?: number; targetCac?: number; showFullyLoaded?: boolean; compareYoY?: boolean }) {
+export default function MonthlyHistoryChart({ data, targetMer, targetCac, targetFullyLoadedMer, showFullyLoaded, compareYoY }: { data: MonthPoint[]; targetMer?: number; targetCac?: number; targetFullyLoadedMer?: number; showFullyLoaded?: boolean; compareYoY?: boolean }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
       <Panel title="Revenue" data={data} dataKey="revenue" color="#8b5cf6" fmt={fmtK} compareYoY={compareYoY} />
       <Panel title="Ad spend" data={data} dataKey="adSpend" color="#f9a8d4" fmt={fmtK} compareYoY={compareYoY} lowerIsBetter />
       <Panel title="MER" data={data} dataKey="mer" color="#818cf8" fmt={v => `${v.toFixed(2)}x`} goal={targetMer} goalLabel={targetMer ? `goal ${targetMer}x` : undefined} compareYoY={compareYoY} />
       <Panel title="New-customer CAC" data={data} dataKey="ncac" color="#86efac" fmt={v => `$${Math.round(v)}`} goal={targetCac} goalLabel={targetCac ? `target $${targetCac}` : undefined} compareYoY={compareYoY} lowerIsBetter />
+      {showFullyLoaded && (
+        <Panel title="Fully loaded MER" data={data} dataKey="flMer" color="#c4b5fd" fmt={v => `${v.toFixed(2)}x`} goal={targetFullyLoadedMer ?? 1} goalLabel={targetFullyLoadedMer ? `goal ${targetFullyLoadedMer}x · sales ÷ (ads + other marketing)` : 'sales ÷ (ads + other marketing)'} compareYoY={compareYoY} />
+      )}
       {showFullyLoaded && (
         <Panel title="Fully loaded CAC" data={data} dataKey="flCac" color="#fde68a" fmt={v => `$${Math.round(v)}`} goal={1} goalLabel="ad spend + other marketing ÷ new customers" compareYoY={compareYoY} lowerIsBetter />
       )}

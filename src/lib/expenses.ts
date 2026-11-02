@@ -43,6 +43,8 @@ export interface ExpenseSheet {
   year: number;
   lines: ExpenseLine[];
   months: ExpenseMonth[];
+  /** Last year's months from the sheet's "<year-1> MARKETING SPENT" / "<year-1> SALES" rows: total marketing only (ads + everything else, no line split). */
+  priorYearMonths: Array<{ month: string; totalMarketing: number; sales: number | null }>;
   fetchedAt: string;
 }
 
@@ -54,9 +56,27 @@ export interface RangeExpenses {
   totalMarketing: number;
   budget: number;
   lines: Array<{ label: string; section: 'paid' | 'organic'; adPlatform: boolean; amount: number }>;
-  monthsCovered: Array<{ month: string; days: number; daysInMonth: number; basis: ExpenseMonth['basis'] }>;
+  monthsCovered: Array<{ month: string; days: number; daysInMonth: number; basis: ExpenseMonth['basis']; priorYear?: boolean }>;
   /** True when part of the range is this month or later (sheet holds plan numbers there). */
   includesPlan: boolean;
+  /**
+   * Prorated TOTAL marketing (ads included) for any part of the range that
+   * falls in the sheet's prior year, from its "<year-1> MARKETING SPENT" row.
+   * The sheet has no line split for that year, so other marketing for those
+   * months is this total minus the dashboard's own ad spend — see otherMarketingFor().
+   */
+  priorYearTotalMarketing: number;
+}
+
+/**
+ * Other (non-ad) marketing for a range: the sheet's lines for the current
+ * year, or, for a range in the prior year, the sheet's total minus the ad
+ * spend the dashboard measured for the same range.
+ */
+export function otherMarketingFor(range: RangeExpenses, adSpend: number): number | null {
+  if (range.nonAdMarketing > 0) return range.nonAdMarketing;
+  if (range.priorYearTotalMarketing > 0) return Math.max(0, range.priorYearTotalMarketing - adSpend);
+  return range.monthsCovered.length ? range.nonAdMarketing : null;
 }
 
 const num = (v: string) => {
@@ -147,7 +167,13 @@ export function parseExpenseSheet(csv: string, year: number, title: string): Exp
       basis: m < today ? 'actual' : m === today ? 'current' : 'plan',
     };
   });
-  return { title, year, lines, months: monthRows, fetchedAt: new Date().toISOString() };
+  const priorYearMonths = months.map(m => {
+    const pm = `${year - 1}${m.slice(4)}`;
+    const total = pySpend ? num(pySpend[monthCol[m]] ?? '') : null;
+    const sales = pySales ? num(pySales[monthCol[m]] ?? '') : null;
+    return { month: pm, totalMarketing: total || 0, sales: sales || null };
+  }).filter(p => p.totalMarketing > 0);
+  return { title, year, lines, months: monthRows, priorYearMonths, fetchedAt: new Date().toISOString() };
 }
 
 const daysIn = (m: string) => new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0).getDate();
@@ -165,6 +191,17 @@ export function expensesForRange(sheet: ExpenseSheet, from: string, to: string):
     weights[mo.month] = days / dim;
     monthsCovered.push({ month: mo.month, days, daysInMonth: dim, basis: mo.basis });
   }
+  // Prior-year months (sheet total only), prorated the same way.
+  let priorYearTotalMarketing = 0;
+  for (const pm of sheet.priorYearMonths || []) {
+    const dim = daysIn(pm.month);
+    const mFrom = `${pm.month}-01`; const mTo = `${pm.month}-${String(dim).padStart(2, '0')}`;
+    const a = from > mFrom ? from : mFrom; const b = to < mTo ? to : mTo;
+    if (a > b) continue;
+    const days = Math.round((Date.parse(b) - Date.parse(a)) / 86400000) + 1;
+    priorYearTotalMarketing += pm.totalMarketing * (days / dim);
+    monthsCovered.push({ month: pm.month, days, daysInMonth: dim, basis: 'actual', priorYear: true });
+  }
   const w = (byMonth: Record<string, number>) => Object.entries(weights).reduce((s, [m, f]) => s + (byMonth[m] || 0) * f, 0);
   const lines = sheet.lines.map(l => ({ label: l.label, section: l.section, adPlatform: l.adPlatform, amount: Math.round(w(l.byMonth) * 100) / 100 })).filter(l => l.amount !== 0);
   const budget = Object.entries(weights).reduce((s, [m, f]) => s + ((sheet.months.find(x => x.month === m)?.budget || 0) * f), 0);
@@ -177,6 +214,7 @@ export function expensesForRange(sheet: ExpenseSheet, from: string, to: string):
   return {
     from, to, nonAdMarketing: r2(nonAdMarketing), sheetAdSpend: r2(sheetAdSpend), totalMarketing: r2(sheetAdSpend + nonAdMarketing), budget: r2(budget),
     lines, monthsCovered, includesPlan: monthsCovered.some(m => m.basis !== 'actual'),
+    priorYearTotalMarketing: r2(priorYearTotalMarketing),
   };
 }
 

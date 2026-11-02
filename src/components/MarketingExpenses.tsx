@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Card from '@/src/components/ui/Card';
 import { formatCurrency } from '@/src/lib/utils';
-import type { RangeExpenses, ExpenseMonth } from '@/src/lib/expenses';
+import { otherMarketingFor, type RangeExpenses, type ExpenseMonth } from '@/src/lib/expenses';
 
 export interface ExpensesPayload { range: RangeExpenses; sheet: { title: string; months: ExpenseMonth[] } }
 interface Props {
@@ -41,7 +41,8 @@ export default function MarketingExpenses({ tf, dateFrom, dateTo, netSales, adSp
   if (failed) return <Card className="mb-4"><p className="text-xs text-gray-400">Marketing expenses sheet unavailable: {failed}</p></Card>;
   if (!data || netSales <= 0) return null;
   const r = data.range;
-  const other = r.nonAdMarketing;
+  const priorYearBasis = r.nonAdMarketing <= 0 && (r.priorYearTotalMarketing ?? 0) > 0;
+  const other = otherMarketingFor(r, adSpend) ?? 0;
   const totalMarketing = adSpend + other;
   const cogs = cogsPct != null ? netSales * (cogsPct / 100) : null;
   const contribution = cogs != null ? netSales - cogs - totalMarketing : null;
@@ -64,7 +65,7 @@ export default function MarketingExpenses({ tf, dateFrom, dateTo, netSales, adSp
     <Card accentColor="#a5b4fc" className="mb-4">
       <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
         <h3 className="text-sm font-bold text-gray-800">💼 Marketing cost detail</h3>
-        <p className="text-[11px] text-gray-400">Ad spend live from the platforms · other marketing from the budgeting sheet · {monthsLabel}{r.includesPlan ? ' · current/future months are plan figures until actuals are entered' : ''}</p>
+        <p className="text-[11px] text-gray-400">Ad spend live from the platforms · other marketing from the budgeting sheet · {monthsLabel}{r.includesPlan ? ' · current/future months are plan figures until actuals are entered' : ''}{priorYearBasis ? ' · last year: the sheet gives one marketing total per month, so other marketing here is that total minus the live ad spend' : ''}</p>
       </div>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <div className="space-y-1.5">
