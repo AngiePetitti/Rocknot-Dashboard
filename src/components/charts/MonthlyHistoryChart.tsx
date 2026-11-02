@@ -18,9 +18,9 @@ function Panel({ title, data, dataKey, color, fmt, goal, goalLabel, compareYoY, 
     <div className="min-w-0">
       <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1">{title}{goal != null && goalLabel ? <span className="text-gray-400 font-normal normal-case"> · {goalLabel}</span> : null}</p>
       {!hasAny ? <p className="text-xs text-gray-400 py-6">No data for these months.</p> : (
-        <div className="h-44">
+        <div className={hasLy ? 'h-52' : 'h-44'}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={rows} margin={{ top: hasLy ? 24 : 18, right: 6, left: 0, bottom: 0 }} barCategoryGap={hasLy ? '22%' : '28%'} barGap={2}>
+            <BarChart data={rows} margin={{ top: hasLy ? 24 : 18, right: 6, left: 0, bottom: 0 }} barCategoryGap={hasLy ? '18%' : '28%'} barGap={hasLy ? 6 : 2}>
               <CartesianGrid vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} interval={0} />
               <YAxis hide domain={[0, (m: number) => m * 1.15]} />
@@ -29,7 +29,11 @@ function Panel({ title, data, dataKey, color, fmt, goal, goalLabel, compareYoY, 
               <Bar dataKey="v" name="This year" fill={color} radius={[4, 4, 0, 0]} isAnimationActive={false}>
                 <LabelList dataKey="v" position="top" formatter={(v: unknown) => (v == null ? '' : fmt(Number(v)))} style={{ fontSize: 10, fill: '#475569', fontWeight: 600 }} />
               </Bar>
-              {hasLy && <Bar dataKey="ly" name="Last year" fill="#d1d5db" radius={[4, 4, 0, 0]} isAnimationActive={false} />}
+              {hasLy && (
+                <Bar dataKey="ly" name="Last year" fill="#d1d5db" radius={[4, 4, 0, 0]} isAnimationActive={false}>
+                  <LabelList dataKey="ly" position="top" formatter={(v: unknown) => (v == null ? '' : fmt(Number(v)))} style={{ fontSize: 10, fill: '#6b7280', fontWeight: 600 }} />
+                </Bar>
+              )}
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -38,7 +42,7 @@ function Panel({ title, data, dataKey, color, fmt, goal, goalLabel, compareYoY, 
         <p className="text-[11px] text-gray-500 mt-1 tabular-nums">
           vs last year: {deltas.map((d, i) => {
             const good = lowerIsBetter ? d.pct <= 0 : d.pct >= 0;
-            return <span key={d.label} title={`${d.label} last year: ${fmt(d.ly)}`}>{i > 0 ? ' · ' : ''}{d.label} <span className={`font-semibold ${good ? 'text-green-600' : 'text-red-500'}`}>{d.pct >= 0 ? '+' : ''}{d.pct.toFixed(0)}%</span> <span className="text-gray-400">({fmt(d.ly)})</span></span>;
+            return <span key={d.label} title={`${d.label} last year: ${fmt(d.ly)}`}>{i > 0 ? ' · ' : ''}{d.label} <span className={`font-semibold ${good ? 'text-green-600' : 'text-red-500'}`}>{d.pct >= 0 ? '+' : ''}{d.pct.toFixed(0)}%</span> <span className="text-gray-500">({fmt(d.ly)})</span></span>;
           })}
         </p>
       )}
@@ -47,8 +51,10 @@ function Panel({ title, data, dataKey, color, fmt, goal, goalLabel, compareYoY, 
 }
 
 export default function MonthlyHistoryChart({ data, targetMer, targetCac, targetFullyLoadedMer, showFullyLoaded, compareYoY }: { data: MonthPoint[]; targetMer?: number; targetCac?: number; targetFullyLoadedMer?: number; showFullyLoaded?: boolean; compareYoY?: boolean }) {
+  // Two charts per row normally; one per row when comparing, so each month
+  // has room for this year's and last year's value side by side.
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
+    <div className={`grid grid-cols-1 ${compareYoY ? '' : 'sm:grid-cols-2'} gap-x-6 gap-y-5`}>
       <Panel title="Revenue" data={data} dataKey="revenue" color="#8b5cf6" fmt={fmtK} compareYoY={compareYoY} />
       <Panel title="Ad spend" data={data} dataKey="adSpend" color="#f9a8d4" fmt={fmtK} compareYoY={compareYoY} lowerIsBetter />
       <Panel title="MER" data={data} dataKey="mer" color="#818cf8" fmt={v => `${v.toFixed(2)}x`} goal={targetMer} goalLabel={targetMer ? `goal ${targetMer}x` : undefined} compareYoY={compareYoY} />
