@@ -21,6 +21,10 @@ interface FinResponse {
   totals?: Totals;
   monthly?: MonthRow[];
   lineItems?: Array<{ account: string; amount: number; section: string; isSummary?: boolean }> | null;
+  categorized?: Array<{ account: string; amount: number; bucket: string; overridden: boolean }> | null;
+  buckets?: Record<string, number> | null;
+  fullyLoadedMer?: number | null;
+  revenueBooked?: number;
   qbDirect?: boolean;
   qbError?: string | null;
 }
@@ -58,8 +62,26 @@ const monthLabel = (ym: string) => {
 
 export default function FinancialsContent() {
   const [range, setRange] = useState('mtd');
+  const [savingAcct, setSavingAcct] = useState<string | null>(null);
   const [data, setData] = useState<FinResponse | null>(null);
   const [loading, setLoading] = useState(true);
+
+  async function setBucket(account: string, bucket: string) {
+    setSavingAcct(account);
+    try {
+      await fetch('/api/financials', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account, bucket }),
+      });
+      // Re-pull so bucket totals and fully-loaded MER recompute server-side.
+      const { from, to } = rangeDates(range);
+      const d = await fetch(`/api/financials?date_from=${from}&date_to=${to}`, { cache: 'no-store' }).then(r => r.json());
+      setData(d);
+    } finally {
+      setSavingAcct(null);
+    }
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -124,6 +146,56 @@ export default function FinancialsContent() {
               valueColor={t.netIncome >= 0 ? '#16a34a' : '#dc2626'}
             />
           </div>
+
+          {data?.buckets && data?.categorized && (
+            <Card className="mb-4" accentColor="#c4b5fd">
+              <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+                <div>
+                  <h2 className="text-sm font-bold text-gray-700">📊 Expense Groups &amp; Fully-Loaded MER</h2>
+                  <p className="text-xs text-gray-400">Every expense account grouped — change a group and the totals recalc. Overrides are remembered.</p>
+                </div>
+                {data.fullyLoadedMer != null && (
+                  <div className="text-right">
+                    <p className="text-[10px] uppercase font-semibold text-gray-400">Fully-Loaded MER</p>
+                    <p className={`text-2xl font-bold ${data.fullyLoadedMer >= 3 ? 'text-green-600' : 'text-amber-600'}`}>{data.fullyLoadedMer.toFixed(2)}x</p>
+                    <p className="text-[10px] text-gray-400">booked revenue {fmt(data.revenueBooked ?? 0)} ÷ ALL marketing {fmt(data.buckets.marketing)}</p>
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4">
+                {(['marketing', 'payroll', 'software', 'fulfillment', 'other'] as const).map(b => (
+                  <div key={b} className="bg-gray-50 rounded-xl px-3 py-2">
+                    <p className="text-[10px] uppercase font-semibold text-gray-400">{b === 'payroll' ? 'Payroll & Labor' : b}</p>
+                    <p className="text-sm font-bold text-gray-800">{fmt(data.buckets![b] || 0)}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-col max-h-96 overflow-y-auto">
+                {[...data.categorized].sort((a, b) => a.bucket.localeCompare(b.bucket) || b.amount - a.amount).map(c => (
+                  <div key={c.account} className="flex items-center gap-2 text-sm py-1.5 border-b border-gray-50">
+                    <span className="min-w-0 break-words flex-1 text-gray-600">{c.account}</span>
+                    <span className="font-semibold whitespace-nowrap text-gray-800">{fmt(c.amount)}</span>
+                    <select
+                      value={c.bucket}
+                      disabled={savingAcct === c.account}
+                      onChange={e => setBucket(c.account, e.target.value)}
+                      className={`text-[11px] border rounded-lg px-1.5 py-1 bg-white ${c.overridden ? 'border-violet-300 text-violet-700' : 'border-gray-200 text-gray-500'}`}
+                    >
+                      <option value="marketing">Marketing</option>
+                      <option value="payroll">Payroll & Labor</option>
+                      <option value="software">Software</option>
+                      <option value="fulfillment">Fulfillment</option>
+                      <option value="other">Other</option>
+                      {c.overridden && <option value="auto">↺ auto</option>}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-2">
+                Fully-Loaded MER = QuickBooks booked revenue ÷ everything grouped as Marketing (platform ad spend as billed, agency fees, influencers, marketing tools). The Overview&apos;s Paid-Media MER divides by platform ad spend only — this number is the true cost of growth.
+              </p>
+            </Card>
+          )}
 
           <Card className="mb-4" accentColor="#86efac">
             <h2 className="text-sm font-bold text-gray-700 mb-3">🧾 Profit &amp; Loss</h2>

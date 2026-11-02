@@ -31,6 +31,19 @@ const PNL_FIELDS = [
 ];
 
 interface QBRow { [key: string]: string | number | null | undefined }
+
+// Expense buckets for the grouped P&L view and fully-loaded MER.
+export type ExpenseBucket = 'marketing' | 'software' | 'payroll' | 'fulfillment' | 'other';
+const BUCKET_RULES: Array<[ExpenseBucket, RegExp]> = [
+  ['marketing', /market|advertis|\bads?\b|meta|facebook|instagram|google ads|adwords|tiktok|snap|pinterest|influencer|affiliate|ugc|creative|agency|klaviyo|sms|email|promo|sponsor|photo|content/i],
+  ['payroll', /payroll|wage|salar|contract(or| labor)|freelance|1099|commission|benefit|gusto|adp/i],
+  ['fulfillment', /shipping|freight|fulfill|postage|3pl|warehouse|packag|ship(bob|station)|carrier|duties|customs/i],
+  ['software', /software|subscript|saas|app\b|shopify|slack|zoom|adobe|canva|figma|quickbooks|windsor|vercel|notion|asana|hosting|domain|tech/i],
+];
+function autoBucket(account: string): ExpenseBucket {
+  for (const [bucket, re] of BUCKET_RULES) if (re.test(account)) return bucket;
+  return 'other';
+}
 const num = (v: unknown) => Number(v ?? 0) || 0;
 
 export async function GET(req: NextRequest) {
@@ -184,8 +197,36 @@ export async function GET(req: NextRequest) {
       qbError = String(e);
     }
 
+    // Bucket the expense line items (manual overrides win over keyword rules).
+    let overrides: Record<string, string> = {};
+    try {
+      const { getKV } = await import('@/src/lib/chatStore');
+      overrides = JSON.parse((await getKV('finance_account_categories')) || '{}');
+    } catch { /* no overrides yet */ }
+    let buckets: Record<string, number> | null = null;
+    let categorized: Array<{ account: string; amount: number; bucket: string; overridden: boolean }> | null = null;
+    if (lineItems) {
+      const expenseLines = lineItems.filter(li => !li.isSummary && /expense/i.test(li.section) && li.amount !== 0);
+      categorized = expenseLines.map(li => {
+        const ov = overrides[li.account];
+        return { account: li.account, amount: li.amount, bucket: ov || autoBucket(li.account), overridden: Boolean(ov) };
+      });
+      buckets = { marketing: 0, software: 0, payroll: 0, fulfillment: 0, other: 0 };
+      for (const c of categorized) buckets[c.bucket] = round((buckets[c.bucket] || 0) + c.amount);
+    }
+    // Fully-loaded MER: booked revenue ÷ booked TOTAL marketing expense
+    // (platform ad spend as billed + agency + influencers + tools tagged
+    // marketing) — the "what does marketing really cost us" ratio.
+    const revenueBooked = round(Array.from(monthly.values()).reduce((sum0, m) => sum0 + m.income, 0));
+    const fullyLoadedMer = buckets && buckets.marketing > 0 && revenueBooked > 0
+      ? Math.round((revenueBooked / buckets.marketing) * 100) / 100 : null;
+
     return NextResponse.json({
       source: 'windsor_quickbooks_pnl',
+      categorized,
+      buckets,
+      fullyLoadedMer,
+      revenueBooked,
       range: { from: dateFrom, to: dateTo },
       rowCount: rows.length,
       accountsSeen,
@@ -207,4 +248,28 @@ export async function GET(req: NextRequest) {
   } catch (e) {
     return NextResponse.json({ source: 'error', error: String(e) }, { status: 502 });
   }
+}
+
+// Save a manual bucket override for one account (admin). Overrides persist in
+// KV and win over the keyword auto-classification.
+export async function PATCH(req: NextRequest) {
+  const { getServerSession } = await import('next-auth');
+  const { authOptions, authConfigured } = await import('@/src/lib/auth');
+  if (authConfigured()) {
+    const session = await getServerSession(authOptions);
+    if (session?.user?.role !== 'admin') return NextResponse.json({ error: 'Admin only' }, { status: 403 });
+  }
+  const body = await req.json().catch(() => ({}));
+  const account = String(body.account || '').trim();
+  const bucket = String(body.bucket || '').trim();
+  if (!account || !['marketing', 'software', 'payroll', 'fulfillment', 'other', 'auto'].includes(bucket)) {
+    return NextResponse.json({ error: 'account and bucket (marketing|software|payroll|fulfillment|other|auto) required' }, { status: 400 });
+  }
+  const { getKV, setKV } = await import('@/src/lib/chatStore');
+  let overrides: Record<string, string> = {};
+  try { overrides = JSON.parse((await getKV('finance_account_categories')) || '{}'); } catch { /* fresh */ }
+  if (bucket === 'auto') delete overrides[account];
+  else overrides[account] = bucket;
+  await setKV('finance_account_categories', JSON.stringify(overrides));
+  return NextResponse.json({ ok: true, overrides });
 }
