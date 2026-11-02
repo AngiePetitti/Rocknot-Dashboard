@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
   const from = single || request.nextUrl.searchParams.get('from') || monthStart;
   const to = single || request.nextUrl.searchParams.get('to') || yesterday;
   const params = { from, to } as Record<string, string | number>;
-  const WHERE = `WHERE DATE(date) BETWEEN @from AND @to${metaAccountSql()}`;
+  const WHERE = `WHERE date BETWEEN @from AND @to${metaAccountSql()}`;
 
   try {
     const cols = await runQuery<{ column_name: string }>(
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
     //     MAX(spend), then summed.
     const dedup = await runQuery<{ deduped_spend: number; group_count: number }>(
       `SELECT SUM(mx) AS deduped_spend, COUNT(*) AS group_count FROM (
-         SELECT DATE(date) AS d, campaign, MAX(CAST(spend AS FLOAT64)) AS mx
+         SELECT date AS d, campaign, MAX(CAST(spend AS FLOAT64)) AS mx
          FROM \`${ds}.facebook_ads\` ${WHERE}
          GROUP BY d, campaign
        )`,
@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
               SUM(row_count) AS total_rows,
               COUNTIF(row_count > 1) AS multi_row_campaigns
        FROM (
-         SELECT DATE(date) AS d, campaign,
+         SELECT date AS d, campaign,
                 SUM(CAST(spend AS FLOAT64)) AS summed,
                 MAX(CAST(spend AS FLOAT64)) AS mx,
                 COUNT(*) AS row_count
@@ -85,10 +85,10 @@ export async function GET(request: NextRequest) {
     const rawMultiRows = await runQuery(
       `SELECT *
        FROM \`${ds}.facebook_ads\`
-       WHERE DATE(date) = @inspect${metaAccountSql()}
+       WHERE date = @inspect${metaAccountSql()}
          AND campaign IN (
            SELECT campaign FROM \`${ds}.facebook_ads\`
-           WHERE DATE(date) = @inspect${metaAccountSql()}
+           WHERE date = @inspect${metaAccountSql()}
            GROUP BY campaign HAVING COUNT(*) > 1
          )
        ORDER BY campaign, date, CAST(spend AS FLOAT64)`,

@@ -302,26 +302,26 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       -- with independent spend/clicks/purchases). They must be SUMMED to get the
       -- true campaign total. metaSource() has already collapsed the backfill's
       -- duplicate copy of each ad-set day.
-      SELECT DATE(date) AS d,
+      SELECT date AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
              SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue
       FROM ${msrc}
-      WHERE DATE(date) BETWEEN @date_from AND @date_to${metaAccountSql()}
+      WHERE date BETWEEN @date_from AND @date_to${metaAccountSql()}
       GROUP BY d` : EMPTY_CTE}
     ),
     google AS (${hasGoogle ? `
-      SELECT DATE(date) AS d,
+      SELECT date AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
              SUM(COALESCE(CAST(conversions_value AS FLOAT64), CAST(conversion_value AS FLOAT64), 0)) AS revenue
       FROM ${gsrc}
-      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d` : EMPTY_CTE}
+      WHERE date BETWEEN @date_from AND @date_to GROUP BY d` : EMPTY_CTE}
     ),
     tiktok AS (${hasTiktok ? `
-      SELECT DATE(date) AS d,
+      SELECT date AS d,
              SUM(CAST(spend AS FLOAT64)) AS spend,
              SUM(IFNULL(CAST(total_complete_payment_rate AS FLOAT64), 0)) AS revenue
       FROM \`${ds}.tiktok_ads\`
-      WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d` : EMPTY_CTE}
+      WHERE date BETWEEN @date_from AND @date_to GROUP BY d` : EMPTY_CTE}
     ),
     days AS (SELECT d FROM UNNEST(GENERATE_DATE_ARRAY(@date_from, @date_to)) AS d)
     SELECT
@@ -405,22 +405,22 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // Snapchat runs as its own guarded query so a missing snapchat_ads table
   // can never break the main ads query.
   const snapSql = `
-    SELECT FORMAT_DATE('%Y-%m-%d', DATE(date)) AS date,
+    SELECT FORMAT_DATE('%Y-%m-%d', date) AS date,
            SUM(CAST(spend AS FLOAT64)) AS spend,
            SUM(IFNULL(CAST(conversion_purchases_value AS FLOAT64), 0)) AS revenue
     FROM \`${ds}.snapchat_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    WHERE date BETWEEN @date_from AND @date_to
     GROUP BY date
   `;
 
   // Pinterest, same guarded pattern. Windsor's Pinterest revenue column name
   // varies by connector version — try each, then spend-only.
   const pinterestSqlFor = (revenueExpr: string) => `
-    SELECT FORMAT_DATE('%Y-%m-%d', DATE(date)) AS date,
+    SELECT FORMAT_DATE('%Y-%m-%d', date) AS date,
            SUM(CAST(spend AS FLOAT64)) AS spend,
            ${revenueExpr} AS revenue
     FROM \`${ds}.pinterest_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    WHERE date BETWEEN @date_from AND @date_to
     GROUP BY date
   `;
   const pinterestSqls = [
@@ -668,7 +668,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       try {
         const prior = await runQuery<{ spend: number | null }>(
           `SELECT SUM(CAST(spend AS FLOAT64)) AS spend FROM \`${ds}.snapchat_ads\`
-           WHERE DATE(date) >= @credit_from AND DATE(date) < @date_from`,
+           WHERE date >= @credit_from AND date < @date_from`,
           { credit_from: credit.from, date_from: dateFrom }
         );
         spendBefore = Number(prior?.[0]?.spend || 0);

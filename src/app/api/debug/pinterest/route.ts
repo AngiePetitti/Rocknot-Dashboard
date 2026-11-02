@@ -29,11 +29,11 @@ export async function GET(request: NextRequest) {
       const acct = names.includes('account_id') ? 'CAST(account_id AS STRING)' : names.includes('advertiser_id') ? 'CAST(advertiser_id AS STRING)' : "'(no account column)'";
       out.byAccount = await runQuery(
         `SELECT ${acct} AS account, COUNT(*) AS row_count, ${sums}
-         FROM \`${ds}.pinterest_ads\` WHERE DATE(date) BETWEEN @f AND @t GROUP BY account`, { f: from, t: today });
+         FROM \`${ds}.pinterest_ads\` WHERE date BETWEEN @f AND @t GROUP BY account`, { f: from, t: today });
       out.byDay = await runQuery(
-        `SELECT FORMAT_DATE('%Y-%m-%d', DATE(date)) AS d, COUNT(*) AS row_count, ${sums}
-         FROM \`${ds}.pinterest_ads\` WHERE DATE(date) BETWEEN @f AND @t GROUP BY d ORDER BY d`, { f: from, t: today });
-      out.latestDay = await runQuery(`SELECT FORMAT_DATE('%Y-%m-%d', MAX(DATE(date))) AS latest FROM \`${ds}.pinterest_ads\``);
+        `SELECT FORMAT_DATE('%Y-%m-%d', date) AS d, COUNT(*) AS row_count, ${sums}
+         FROM \`${ds}.pinterest_ads\` WHERE date BETWEEN @f AND @t GROUP BY d ORDER BY d`, { f: from, t: today });
+      out.latestDay = await runQuery(`SELECT FORMAT_DATE('%Y-%m-%d', MAX(date)) AS latest FROM \`${ds}.pinterest_ads\``);
       // Where did the latest Windsor task write? Every table in the dataset
       // with "pinterest" in its name, with row count and last-modified time,
       // so a task that landed under another table name is obvious.
@@ -46,21 +46,21 @@ export async function GET(request: NextRequest) {
       const probeDay = new Date(Date.parse(`${today}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
       out.probeDay = probeDay;
       out.grainByDay = await runQuery(
-        `SELECT FORMAT_DATE('%Y-%m-%d', DATE(date)) AS d, COUNT(*) AS row_count,
+        `SELECT FORMAT_DATE('%Y-%m-%d', date) AS d, COUNT(*) AS row_count,
                 COUNT(DISTINCT CAST(ad_id AS STRING)) AS ads, COUNT(DISTINCT CAST(ad_group_name AS STRING)) AS ad_groups,
                 COUNT(DISTINCT CAST(campaign_name AS STRING)) AS campaigns, COUNT(DISTINCT CAST(account_id AS STRING)) AS accounts,
                 SUM(CAST(spend AS FLOAT64)) AS spend, COUNTIF(CAST(spend AS FLOAT64) = 0) AS zero_spend_rows
-         FROM \`${ds}.pinterest_ads\` WHERE DATE(date) BETWEEN @f AND @t GROUP BY d ORDER BY d`, { f: from, t: today }).catch(e => ({ error: String(e) }));
+         FROM \`${ds}.pinterest_ads\` WHERE date BETWEEN @f AND @t GROUP BY d ORDER BY d`, { f: from, t: today }).catch(e => ({ error: String(e) }));
       out.probeRows = await runQuery(
         `SELECT CAST(ad_id AS STRING) AS ad_id, CAST(ad_group_name AS STRING) AS ad_group_name, CAST(campaign_name AS STRING) AS campaign_name,
                 CAST(account_id AS STRING) AS account_id, CAST(spend AS FLOAT64) AS spend, CAST(clicks AS FLOAT64) AS clicks,
                 CAST(impressions AS FLOAT64) AS impressions, CAST(total_checkout AS FLOAT64) AS total_checkout
-         FROM \`${ds}.pinterest_ads\` WHERE DATE(date) = @d ORDER BY spend DESC LIMIT 60`, { d: probeDay }).catch(e => ({ error: String(e) }));
+         FROM \`${ds}.pinterest_ads\` WHERE date = @d ORDER BY spend DESC LIMIT 60`, { d: probeDay }).catch(e => ({ error: String(e) }));
       // Rows from the rebuilt task carry no total_conversions_value (the new
       // field list dropped it) — split the window's rows by that marker.
       out.rowsByTask = await runQuery(
         `SELECT IF(total_conversions_value IS NULL, 'new_task_fields', 'old_task_fields') AS task_rows,
-                COUNT(*) AS row_count, MIN(DATE(date)) AS first_day, MAX(DATE(date)) AS last_day,
+                COUNT(*) AS row_count, MIN(date) AS first_day, MAX(date) AS last_day,
                 SUM(IFNULL(CAST(total_checkout AS FLOAT64), 0)) AS total_checkout
          FROM \`${ds}.pinterest_ads\` GROUP BY task_rows`).catch(e => ({ error: String(e) }));
     } catch (e) { out.bigqueryError = String(e instanceof Error ? e.message : e); }

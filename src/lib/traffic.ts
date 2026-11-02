@@ -135,7 +135,7 @@ async function fetchAdLookup(from: string, to: string): Promise<AdLookup> {
       const src = t.table === 'facebook_ads' ? await metaSource() : `\`${ds}.${t.table}\``;
       const rows = await runQuery<{ ad_id: string; ad_name: string; campaign: string; spend: number }>(
         `SELECT CAST(ad_id AS STRING) AS ad_id, ANY_VALUE(${t.nameCol}) AS ad_name, ANY_VALUE(campaign) AS campaign, SUM(CAST(spend AS FLOAT64)) AS spend
-         FROM ${src} WHERE DATE(date) BETWEEN @date_from AND @date_to${t.where}
+         FROM ${src} WHERE date BETWEEN @date_from AND @date_to${t.where}
          GROUP BY ad_id`,
         { date_from: from, date_to: to },
       );

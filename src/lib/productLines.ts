@@ -67,7 +67,7 @@ async function spendByLine(from: string, to: string, lines: ProductLine[]): Prom
       const rows = await runQuery<{ line: string; spend: number | null }>(
         `SELECT ${lineCaseSql(lines)} AS line, SUM(CAST(spend AS FLOAT64)) AS spend
          FROM ${src}
-         WHERE DATE(date) BETWEEN @from AND @to${extra}
+         WHERE date BETWEEN @from AND @to${extra}
          GROUP BY line`,
         { from, to }
       );

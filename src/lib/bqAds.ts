@@ -97,7 +97,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
       0 AS impressions
     FROM ${msrc}
-    WHERE DATE(date) BETWEEN @date_from AND @date_to${metaAccountSql()}
+    WHERE date BETWEEN @date_from AND @date_to${metaAccountSql()}
   `;
 
   const googleSql = `
@@ -108,7 +108,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
       0 AS impressions
     FROM ${gsrc}
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    WHERE date BETWEEN @date_from AND @date_to
   `;
 
   const tiktokSql = `
@@ -119,7 +119,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
       SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
     FROM \`${ds}.tiktok_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    WHERE date BETWEEN @date_from AND @date_to
   `;
 
   const tiktokSqlLegacy = tiktokSql.replace(
@@ -135,26 +135,26 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
       SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
       SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
     FROM \`${ds}.tiktok_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    WHERE date BETWEEN @date_from AND @date_to
   `;
 
   const metaDailySql = `
-    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
+    SELECT date AS d, SUM(CAST(spend AS FLOAT64)) AS spend
     FROM ${msrc}
-    WHERE DATE(date) BETWEEN @date_from AND @date_to${metaAccountSql()}
+    WHERE date BETWEEN @date_from AND @date_to${metaAccountSql()}
     GROUP BY d
   `;
 
   const googleDailySql = `
-    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
+    SELECT date AS d, SUM(CAST(spend AS FLOAT64)) AS spend
     FROM ${gsrc}
-    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+    WHERE date BETWEEN @date_from AND @date_to GROUP BY d
   `;
 
   const tiktokDailySql = `
-    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
+    SELECT date AS d, SUM(CAST(spend AS FLOAT64)) AS spend
     FROM \`${ds}.tiktok_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+    WHERE date BETWEEN @date_from AND @date_to GROUP BY d
   `;
 
   // Snapchat (Windsor → snapchat_ads). Guarded like the others — before the
@@ -166,12 +166,12 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
            SUM(IFNULL(COALESCE(CAST(clicks AS FLOAT64), CAST(swipes AS FLOAT64)), 0)) AS clicks,
            SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
     FROM \`${ds}.snapchat_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    WHERE date BETWEEN @date_from AND @date_to
   `;
   const snapDailySql = `
-    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend
+    SELECT date AS d, SUM(CAST(spend AS FLOAT64)) AS spend
     FROM \`${ds}.snapchat_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+    WHERE date BETWEEN @date_from AND @date_to GROUP BY d
   `;
 
   // Pinterest (Windsor → pinterest_ads). Windsor's Pinterest column names vary
@@ -184,7 +184,7 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
            SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
            SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
     FROM \`${ds}.pinterest_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    WHERE date BETWEEN @date_from AND @date_to
   `;
   const pinterestSql = pinterestSqlFor('total_checkout_value', 'total_checkout');
   const pinterestSqlAlt = pinterestSqlFor('total_conversions_value', 'total_conversions');
@@ -193,25 +193,25 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
            SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
            SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
     FROM \`${ds}.pinterest_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    WHERE date BETWEEN @date_from AND @date_to
   `;
   // Per-day revenue + checkouts too (not just spend): the live Windsor patch
   // below replaces whole days, so it needs the BigQuery value it displaces.
   const pinterestDailySqlFor = (revenueCol: string, convCol: string) => `
-    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend,
+    SELECT date AS d, SUM(CAST(spend AS FLOAT64)) AS spend,
            SUM(IFNULL(CAST(${revenueCol} AS FLOAT64), 0)) AS revenue,
            SUM(IFNULL(CAST(${convCol} AS FLOAT64), 0)) AS conversions,
            SUM(IFNULL(CAST(clicks AS FLOAT64), 0)) AS clicks,
            SUM(IFNULL(CAST(impressions AS FLOAT64), 0)) AS impressions
     FROM \`${ds}.pinterest_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+    WHERE date BETWEEN @date_from AND @date_to GROUP BY d
   `;
   const pinterestDailySql = pinterestDailySqlFor('total_checkout_value', 'total_checkout');
   const pinterestDailySqlAlt = pinterestDailySqlFor('total_conversions_value', 'total_conversions');
   const pinterestDailySqlMin = `
-    SELECT DATE(date) AS d, SUM(CAST(spend AS FLOAT64)) AS spend, 0 AS revenue, 0 AS conversions
+    SELECT date AS d, SUM(CAST(spend AS FLOAT64)) AS spend, 0 AS revenue, 0 AS conversions
     FROM \`${ds}.pinterest_ads\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY d
+    WHERE date BETWEEN @date_from AND @date_to GROUP BY d
   `;
 
   // Safe fallbacks using only columns confirmed to exist in BigQuery
@@ -221,14 +221,14 @@ export async function getAdsOverview(dateFrom: string, dateTo: string): Promise<
            SUM(IFNULL(CAST(action_values_omni_purchase AS FLOAT64), 0)) AS revenue,
            0 AS conversions, 0 AS clicks, 0 AS impressions
     FROM ${msrc}
-    WHERE DATE(date) BETWEEN @date_from AND @date_to${metaAccountSql()}
+    WHERE date BETWEEN @date_from AND @date_to${metaAccountSql()}
   `;
   const googleSqlMin = `
     SELECT SUM(CAST(spend AS FLOAT64)) AS spend,
            SUM(IFNULL(CAST(conversion_value AS FLOAT64), 0)) AS revenue,
            0 AS conversions, 0 AS clicks, 0 AS impressions
     FROM ${gsrc}
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    WHERE date BETWEEN @date_from AND @date_to
   `;
 
   // Kick the platform-API patch fetches off NOW so they run concurrently with

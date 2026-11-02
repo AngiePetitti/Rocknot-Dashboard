@@ -291,8 +291,8 @@ export async function fetchPinterestOrganicFromTable(from: string, to: string): 
       ? `SUM(SAFE_CAST(${c} AS FLOAT64)) AS ${k}_sum, MAX(SAFE_CAST(${c} AS FLOAT64)) AS ${k}_max, COUNT(DISTINCT SAFE_CAST(${c} AS FLOAT64)) AS ${k}_n`
       : `0 AS ${k}_sum, 0 AS ${k}_max, 0 AS ${k}_n`; }).join(', ');
     const tcols = TEXT.map(k => { const c = pick(k); return c ? `ANY_VALUE(CAST(${c} AS STRING) HAVING MAX date) AS ${k}` : `NULL AS ${k}`; }).join(', ');
-    const sql = `SELECT CAST(${id} AS STRING) AS pin_id, COUNT(DISTINCT DATE(date)) AS days, ${tcols}, ${mcols}
-      FROM \`${ds}.pinterest_organic\` WHERE DATE(date) BETWEEN @from AND @to AND ${id} IS NOT NULL
+    const sql = `SELECT CAST(${id} AS STRING) AS pin_id, COUNT(DISTINCT date) AS days, ${tcols}, ${mcols}
+      FROM \`${ds}.pinterest_organic\` WHERE date BETWEEN @from AND @to AND ${id} IS NOT NULL
       GROUP BY pin_id
       HAVING (impressions_sum + saves_sum + pinClicks_sum + outboundClicks_sum) > 0
       ORDER BY impressions_sum DESC, pinClicks_sum DESC, saves_sum DESC LIMIT 400`;
@@ -319,7 +319,7 @@ export async function fetchPinterestOrganicFromTable(from: string, to: string): 
     if (missing.length) notes.push(`The Windsor → BigQuery task for Pinterest Organic saved only ${Array.from(have).filter(c => /^pin/.test(c)).join(', ') || 'no pin fields'}. Edit the task in Windsor and tick ${missing.map(k => labels[k] || k).join(', ')}, then run a backfill.${idFallback ? ' Until then pins are grouped by their text, not their id.' : ''}`);
     if (!items.length) {
       // Say what the range holds so an empty grid explains itself.
-      const cnt = await runQuery<{ n: number | string }>(`SELECT COUNT(*) AS n FROM \`${ds}.pinterest_organic\` WHERE DATE(date) BETWEEN @from AND @to`, { from, to }).catch(() => [{ n: -1 }]);
+      const cnt = await runQuery<{ n: number | string }>(`SELECT COUNT(*) AS n FROM \`${ds}.pinterest_organic\` WHERE date BETWEEN @from AND @to`, { from, to }).catch(() => [{ n: -1 }]);
       const n = num(cnt[0]?.n);
       notes.push(n > 0 ? `${n.toLocaleString()} rows for ${from} → ${to} but every impression / save / click column is zero or empty (reading ${METRICS.map(k => `${labels[k]} ← ${pick(k) || 'none'}`).join(', ')}).` : n === 0 ? `No rows for ${from} → ${to} in the table.` : '');
     }
@@ -801,7 +801,7 @@ async function fetchPinterestAudienceFromTable(from: string, to: string): Promis
     const use = PIN_TABLE_ACCOUNT_COLS.filter(c => have.has(c));
     if (!use.length || !have.has('date')) return null;
     // Account totals repeat on every pin row for the day, so MAX per day is the day's value.
-    const rows = await runQuery<Record<string, unknown>>(`SELECT CAST(date AS STRING) AS date, ${use.map(c => `MAX(SAFE_CAST(${c} AS FLOAT64)) AS ${c}`).join(', ')} FROM \`${ds}.pinterest_organic\` WHERE DATE(date) BETWEEN @from AND @to GROUP BY date ORDER BY date`, { from, to });
+    const rows = await runQuery<Record<string, unknown>>(`SELECT CAST(date AS STRING) AS date, ${use.map(c => `MAX(SAFE_CAST(${c} AS FLOAT64)) AS ${c}`).join(', ')} FROM \`${ds}.pinterest_organic\` WHERE date BETWEEN @from AND @to GROUP BY date ORDER BY date`, { from, to });
     if (!rows.length) return null;
     const a = audienceFromRows('pinterest_organic', rows, { fieldSet: 'bigquery:pinterest_organic' });
     return a.followers != null || a.newFollowers != null ? a : null;
@@ -843,11 +843,11 @@ export async function fetchPinterestDaily(from: string, to: string): Promise<Pin
     const f = (c: string | null) => (c ? `SUM(SAFE_CAST(${c} AS FLOAT64))` : '0');
     const dayBefore = new Date(Date.parse(from) - 86400000).toISOString().slice(0, 10);
     const [rows, probe, createdRows] = await Promise.all([
-      runQuery<Record<string, unknown>>(`SELECT CAST(DATE(date) AS STRING) AS d, ${f(impr)} AS impressions, ${f(save)} AS saves, ${f(click)} AS pin_clicks, ${f(out)} AS outbound, COUNT(DISTINCT ${id}) AS pins
-        FROM \`${ds}.pinterest_organic\` WHERE DATE(date) BETWEEN @from AND @to AND ${id} IS NOT NULL GROUP BY d ORDER BY d`, { from: dayBefore, to }),
+      runQuery<Record<string, unknown>>(`SELECT CAST(date AS STRING) AS d, ${f(impr)} AS impressions, ${f(save)} AS saves, ${f(click)} AS pin_clicks, ${f(out)} AS outbound, COUNT(DISTINCT ${id}) AS pins
+        FROM \`${ds}.pinterest_organic\` WHERE date BETWEEN @from AND @to AND ${id} IS NOT NULL GROUP BY d ORDER BY d`, { from: dayBefore, to }),
       impr ? runQuery<{ lifetime_like: number | string; total: number | string }>(`SELECT COUNTIF(n <= 1) AS lifetime_like, COUNT(*) AS total FROM (
         SELECT ${id} AS pid, COUNT(DISTINCT SAFE_CAST(${impr} AS FLOAT64)) AS n FROM \`${ds}.pinterest_organic\`
-        WHERE DATE(date) BETWEEN @from AND @to AND ${id} IS NOT NULL AND SAFE_CAST(${impr} AS FLOAT64) > 0 GROUP BY pid HAVING COUNT(DISTINCT DATE(date)) > 2)`, { from: dayBefore, to }) : Promise.resolve([{ lifetime_like: 0, total: 0 }]),
+        WHERE date BETWEEN @from AND @to AND ${id} IS NOT NULL AND SAFE_CAST(${impr} AS FLOAT64) > 0 GROUP BY pid HAVING COUNT(DISTINCT date) > 2)`, { from: dayBefore, to }) : Promise.resolve([{ lifetime_like: 0, total: 0 }]),
       created ? runQuery<{ d: string; pins: number | string }>(`SELECT SUBSTR(CAST(${created} AS STRING), 1, 10) AS d, COUNT(DISTINCT ${id}) AS pins FROM \`${ds}.pinterest_organic\`
         WHERE SUBSTR(CAST(${created} AS STRING), 1, 10) BETWEEN @from AND @to AND ${id} IS NOT NULL GROUP BY d ORDER BY d`, { from, to }) : Promise.resolve([]),
     ]);

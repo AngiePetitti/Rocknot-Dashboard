@@ -216,9 +216,9 @@ export async function getPaybackLtv(): Promise<PaybackCohort[]> {
   const gsrc = await googleSource();
   const msrc = await metaSource();
   const spendFor = (table: string, extra = '') => `
-    SELECT FORMAT_DATE('%Y-%m-01', DATE(date)) AS m, SUM(CAST(spend AS FLOAT64)) AS spend
+    SELECT FORMAT_DATE('%Y-%m-01', date) AS m, SUM(CAST(spend AS FLOAT64)) AS spend
     FROM ${table === 'google_ads' ? gsrc : table === 'facebook_ads' ? msrc : `\`${ds}.${table}\``}
-    WHERE DATE(date) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 12 MONTH) ${extra}
+    WHERE date >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 12 MONTH) ${extra}
     GROUP BY m`;
 
   const [cohortRows, meta, google, tiktok, snap, pinterest] = await Promise.all([

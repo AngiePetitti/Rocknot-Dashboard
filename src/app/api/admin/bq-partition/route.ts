@@ -38,19 +38,26 @@ export async function GET(req: NextRequest) {
     WHERE column_name = 'date'
   `);
   const typeOf = new Map(cols.map(c => [c.table_name, c.data_type]));
+  // Which column each table is actually partitioned on — partitioning by
+  // ingestion time looks "partitioned" but does NOT prune our date filters.
+  const partCols = await runQuery<{ table_name: string; column_name: string }>(`
+    SELECT table_name, column_name FROM \`${ds}\`.INFORMATION_SCHEMA.COLUMNS
+    WHERE is_partitioning_column = 'YES'
+  `).catch(() => [] as Array<{ table_name: string; column_name: string }>);
+  const partColOf = new Map(partCols.map(c => [c.table_name, c.column_name]));
 
   const plan: Array<Record<string, unknown>> = [];
   for (const t of tables) {
     if (!CANDIDATES.includes(t.table_name)) continue;
-    const already = /PARTITION BY/i.test(t.ddl || '');
+    const partCol = partColOf.get(t.table_name) || (/PARTITION BY/i.test(t.ddl || '') ? '(ingestion time)' : null);
     const dt = typeOf.get(t.table_name) || 'none';
     let action = 'skip';
     let partitionExpr = '';
-    if (already) action = 'already partitioned';
+    if (partCol === 'date') action = 'already partitioned by date — queries prune correctly';
     else if (dt === 'DATE') { action = 'partition'; partitionExpr = '`date`'; }
     else if (dt === 'TIMESTAMP' || dt === 'DATETIME') { action = 'partition'; partitionExpr = 'DATE(`date`)'; }
     else action = `skip - date column is ${dt}; needs manual handling`;
-    const entry: Record<string, unknown> = { table: t.table_name, sizeGb: sizeOf.get(t.table_name) ?? null, dateType: dt, action };
+    const entry: Record<string, unknown> = { table: t.table_name, sizeGb: sizeOf.get(t.table_name) ?? null, dateType: dt, partitionedOn: partCol, action };
     plan.push(entry);
 
     if (execute && action === 'partition') {

@@ -33,7 +33,7 @@ export async function getProductSales(dateFrom: string, dateTo: string): Promise
       SUM(CAST(line_item__quantity AS FLOAT64))  AS total_quantity,
       SUM(CAST(line_item__price   AS FLOAT64))  AS total_revenue
     FROM \`${ds}.shopify_products\`
-    WHERE DATE(date) BETWEEN @date_from AND @date_to
+    WHERE date BETWEEN @date_from AND @date_to
       AND line_item__title IS NOT NULL
       AND line_item__title != ''
     GROUP BY line_item__title, line_item__product_type

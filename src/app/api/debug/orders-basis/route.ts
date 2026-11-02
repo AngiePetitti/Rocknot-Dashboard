@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
               ${sumIf('order_gross_sales')} AS sum_gross_sales,
               ${sumIf('order_current_total_price')} AS sum_current_total_price
        FROM \`${ds}.shopify_orders\`
-       WHERE DATE(date) BETWEEN @from AND @to`, params
+       WHERE date BETWEEN @from AND @to`, params
     );
     const r = raw[0] || {};
     out.rawRows = Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v === null ? null : num(v)]));
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
     const dist = await runQuery<{ rows_per_order: number; orders: number }>(
       `SELECT LEAST(rows_per_order, 5) AS rows_per_order, COUNT(*) AS orders
        FROM (SELECT order_id, COUNT(*) AS rows_per_order FROM \`${ds}.shopify_orders\`
-             WHERE DATE(date) BETWEEN @from AND @to AND order_id IS NOT NULL GROUP BY order_id)
+             WHERE date BETWEEN @from AND @to AND order_id IS NOT NULL GROUP BY order_id)
        GROUP BY rows_per_order ORDER BY rows_per_order`, params
     );
     out.rowsPerOrder = dist.map(x => ({ rowsPerOrder: Number(x.rows_per_order) >= 5 ? '5+' : Number(x.rows_per_order), orders: Number(x.orders) }));
@@ -97,7 +97,7 @@ export async function GET(request: NextRequest) {
   try {
     const cand = await runQuery<Record<string, unknown>>(
       `WITH rows_d AS (
-         SELECT DISTINCT CAST(order_id AS STRING) AS order_id, DATE(date) AS d,
+         SELECT DISTINCT CAST(order_id AS STRING) AS order_id, date AS d,
                 CAST(order_total_price AS FLOAT64) AS total_price,
                 CAST(order_net_sales AS FLOAT64) AS net_sales
          FROM \`${ds}.shopify_orders\` WHERE order_id IS NOT NULL
@@ -129,7 +129,7 @@ export async function GET(request: NextRequest) {
     // (`rows` is a reserved word in BigQuery — hence row_count.)
     const rows = await runQuery<{ source: string; row_count: number; orders: number }>(
       `SELECT IFNULL(CAST(order_source_name AS STRING), '(null)') AS source, COUNT(*) AS row_count, COUNT(DISTINCT order_id) AS orders
-       FROM \`${ds}.shopify_orders\` WHERE DATE(date) BETWEEN @date_from AND @date_to GROUP BY source ORDER BY row_count DESC LIMIT 20`,
+       FROM \`${ds}.shopify_orders\` WHERE date BETWEEN @date_from AND @date_to GROUP BY source ORDER BY row_count DESC LIMIT 20`,
       { date_from: from, date_to: to });
     out.sourceNames = rows.map(r => ({ source: r.source, rows: Number(r.row_count), orders: Number(r.orders) }));
   } catch (e: unknown) { out.sourceNames = { error: String(e instanceof Error ? e.message : e) }; }

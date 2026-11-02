@@ -18,25 +18,25 @@ export async function GET() {
     try {
       const ds = getDataset();
       out.bigquery = await runQuery(
-        `SELECT FORMAT_DATE('%Y-%m-%d', DATE(date)) AS d,
+        `SELECT FORMAT_DATE('%Y-%m-%d', date) AS d,
                 COUNT(*) AS row_count,
                 COUNT(DISTINCT ad_id) AS distinct_ads,
                 SUM(CAST(spend AS FLOAT64)) AS spend,
                 SUM(IFNULL(CAST(conversion_purchases AS FLOAT64), 0)) AS purchases,
                 SUM(IFNULL(CAST(conversion_purchases_value AS FLOAT64), 0)) AS revenue
          FROM \`${ds}.snapchat_ads\`
-         WHERE DATE(date) BETWEEN @f AND @t
+         WHERE date BETWEEN @f AND @t
          GROUP BY d ORDER BY d`,
         { f: from, t: today }
       );
       // Duplicate detector: same ad, same day, appearing on multiple rows
       // with identical spend — the signature of stacked sync snapshots.
       out.duplicateSample = await runQuery(
-        `SELECT FORMAT_DATE('%Y-%m-%d', DATE(date)) AS d, ad_id, COUNT(*) AS copies,
+        `SELECT FORMAT_DATE('%Y-%m-%d', date) AS d, ad_id, COUNT(*) AS copies,
                 SUM(CAST(spend AS FLOAT64)) AS summed_spend,
                 SUM(IFNULL(CAST(conversion_purchases_value AS FLOAT64), 0)) AS summed_revenue
          FROM \`${ds}.snapchat_ads\`
-         WHERE DATE(date) BETWEEN @f AND @t
+         WHERE date BETWEEN @f AND @t
          GROUP BY d, ad_id HAVING COUNT(*) > 1
          ORDER BY copies DESC LIMIT 10`,
         { f: from, t: today }

@@ -126,7 +126,7 @@ export function dailyShopifySalesSql(ds: string, rowFilter = ''): string {
     WITH ev AS (
       SELECT DISTINCT
         COALESCE(CAST(order_id AS STRING), TO_JSON_STRING(STRUCT(date, order_total_price, order_net_sales, order_customer_id))) AS order_id,
-        DATE(date) AS d,
+        date AS d,
         COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0) AS total,
         COALESCE(CAST(order_net_sales AS FLOAT64), CAST(order_total_price AS FLOAT64), 0) AS net
       FROM \`${ds}.shopify_orders\`${rowFilter ? ` WHERE ${rowFilter}` : ''}
@@ -156,7 +156,7 @@ export function dedupedOrdersCte(ds: string, rowFilter = ''): string {
       SELECT DISTINCT
         COALESCE(CAST(order_id AS STRING), TO_JSON_STRING(STRUCT(date, order_total_price, order_net_sales, order_customer_id))) AS order_id,
         CAST(order_customer_id AS STRING) AS cid,
-        DATE(date) AS d,
+        date AS d,
         COALESCE(CAST(order_total_price AS FLOAT64), CAST(order_net_sales AS FLOAT64), 0) AS total,
         COALESCE(CAST(order_net_sales AS FLOAT64), CAST(order_total_price AS FLOAT64), 0) AS net
       FROM \`${ds}.shopify_orders\`${rowFilter ? ` WHERE ${rowFilter}` : ''}

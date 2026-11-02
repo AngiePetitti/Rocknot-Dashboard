@@ -771,7 +771,7 @@ export async function GET(request: NextRequest) {
             const { runQuery, getDataset } = await import('@/src/lib/bigquery');
             const rows = await runQuery<{ spend: number | null }>(
               `SELECT SUM(CAST(spend AS FLOAT64)) AS spend FROM \`${getDataset()}.snapchat_ads\`
-               WHERE DATE(date) >= @cf AND DATE(date) < @df`,
+               WHERE date >= @cf AND date < @df`,
               { cf: credit.from, df: currentParams.date_from }
             );
             out[credit.from] = Number(rows?.[0]?.spend || 0);

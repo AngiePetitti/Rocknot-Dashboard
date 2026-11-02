@@ -27,8 +27,8 @@ export async function GET() {
         row_count: number | null;
         spend: number | null;
       }>(
-        `SELECT MIN(DATE(date)) AS first_day, MAX(DATE(date)) AS last_day,
-                COUNT(DISTINCT DATE(date)) AS days, COUNT(*) AS row_count
+        `SELECT MIN(date) AS first_day, MAX(date) AS last_day,
+                COUNT(DISTINCT date) AS days, COUNT(*) AS row_count
                 ${spend ? ', SUM(CAST(spend AS FLOAT64)) AS spend' : ', NULL AS spend'}
          FROM \`${ds}.${table}\``,
         {}
