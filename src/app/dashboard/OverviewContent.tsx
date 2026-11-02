@@ -1382,11 +1382,13 @@ export default function OverviewContent() {
       )}
 
       {/* Charts Row */}
-      {/* Month-by-month history for 3-month-and-longer ranges */}
+      {/* Month-by-month history: 3-month-and-longer ranges, Last Month and Month to Date */}
       {isLive && (() => {
         const r = tfRange(tfRaw as Timeframe | 'custom', dateFrom, dateTo);
         const days = Math.round((Date.parse(r.to) - Date.parse(r.from)) / 86400000) + 1;
-        if (days < 85) return null;
+        // Long ranges, plus Last Month and Month to Date so a single month can
+        // be read against the same month last year.
+        if (days < 85 && tfRaw !== 'last_month' && tfRaw !== 'mtd') return null;
         return <MonthlyHistory from={r.from} to={r.to} targetMer={MER_GOAL} targetCac={TARGET_CAC} targetFullyLoadedMer={goalsNow.targetFullyLoadedMer ?? undefined} defaultYoY={compareOn && compareTo === 'year'} />;
       })()}
 
