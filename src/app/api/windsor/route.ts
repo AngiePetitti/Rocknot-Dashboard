@@ -668,7 +668,7 @@ export async function GET(request: NextRequest) {
         revenueData: overview.revenueData,
         ...(overview.adsError ? { adsError: overview.adsError } : {}),
         ...(bqPrior ? { priorPeriod: bqPrior, priorLabel: bqPriorLabel, compareMode } : {}),
-      }, await partnerSession()), { headers: cacheHeaders(false, params.date_to < new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })) });
+      }, await partnerSession()), { headers: cacheHeaders(false, Boolean(currentParams.date_to) && currentParams.date_to < todayStr) });
     }
 
     if (debug) {
