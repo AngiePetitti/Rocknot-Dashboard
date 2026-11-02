@@ -13,14 +13,14 @@ function Panel({ title, data, dataKey, color, fmt, goal, goalLabel, compareYoY, 
   const rows = data.map(d => ({ ...d, v: d[dataKey] == null ? null : Number(d[dataKey]), ly: compareYoY && d.ly && d.ly[dataKey] != null ? Number(d.ly[dataKey]) : null }));
   const hasAny = rows.some(r => r.v != null && r.v > 0);
   const hasLy = compareYoY && rows.some(r => r.ly != null && r.ly > 0);
-  const deltas = hasLy ? rows.filter(r => r.v != null && r.ly != null && r.ly > 0).map(r => ({ label: r.label, pct: ((r.v! - r.ly!) / r.ly!) * 100 })) : [];
+  const deltas = hasLy ? rows.filter(r => r.v != null && r.ly != null && r.ly > 0).map(r => ({ label: r.label, pct: ((r.v! - r.ly!) / r.ly!) * 100, ly: r.ly! })) : [];
   return (
     <div className="min-w-0">
       <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1">{title}{goal != null && goalLabel ? <span className="text-gray-400 font-normal normal-case"> · {goalLabel}</span> : null}</p>
       {!hasAny ? <p className="text-xs text-gray-400 py-6">No data for these months.</p> : (
         <div className="h-44">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={rows} margin={{ top: 18, right: 6, left: 0, bottom: 0 }} barCategoryGap={hasLy ? '22%' : '28%'} barGap={2}>
+            <BarChart data={rows} margin={{ top: hasLy ? 24 : 18, right: 6, left: 0, bottom: 0 }} barCategoryGap={hasLy ? '22%' : '28%'} barGap={2}>
               <CartesianGrid vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} interval={0} />
               <YAxis hide domain={[0, (m: number) => m * 1.15]} />
@@ -29,11 +29,7 @@ function Panel({ title, data, dataKey, color, fmt, goal, goalLabel, compareYoY, 
               <Bar dataKey="v" name="This year" fill={color} radius={[4, 4, 0, 0]} isAnimationActive={false}>
                 <LabelList dataKey="v" position="top" formatter={(v: unknown) => (v == null ? '' : fmt(Number(v)))} style={{ fontSize: 10, fill: '#475569', fontWeight: 600 }} />
               </Bar>
-              {hasLy && (
-                <Bar dataKey="ly" name="Last year" fill="#d1d5db" radius={[4, 4, 0, 0]} isAnimationActive={false}>
-                  <LabelList dataKey="ly" position="top" formatter={(v: unknown) => (v == null ? '' : fmt(Number(v)))} style={{ fontSize: 9, fill: '#9ca3af' }} />
-                </Bar>
-              )}
+              {hasLy && <Bar dataKey="ly" name="Last year" fill="#d1d5db" radius={[4, 4, 0, 0]} isAnimationActive={false} />}
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -42,7 +38,7 @@ function Panel({ title, data, dataKey, color, fmt, goal, goalLabel, compareYoY, 
         <p className="text-[11px] text-gray-500 mt-1 tabular-nums">
           vs last year: {deltas.map((d, i) => {
             const good = lowerIsBetter ? d.pct <= 0 : d.pct >= 0;
-            return <span key={d.label}>{i > 0 ? ' · ' : ''}{d.label} <span className={`font-semibold ${good ? 'text-green-600' : 'text-red-500'}`}>{d.pct >= 0 ? '+' : ''}{d.pct.toFixed(0)}%</span></span>;
+            return <span key={d.label} title={`${d.label} last year: ${fmt(d.ly)}`}>{i > 0 ? ' · ' : ''}{d.label} <span className={`font-semibold ${good ? 'text-green-600' : 'text-red-500'}`}>{d.pct >= 0 ? '+' : ''}{d.pct.toFixed(0)}%</span> <span className="text-gray-400">({fmt(d.ly)})</span></span>;
           })}
         </p>
       )}
