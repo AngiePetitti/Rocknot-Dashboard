@@ -79,7 +79,7 @@ export default function MonthlyHistory({ from, to, targetMer, targetCac, targetF
     });
   }, [months]);
 
-  if (months.length < 3) return null;
+  if (months.length < 1) return null;
   const data = (months.map(mo => rows[mo.key]).filter(Boolean) as MonthPoint[]).map(d => {
     const o = other[d.month];
     const fl = o != null && d.newCustomers > 0 ? (d.adSpend + o) / d.newCustomers : null;
@@ -100,7 +100,7 @@ export default function MonthlyHistory({ from, to, targetMer, targetCac, targetF
     <Card accentColor="#c4b5fd" className="mb-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
         <div>
-          <h2 className="text-sm font-bold text-gray-700">Month by month</h2>
+          <h2 className="text-sm font-bold text-gray-700">{months.length === 1 ? (months[0].partial ? 'This month so far' : 'Last month') : 'Month by month'}</h2>
           <p className="text-xs text-gray-400">
             {data.length ? `${data[0].label} – ${data[data.length - 1].label}` : 'Loading…'}{skippedStart ? ` · the range starts on ${from}, so the first partial month is left out` : ''}{loading ? ' · loading…' : ''}
           </p>
