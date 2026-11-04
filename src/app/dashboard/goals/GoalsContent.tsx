@@ -7,6 +7,7 @@ import { formatCurrency, isLiveOverviewSource } from '@/src/lib/utils';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import { useClient } from '@/src/components/ClientProvider';
+import GoalPlan from '@/src/components/GoalPlan';
 import { effectiveGoals } from '@/src/lib/client';
 
 interface MonthGoal { month: string; revenueGoal: number; adBudget: number; pinned?: boolean }
@@ -444,6 +445,9 @@ export default function GoalsContent() {
           </Card>
         );
       })()}
+
+      {/* The agreed month plan and the dated checkpoints it is re-read at (clients with goals.plan / goals.checkpoints) */}
+      {(client.goals.plan?.length || client.goals.checkpoints?.length) ? <GoalPlan actuals={actuals} /> : null}
 
       <Card accentColor="#c4b5fd" className="mb-5">
         <div className="flex flex-col sm:flex-row sm:items-end gap-4">
