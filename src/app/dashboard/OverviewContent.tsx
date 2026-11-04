@@ -590,6 +590,20 @@ export default function OverviewContent() {
         <TimeframeSelector />
       </Header>
 
+      {/* Next dated checkpoint from the agreed plan (clients with goals.checkpoints) */}
+      {!isPartner && (() => {
+        const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+        const next = [...(client.goals.checkpoints || [])].sort((a, b) => a.date.localeCompare(b.date)).find(c => c.date >= todayStr);
+        if (!next) return null;
+        const [y, m, d] = next.date.split('-').map(Number);
+        const when = next.date === todayStr ? 'Today' : new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        return (
+          <Link href="/dashboard/goals" className="block rounded-xl border border-emerald-100 bg-emerald-50/60 px-4 py-2 mb-4 text-xs text-gray-600">
+            📍 <b className="text-gray-800">{when}: {next.title}</b> · {next.check}{next.decision ? ` Decision: ${next.decision}` : ''} <span className="text-emerald-700 font-semibold whitespace-nowrap">Plan and checkpoints →</span>
+          </Link>
+        );
+      })()}
+
       {/* Diagnostic line when no launch banners render — silence hid real
           failures (and TBD-parked launches) from everyone. */}
       {!isPartner && launchAlerts.length === 0 && launchAlertNote && (
