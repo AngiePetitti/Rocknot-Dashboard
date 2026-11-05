@@ -106,9 +106,13 @@ export default function GoalPlan({ actuals }: { actuals: Record<string, Actual> 
                   <Fragment key={p.month}>
                     <tr className={`border-t border-gray-50 align-top ${cur ? 'bg-emerald-50/40' : ''}`}>
                       <td className="py-2 pr-4 whitespace-nowrap font-semibold text-gray-800">{monthLabel(p.month)}{cur && <span className="ml-1 text-[10px] font-semibold text-emerald-700">now</span>}</td>
-                      <td className="py-2 pr-4 whitespace-nowrap text-gray-800">{k$(p.revenueGoal)}{p.stretchGoal ? <span className="text-gray-400"> · stretch {k$(p.stretchGoal)}</span> : null}</td>
+                      <td className="py-2 pr-4 whitespace-nowrap text-gray-800">
+                        {k$(p.revenueGoal)}{p.stretchGoal ? <span className="text-gray-400"> · stretch {k$(p.stretchGoal)}</span> : null}
+                        {p.floorGoal ? <span className="block text-[11px] text-gray-400">floor {k$(p.floorGoal)}</span> : null}
+                      </td>
                       <td className="py-2 pr-4 whitespace-nowrap text-gray-800">
                         {p.newCustomerGoal != null ? p.newCustomerGoal.toLocaleString() : '—'}
+                        {p.newCustomerFloor ? <span className="text-gray-400"> · floor {p.newCustomerFloor.toLocaleString()}</span> : null}
                         {a?.newCustomers != null && a.newCustomers > 0 && p.newCustomerGoal ? <span className={`block text-[11px] ${a.newCustomers >= p.newCustomerGoal ? 'text-emerald-700' : 'text-gray-500'}`}>{a.newCustomers.toLocaleString()} so far</span> : null}
                       </td>
                       <td className="py-2 pr-4 whitespace-nowrap text-gray-800">{k$(p.adBudget)}{p.adBudgetMax ? <span className="text-gray-400"> → {k$(p.adBudgetMax)} if gates pass</span> : null}</td>
