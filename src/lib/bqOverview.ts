@@ -50,7 +50,7 @@ export interface OverviewResult {
     /** Marketplace channels (e.g. Nordstrom) EXCLUDED from every figure above — shown so the exclusion is visible. */
     marketplaces?: MarketplaceTotals[];
   };
-  revenueData: Array<{ date: string; revenue: number; netSales?: number; orders: number; adSpend: number; newCustomers: number; totalCustomers: number }>;
+  revenueData: Array<{ date: string; revenue: number; netSales?: number; grossLessDiscounts?: number; orders: number; adSpend: number; newCustomers: number; totalCustomers: number }>;
   revenueSource: 'shopify' | 'none';
   /** Where the Shopify sales figures came from: Shopify's own report (matches Shopify Analytics) or the Windsor-synced order rows (fallback). */
   shopifySource?: 'shopifyql' | 'shopifyql_totals' | 'bigquery';
@@ -649,7 +649,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
 
     const cd = custDailyByDate[date];
     return {
-      date, revenue: Math.round(revenue), netSales: Math.round(s ? s.netSales : 0), orders, adSpend: Math.round(adSpend),
+      date, revenue: Math.round(revenue), netSales: Math.round(s ? s.netSales : 0), grossLessDiscounts: Math.round(s ? (s.grossLessDiscounts || 0) : 0), orders, adSpend: Math.round(adSpend),
       newCustomers: cd?.newCustomers ?? 0,
       totalCustomers: cd?.totalCustomers ?? 0,
     };

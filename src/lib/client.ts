@@ -52,9 +52,11 @@ export interface GoalSeason {
 export interface MonthPlan {
   /** 'YYYY-MM' */
   month: string;
-  /** Total sales on the client's basis. */
+  /** Revenue on the client's MER basis (revenue.merBasis: net sales, or gross sales less discounts). */
   revenueGoal?: number;
   stretchGoal?: number;
+  /** New customers (all channels the client counts). */
+  newCustomerGoal?: number;
   /** Planned starting ad spend and the ceiling if every gate passes. */
   adBudget?: number;
   adBudgetMax?: number;
@@ -537,31 +539,32 @@ const KAILEEP: ClientProfile = {
       { name: 'Peak season', months: [1, 2, 3, 4, 5, 6, 7, 8], targetMer: 6.5, merFloor: 6.0, merLabel: '6.5–7.5x', targetFullyLoadedMer: 4.25, fullyLoadedFloor: 3.8, fullyLoadedLabel: '4.25–4.5x', targetCac: 28, cacCeiling: 30, cacLabel: '$25–28', targetFullyLoadedCac: 35, fullyLoadedCacCeiling: 38, posture: 'Scale 10–15% a week when performance supports it; no increases while a floor is breached.' },
       { name: 'Slow season', months: [9, 10, 11, 12], targetMer: 5.5, merFloor: 5.0, merLabel: '5.5x', targetFullyLoadedMer: 3.5, fullyLoadedFloor: 3.3, fullyLoadedLabel: '3.5–3.8x', targetCac: 30, cacCeiling: 35, cacLabel: '$28–30', targetFullyLoadedCac: 45, fullyLoadedCacCeiling: 50, posture: 'Hold: budget changes at most 10–15% a week, no increases while performance is below a floor. BFCM (Nov 25–30) is judged on its own.' },
     ],
-    // Month plan and checkpoints from the December / January team briefs
-    // (Nov 4, 2026 reply to Airin). Fully loaded CAC: $45 (ceiling $50)
-    // Nov–Dec, $38 ($42) Jan, $35 ($38) from Feb if the fixed base holds,
-    // returns come back toward 15–16% and the January price rise lands.
+    // 90-day growth plan (Nov 5, 2026 memo to Airin). Revenue is gross sales
+    // less discounts, all channels except Nordstrom (Airin's basis and the
+    // sheet's "Actual sales" row). Fully loaded CAC = media + non-media
+    // marketing + agency fee ÷ new customers. Last year on this basis:
+    // Nov $217.7K, Dec $235.0K, Jan $382.4K, Feb $357.9K.
     plan: [
-      { month: '2026-11', adBudget: 44000, targetFullyLoadedCac: 45, fullyLoadedCacCeiling: 50, rule: 'Hold. Meta ramp read on Nov 7. BFCM (Nov 25–30) is judged on its own against last year\'s sale window.' },
-      { month: '2026-12', revenueGoal: 225000, stretchGoal: 250000, adBudget: 36000, adBudgetMax: 44000, targetFullyLoadedCac: 45, fullyLoadedCacCeiling: 50, aovTarget: 128, rule: 'Start at $36K. Lift 10–15% a week only if paid MER is at or above 6.0x on Dec 5 and again on Dec 12; the extra goes into Dec 26–31. Under 5.5x on Dec 5 → hold at $36K and take a flat month. Pinterest ads stay at $3K, top of funnel, judged on breakeven (Pinterest-attributed sales cover the spend).' },
-      { month: '2027-01', revenueGoal: 370000, stretchGoal: 408000, adBudget: 52000, adBudgetMax: 58000, targetFullyLoadedCac: 38, fullyLoadedCacCeiling: 42, aovTarget: 150, rule: 'Lift 10–15% on Jan 2, 9, 16 and 23 only while paid MER is at or above 6.0x and ads-only CAC is under $30; a breach pauses the next lift. $408K needs conversion to hold at 1.37% through the price increase and paid MER near 7.8x. AOV target pending Airin\'s answer on the January price rise ($155–165 if prices go up 10–20%).' },
-      { month: '2027-02', targetFullyLoadedCac: 35, fullyLoadedCacCeiling: 38, rule: '$35 holds only if the fixed marketing base stays at the December plan, returns come back toward 15–16% of gross, and the January price increase lands without a conversion drop.' },
+      { month: '2026-11', revenueGoal: 225000, newCustomerGoal: 1500, adBudget: 44000, targetFullyLoadedCac: 50, fullyLoadedCacCeiling: 52, rule: 'Meta ramp read on Nov 7: continue only if blended CAC ≤ $28 and paid MER ≥ 5.3x, otherwise 15% back to Google. Google Shopping and non-brand rebuilt toward $28K by Dec 1. BFCM (Nov 25–30) judged on its own.' },
+      { month: '2026-12', revenueGoal: 250000, newCustomerGoal: 1575, adBudget: 36000, adBudgetMax: 44000, targetFullyLoadedCac: 44, fullyLoadedCacCeiling: 48, aovTarget: 140, rule: 'Google-first at $28K, Meta $12–14K, Pinterest $3K top of funnel on breakeven. Start at $36K; lift 10–15% only if paid MER ≥ 6.0x on Dec 5 and again on Dec 12, extra into Dec 26–31. Under 5.5x on Dec 5 → hold at $36K. Needs 6.9x paid MER (Oct 5.5x, last Dec 10.2x). First month new customers should be positive year over year (+10%).' },
+      { month: '2027-01', revenueGoal: 400000, stretchGoal: 440000, newCustomerGoal: 2300, adBudget: 41000, adBudgetMax: 48000, targetFullyLoadedCac: 33, fullyLoadedCacCeiling: 38, aovTarget: 155, rule: 'Last January\'s economics: 2,263 new customers at $40K of ads, 9.5x paid MER, $29 fully loaded CAC. Lift 10–15% on Jan 2, 9, 16 and 23 only while paid MER ≥ 6.0x and ads-only CAC < $30. Jan 9 reads conversion through the 10% price increase; if paid MER is near October\'s 5.5x instead, fully loaded CAC is ~$50 and the fixed-base / spend decision goes to Airin that day.' },
+      { month: '2027-02', revenueGoal: 375000, newCustomerGoal: 2250, adBudget: 40000, targetFullyLoadedCac: 33, fullyLoadedCacCeiling: 35, aovTarget: 155, rule: '$35 or better holds only if the fixed marketing base is back at the Q1 level (~$27.5K a month), women\'s returns are moving from 25.5% toward 21% of gross, and the price increase landed without a conversion drop. Feb 2 is the 90-day review: if Dec and Jan both missed the new-customer targets, the plan changes, not the targets.' },
     ],
     checkpoints: [
       { id: 'cp-2026-11-07', date: '2026-11-07', title: 'Meta ramp read', check: 'Blended new-customer CAC and paid MER after the Oct 31 changes (last 7 days was $62 on Nov 3).', decision: 'Continue the ramp if blended CAC is at or under $28 and paid MER at or above 5.3x; otherwise pull Meta back 15% and move it to Google non-brand search and Shopping.', owner: 'Angie' },
-      { id: 'cp-2026-11-20', date: '2026-11-20', title: 'December lock', check: 'Shipping cutoff dates confirmed with fulfillment; gift-guide assets in review.', decision: 'Lock the December email and SMS calendar.', owner: 'Karina, Astrid' },
       { id: 'cp-2026-11-29', date: '2026-11-29', title: 'BFCM extension call', check: 'Sale performance against the slow-season floors.', decision: 'Default: the sale ends midnight Nov 30. Extend only if it is beating the floors.', owner: 'Angie, Airin' },
-      { id: 'cp-2026-12-01', date: '2026-12-01', title: 'December live', check: 'Gift guide live, BFCM campaigns off, December budgets set at $36K (Google $18K, Meta $14K, Pinterest $3K, test $1K).', owner: 'Angie, Ting' },
+      { id: 'cp-2026-11-20', date: '2026-11-20', title: 'December lock', check: 'Shipping cutoff dates confirmed with fulfillment; gift-guide assets in review; Klaviyo UTM tagging live on every send and flow so email traffic stops landing in "direct".', decision: 'Lock the December email and SMS calendar.', owner: 'Karina, Astrid' },
+      { id: 'cp-2026-12-01', date: '2026-12-01', title: 'December live', check: 'Gift guide live, BFCM campaigns off, December budgets set at $36K Google-first (Google Shopping and non-brand $28K incl. a kids campaign, Meta $12–14K, Pinterest $3K top of funnel, brand defence covering "kailee p nordstrom" queries).', owner: 'Angie, Ting' },
       { id: 'cp-2026-12-05', date: '2026-12-05', title: 'Gate 1', check: 'Paid MER, ads-only CAC, and four-week fully loaded MER and CAC against the slow-season guardrails.', decision: 'Paid MER at or above 6.0x → lift 10–15%. Under 5.5x → hold at $36K for the month.', owner: 'Angie' },
       { id: 'cp-2026-12-12', date: '2026-12-12', title: 'Gate 2', check: 'Same test as Gate 1 after the first lift.', decision: 'Paid MER at or above 6.0x → second lift toward $44K, weighted to Dec 26–31. Otherwise hold.', owner: 'Angie' },
-      { id: 'cp-2026-12-15', date: '2026-12-15', title: 'Airin decisions', check: 'Year-end kids clearance (extra 20% test) and the January price increase and AOV target.', owner: 'Airin' },
+      { id: 'cp-2026-12-15', date: '2026-12-15', title: 'Airin decisions', check: 'Fixed marketing base for January (back to the Q1 level of ~$27.5K a month, or not); the January price increase (10% planned) and AOV target; year-end kids clearance (extra 20% test); Nordstrom sell-through by style and DTC-first launches.', owner: 'Airin' },
       { id: 'cp-2026-12-19', date: '2026-12-19', title: 'Checkpoint 4 and January approval', check: 'Peak-season targets confirmed; engagement content bank complete; Pinterest ads against breakeven (Pinterest-attributed sales cover the $3K).', decision: 'Approve the January budget plan. Pinterest under breakeven → discuss with two months of data.', owner: 'Angie, Airin' },
       { id: 'cp-2026-12-26', date: '2026-12-26', title: 'The flip', check: 'Engaged hub live, welcome flow switched, bridal ads on, Meta budget moved to bridal prospecting.', owner: 'Angie, Ting, Karina' },
       { id: 'cp-2027-01-02', date: '2027-01-02', title: 'January lift 1', check: 'Paid MER at or above 6.0x and ads-only CAC under $30.', decision: 'Lift 10–15% or hold.', owner: 'Angie' },
-      { id: 'cp-2027-01-09', date: '2027-01-09', title: 'January lift 2', check: 'Same test; conversion rate through the price increase; bundle attach rate; list growth pace.', decision: 'Second lift or hold. Tells us whether $408K is live or $370K is the month.', owner: 'Angie' },
+      { id: 'cp-2027-01-09', date: '2027-01-09', title: 'January lift 2 and the efficiency read', check: 'Paid MER against last January\'s 9.5x (October was 5.5x); conversion through the price increase; flower-girl attach rate; list growth pace.', decision: 'Second lift or hold. If paid MER is near 5.5x, fully loaded CAC lands near $50 and the three options (cut the fixed base harder, accept a higher CAC through peak, or reduce spend and volume together) go to Airin with numbers today.', owner: 'Angie, Airin' },
       { id: 'cp-2027-01-16', date: '2027-01-16', title: 'January lift 3', check: 'Same test; influencer content check-in.', decision: 'Third lift or hold.', owner: 'Angie' },
       { id: 'cp-2027-01-23', date: '2027-01-23', title: 'January lift 4 and February brief', check: 'Pace to $370K; retargeting pool sizes (150K Meta, 60K Pinterest); bundle attach rate (under 10% → revisit).', decision: 'Fourth lift or hold; February creative brief to Michelle and Astrid.', owner: 'Angie' },
-      { id: 'cp-2027-02-02', date: '2027-02-02', title: 'January wrap', check: 'January against the brief; whether the three conditions for a $35 fully loaded CAC held.', decision: 'Set the February–March plan and confirm or move the $35 target.', owner: 'Angie, Airin' },
+      { id: 'cp-2027-02-02', date: '2027-02-02', title: '90-day review', check: 'December and January against the plan table: new customers year over year, revenue on the gross-less-discounts basis, fully loaded CAC, returns rate, and whether the three conditions for $35 held.', decision: 'If both months missed the new-customer targets, the plan changes, not the targets. Set the February–March plan.', owner: 'Angie, Airin' },
     ],
   },
   inventory: { mode: 'standard' },
