@@ -11,7 +11,8 @@ import GoalPlan from '@/src/components/GoalPlan';
 import { effectiveGoals } from '@/src/lib/client';
 
 interface MonthGoal { month: string; revenueGoal: number; adBudget: number; pinned?: boolean }
-interface MonthActual { revenue: number; adSpend: number }
+interface MonthActual { revenue: number; adSpend: number; newCustomers?: number }
+type DailyRow = { date: string; revenue: number; netSales?: number; grossLessDiscounts?: number; adSpend: number; newCustomers?: number };
 
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -30,18 +31,22 @@ function monthKey(y: number, m: number): string {
 // otherwise the month-end pace projection counts today's revenue without
 // counting today as an elapsed day and lands way above the Overview's
 // forecast for the same month.
-// Goals track NET sales (the annual target is net) — falls back to total sales
-// for days where net isn't reported.
-function byMonth(daily: { date: string; revenue: number; netSales?: number; adSpend: number }[]): Record<string, MonthActual> {
+// Goals track the client's MER basis: NET sales by default (the annual target
+// is net), or gross sales less discounts for a client whose targets are set
+// before returns (Kailee P). Falls back to total sales for days where the
+// basis isn't reported.
+function byMonth(daily: DailyRow[], basis: 'net' | 'gross_less_discounts' = 'net'): Record<string, MonthActual> {
   const t = pstToday();
   const todayStr = `${t.y}-${String(t.m).padStart(2, '0')}-${String(t.d).padStart(2, '0')}`;
   const out: Record<string, MonthActual> = {};
   for (const r of daily) {
     const k = (r.date || '').slice(0, 7);
     if (!k || r.date >= todayStr) continue;
-    if (!out[k]) out[k] = { revenue: 0, adSpend: 0 };
-    out[k].revenue += (r.netSales || r.revenue) || 0;
+    if (!out[k]) out[k] = { revenue: 0, adSpend: 0, newCustomers: 0 };
+    const gld = basis === 'gross_less_discounts' ? r.grossLessDiscounts : undefined;
+    out[k].revenue += (gld || r.netSales || r.revenue) || 0;
     out[k].adSpend += r.adSpend || 0;
+    out[k].newCustomers = (out[k].newCustomers || 0) + (r.newCustomers || 0);
   }
   return out;
 }
@@ -117,7 +122,7 @@ export default function GoalsContent() {
     // quarter-sized chunks and merge. A silent failure here used to blank
     // the whole Actual/Forecast column AND corrupt auto-plan's math.
     (async () => {
-      type Day = { date: string; revenue: number; netSales?: number; adSpend: number };
+      type Day = DailyRow;
       const tryFetch = async (url: string): Promise<{ metrics?: { aov?: number }; revenueData: Day[] } | null> => {
         try {
           const r = await fetch(url, { cache: 'no-store' });
@@ -142,17 +147,17 @@ export default function GoalsContent() {
         d = merged.length ? { revenueData: merged } : null;
       }
       if (d) {
-        setActuals(byMonth(d.revenueData));
+        setActuals(byMonth(d.revenueData, client.revenue.merBasis ?? 'net'));
         if (d.metrics?.aov) setAov(d.metrics.aov);
         setActualsError(null);
       } else {
         setActualsError('Monthly actuals could not be loaded right now — the Actual column and auto-plan need them. Refresh in a minute.');
       }
     })();
-    cachedJson<{ source?: string; revenueData?: { date: string; revenue: number; netSales?: number; adSpend: number }[] }>(
+    cachedJson<{ source?: string; revenueData?: DailyRow[] }>(
       `/api/windsor?tf=custom&date_from=${year - 1}-01-01&date_to=${year - 1}-12-31`,
       d => {
-        if (isLiveOverviewSource(d.source)) setLastYear(byMonth(d.revenueData || []));
+        if (isLiveOverviewSource(d.source)) setLastYear(byMonth(d.revenueData || [], client.revenue.merBasis ?? 'net'));
       }
     );
     fetch('/api/notes/months', { cache: 'no-store' })

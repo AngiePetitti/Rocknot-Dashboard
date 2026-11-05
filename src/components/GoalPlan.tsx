@@ -9,7 +9,7 @@ import { useClient } from '@/src/components/ClientProvider';
 import { formatCurrency } from '@/src/lib/utils';
 import type { Checkpoint, MonthPlan } from '@/src/lib/client';
 
-interface Actual { revenue: number; adSpend: number }
+interface Actual { revenue: number; adSpend: number; newCustomers?: number }
 interface Review { reviewedAt: string; by?: string; note?: string }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -86,6 +86,7 @@ export default function GoalPlan({ actuals }: { actuals: Record<string, Actual> 
               <tr className="text-left text-xs font-semibold text-gray-400 uppercase">
                 <th className="pb-2 pr-4">Month</th>
                 <th className="pb-2 pr-4">Revenue goal</th>
+                <th className="pb-2 pr-4">New customers</th>
                 <th className="pb-2 pr-4">Ad budget</th>
                 <th className="pb-2 pr-4">Paid MER needed</th>
                 <th className="pb-2 pr-4">Fully loaded CAC</th>
@@ -106,6 +107,10 @@ export default function GoalPlan({ actuals }: { actuals: Record<string, Actual> 
                     <tr className={`border-t border-gray-50 align-top ${cur ? 'bg-emerald-50/40' : ''}`}>
                       <td className="py-2 pr-4 whitespace-nowrap font-semibold text-gray-800">{monthLabel(p.month)}{cur && <span className="ml-1 text-[10px] font-semibold text-emerald-700">now</span>}</td>
                       <td className="py-2 pr-4 whitespace-nowrap text-gray-800">{k$(p.revenueGoal)}{p.stretchGoal ? <span className="text-gray-400"> · stretch {k$(p.stretchGoal)}</span> : null}</td>
+                      <td className="py-2 pr-4 whitespace-nowrap text-gray-800">
+                        {p.newCustomerGoal != null ? p.newCustomerGoal.toLocaleString() : '—'}
+                        {a?.newCustomers != null && a.newCustomers > 0 && p.newCustomerGoal ? <span className={`block text-[11px] ${a.newCustomers >= p.newCustomerGoal ? 'text-emerald-700' : 'text-gray-500'}`}>{a.newCustomers.toLocaleString()} so far</span> : null}
+                      </td>
                       <td className="py-2 pr-4 whitespace-nowrap text-gray-800">{k$(p.adBudget)}{p.adBudgetMax ? <span className="text-gray-400"> → {k$(p.adBudgetMax)} if gates pass</span> : null}</td>
                       <td className="py-2 pr-4 whitespace-nowrap text-gray-800">{needMer ? `${needMer.toFixed(1)}x` : '—'}{needMerMax ? <span className="text-gray-400"> · {needMerMax.toFixed(1)}x at max</span> : null}</td>
                       <td className="py-2 pr-4 whitespace-nowrap text-gray-800">{p.targetFullyLoadedCac != null ? `$${p.targetFullyLoadedCac} target` : '—'}{p.fullyLoadedCacCeiling != null ? <span className="text-gray-400"> · ${p.fullyLoadedCacCeiling} ceiling</span> : null}</td>
@@ -122,7 +127,7 @@ export default function GoalPlan({ actuals }: { actuals: Record<string, Actual> 
                     {p.rule && (
                       <tr className={`${cur ? 'bg-emerald-50/40' : ''}`}>
                         <td />
-                        <td colSpan={6} className="pb-2 pr-4 text-[11px] text-gray-500 leading-snug">{p.rule}</td>
+                        <td colSpan={7} className="pb-2 pr-4 text-[11px] text-gray-500 leading-snug">{p.rule}</td>
                       </tr>
                     )}
                   </Fragment>
