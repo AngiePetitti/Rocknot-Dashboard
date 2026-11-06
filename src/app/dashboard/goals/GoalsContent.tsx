@@ -264,7 +264,9 @@ export default function GoalsContent() {
     setGoals(prev => {
       const base = prev[k] ?? { month: k, revenueGoal: 0, adBudget: 0 };
       // Hand-edited months pin themselves so auto-plan won't overwrite them.
-      return { ...prev, [k]: { ...base, [field]: value, pinned: true } };
+      // Editing revenue also recomputes that month's ad budget at its MER target.
+      const extra = field === 'revenueGoal' ? { adBudget: Math.round(value / merFor(k) / 100) * 100 } : {};
+      return { ...prev, [k]: { ...base, [field]: value, ...extra, pinned: true } };
     });
     setDirty(true);
     // Editing a month's revenue goal re-balances the other (unpinned) months
