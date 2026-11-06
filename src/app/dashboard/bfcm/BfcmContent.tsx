@@ -123,7 +123,7 @@ export default function BfcmContent() {
                   {plan.window.from.slice(5).replace('-', '/')} → {plan.window.to.slice(5).replace('-', '/')}
                 </span>
                 {plan.goals.revenue > 0 && (
-                  <span className="text-[11px] font-semibold bg-white border border-green-200 text-green-700 rounded-full px-2 py-0.5">Goal {formatCurrency(plan.goals.revenue, true)}</span>
+                  <span className="text-[11px] font-semibold bg-white border border-green-200 text-green-700 rounded-full px-2 py-0.5">Sale goal {formatCurrency(plan.goals.revenue, true)}</span>
                 )}
                 {plan.goals.adSpend > 0 && (
                   <span className="text-[11px] font-semibold bg-white border border-amber-200 text-amber-700 rounded-full px-2 py-0.5">Spend cap {formatCurrency(plan.goals.adSpend, true)}</span>
@@ -181,8 +181,8 @@ export default function BfcmContent() {
                 <label className="text-xs text-gray-500 md:col-span-2">The plan (audiences, cadence, what we are doing differently this year)<textarea value={d.summary} onChange={e => setDraft({ ...d, summary: e.target.value })} rows={4} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></label>
                 <label className="text-xs text-gray-500 md:col-span-2">Offers (sitewide %, tiers, gift with purchase, codes, exclusions)<textarea value={d.offers} onChange={e => setDraft({ ...d, offers: e.target.value })} rows={3} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 md:col-span-2">
-                  <label className="text-xs text-gray-500">Revenue goal $<input type="number" value={d.goals.revenue || ''} onChange={e => setDraft({ ...d, goals: { ...d.goals, revenue: Number(e.target.value) || 0 } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
-                  <label className="text-xs text-gray-500">Ad spend goal $<input type="number" value={d.goals.adSpend || ''} onChange={e => setDraft({ ...d, goals: { ...d.goals, adSpend: Number(e.target.value) || 0 } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
+                  <label className="text-xs text-gray-500">Sale window revenue goal $ (not monthly)<input type="number" value={d.goals.revenue || ''} onChange={e => setDraft({ ...d, goals: { ...d.goals, revenue: Number(e.target.value) || 0 } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
+                  <label className="text-xs text-gray-500">Sale window ad spend goal $<input type="number" value={d.goals.adSpend || ''} onChange={e => setDraft({ ...d, goals: { ...d.goals, adSpend: Number(e.target.value) || 0 } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
                   <label className="text-xs text-gray-500">Orders goal<input type="number" value={d.goals.orders || ''} onChange={e => setDraft({ ...d, goals: { ...d.goals, orders: Number(e.target.value) || undefined } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
                   <label className="text-xs text-gray-500">Email + SMS revenue goal $<input type="number" value={d.goals.emailRevenue || ''} onChange={e => setDraft({ ...d, goals: { ...d.goals, emailRevenue: Number(e.target.value) || undefined } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
                 </div>
