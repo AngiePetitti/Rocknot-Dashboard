@@ -112,6 +112,27 @@ export default function BfcmContent() {
 
       {plan && (
         <>
+          {/* ── The sale, front and center: offer, dates, goals ── */}
+          {(plan.offers || plan.goals.revenue > 0) && (
+            <div className="rounded-2xl border border-violet-200 bg-gradient-to-r from-violet-50 to-pink-50 px-4 py-3.5 mb-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-base">🛍️</span>
+                <p className="text-sm font-bold text-gray-800">{plan.name}</p>
+                <span className="text-[11px] font-semibold bg-white border border-violet-200 text-violet-700 rounded-full px-2 py-0.5">
+                  {plan.earlyAccessFrom && plan.earlyAccessFrom !== plan.window.from ? `VIP ${plan.earlyAccessFrom.slice(5).replace('-', '/')} · ` : plan.earlyAccessFrom ? `VIP + ` : ''}
+                  {plan.window.from.slice(5).replace('-', '/')} → {plan.window.to.slice(5).replace('-', '/')}
+                </span>
+                {plan.goals.revenue > 0 && (
+                  <span className="text-[11px] font-semibold bg-white border border-green-200 text-green-700 rounded-full px-2 py-0.5">Goal {formatCurrency(plan.goals.revenue, true)}</span>
+                )}
+                {plan.goals.adSpend > 0 && (
+                  <span className="text-[11px] font-semibold bg-white border border-amber-200 text-amber-700 rounded-full px-2 py-0.5">Spend cap {formatCurrency(plan.goals.adSpend, true)}</span>
+                )}
+              </div>
+              {plan.offers && <p className="text-xs text-gray-600 mt-2 whitespace-pre-wrap">{plan.offers}</p>}
+            </div>
+          )}
+
           {/* ── Plan at the top ── */}
           <Card accentColor="#f59e0b" className="mb-4">
             <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
