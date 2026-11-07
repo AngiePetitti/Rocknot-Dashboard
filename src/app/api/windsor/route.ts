@@ -23,7 +23,7 @@ import { cacheHeaders } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { fetchMetaToday, fetchMetaDaily } from '@/src/lib/metaLive';
 import { fetchSnapToday } from '@/src/lib/snapLive';
-import { metaAccountNameMatch, hasPlatform, windsorParams, usesDirectData, merBasis } from '@/src/lib/client';
+import { metaAccountNameMatch, hasPlatform, windsorParams, usesDirectData, merBasis, getClient } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -637,8 +637,9 @@ export async function GET(request: NextRequest) {
     // "To" left at today) would otherwise go to the Windsor REST path for the
     // whole span and time out. Serve it from BigQuery through yesterday
     // instead; the one missing day is flagged below like any other lag.
+    // Kailee P only (per Angie, Nov 7 2026): other clients keep the original path.
     let trimmedToYesterday = false;
-    if (isCustom && dateTo >= todayStr && dateFrom && dateFrom < addDays(todayStr, -31)) {
+    if (getClient().id === 'kaileep' && isCustom && dateTo >= todayStr && dateFrom && dateFrom < addDays(todayStr, -31)) {
       currentParams = { date_from: dateFrom, date_to: yesterdayStr };
       trimmedToYesterday = true;
     }
