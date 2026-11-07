@@ -643,25 +643,34 @@ export async function GET(request: NextRequest) {
 
       let bqPrior = null;
       let bqPriorLabel = '';
+      let priorError: string | null = null;
       if (withCompare) {
-        if (compareMode !== 'prior') {
-          // Same dates one month / one year earlier.
-          const pr = priorRangeFor(compareMode, isCustom ? 'custom' : tf, currentParams.date_from, currentParams.date_to);
-          const p = await getOverview(pr.from, pr.to);
-          bqPrior = p.metrics;
-          bqPriorLabel = pr.label;
-        } else if (isCustom && dateFrom && dateTo) {
-          const days = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1;
-          const priorTo = addDays(dateFrom, -1);
-          const priorFrom = addDays(dateFrom, -days);
-          const p = await getOverview(priorFrom, priorTo);
-          bqPrior = p.metrics;
-          bqPriorLabel = `${priorFrom} – ${priorTo}`;
-        } else {
-          const prior = buildPriorParams(tf, todayStr, yesterdayStr);
-          const p = await getOverview(prior.params.date_from, prior.params.date_to);
-          bqPrior = p.metrics;
-          bqPriorLabel = prior.label;
+        // The comparison must never take the current period down with it: a
+        // prior range before the BigQuery history starts (last November's
+        // year-over-year is November 2024) returns the current numbers alone.
+        try {
+          if (compareMode !== 'prior') {
+            // Same dates one month / one year earlier.
+            const pr = priorRangeFor(compareMode, isCustom ? 'custom' : tf, currentParams.date_from, currentParams.date_to);
+            const p = await getOverview(pr.from, pr.to);
+            bqPrior = p.metrics;
+            bqPriorLabel = pr.label;
+          } else if (isCustom && dateFrom && dateTo) {
+            const days = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1;
+            const priorTo = addDays(dateFrom, -1);
+            const priorFrom = addDays(dateFrom, -days);
+            const p = await getOverview(priorFrom, priorTo);
+            bqPrior = p.metrics;
+            bqPriorLabel = `${priorFrom} – ${priorTo}`;
+          } else {
+            const prior = buildPriorParams(tf, todayStr, yesterdayStr);
+            const p = await getOverview(prior.params.date_from, prior.params.date_to);
+            bqPrior = p.metrics;
+            bqPriorLabel = prior.label;
+          }
+        } catch (e) {
+          priorError = e instanceof Error ? e.message : String(e);
+          bqPrior = null;
         }
       }
 
@@ -678,6 +687,7 @@ export async function GET(request: NextRequest) {
         ...(overview.adsError ? { adsError: overview.adsError } : {}),
         ...(trimmedToYesterday ? { dataLag: true, latestAvailableDate: yesterdayStr } : {}),
         ...(bqPrior ? { priorPeriod: bqPrior, priorLabel: bqPriorLabel, compareMode } : {}),
+        ...(priorError ? { priorError } : {}),
       }, await partnerSession()), { headers: cacheHeaders(false, Boolean(currentParams.date_to) && currentParams.date_to < todayStr) });
     }
 
