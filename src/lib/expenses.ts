@@ -74,8 +74,18 @@ export interface RangeExpenses {
  * spend the dashboard measured for the same range.
  */
 export function otherMarketingFor(range: RangeExpenses, adSpend: number): number | null {
-  if (range.nonAdMarketing > 0) return range.nonAdMarketing;
-  if (range.priorYearTotalMarketing > 0) return Math.max(0, range.priorYearTotalMarketing - adSpend);
+  const prior = range.priorYearTotalMarketing || 0;
+  if (range.nonAdMarketing > 0) {
+    if (prior <= 0) return range.nonAdMarketing;
+    // The range spans both years: the sheet lines cover the current-year
+    // part; for the prior-year part take its total minus the share of the
+    // measured ad spend that falls in those days.
+    const days = (py: boolean) => range.monthsCovered.filter(m => Boolean(m.priorYear) === py).reduce((s, m) => s + m.days, 0);
+    const priorDays = days(true), allDays = priorDays + days(false);
+    const priorAds = allDays > 0 ? adSpend * (priorDays / allDays) : 0;
+    return range.nonAdMarketing + Math.max(0, prior - priorAds);
+  }
+  if (prior > 0) return Math.max(0, prior - adSpend);
   return range.monthsCovered.length ? range.nonAdMarketing : null;
 }
 

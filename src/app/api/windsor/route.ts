@@ -628,7 +628,16 @@ export async function GET(request: NextRequest) {
     // report-mixing restrictions, preset mismatches).
     // "Today" is the exception: BigQuery only updates when Windsor's scheduled
     // sync runs, so the live view goes straight to the Windsor API instead.
-    const includesToday = tfRaw === 'today' || (isCustom && dateTo >= todayStr);
+    // A long custom range that runs up to today (a "From" months back with
+    // "To" left at today) would otherwise go to the Windsor REST path for the
+    // whole span and time out. Serve it from BigQuery through yesterday
+    // instead; the one missing day is flagged below like any other lag.
+    let trimmedToYesterday = false;
+    if (isCustom && dateTo >= todayStr && dateFrom && dateFrom < addDays(todayStr, -31)) {
+      currentParams = { date_from: dateFrom, date_to: yesterdayStr };
+      trimmedToYesterday = true;
+    }
+    const includesToday = tfRaw === 'today' || (isCustom && dateTo >= todayStr && !trimmedToYesterday);
     if (isBigQueryConfigured() && !debug && !includesToday) {
       const overview = await getOverview(currentParams.date_from, currentParams.date_to);
 
@@ -667,6 +676,7 @@ export async function GET(request: NextRequest) {
         metrics: overview.metrics,
         revenueData: overview.revenueData,
         ...(overview.adsError ? { adsError: overview.adsError } : {}),
+        ...(trimmedToYesterday ? { dataLag: true, latestAvailableDate: yesterdayStr } : {}),
         ...(bqPrior ? { priorPeriod: bqPrior, priorLabel: bqPriorLabel, compareMode } : {}),
       }, await partnerSession()), { headers: cacheHeaders(false, Boolean(currentParams.date_to) && currentParams.date_to < todayStr) });
     }

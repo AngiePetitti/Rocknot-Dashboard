@@ -15,8 +15,12 @@ export default function TimeframeSelector() {
   const compareTo = (['prior', 'month', 'year'].includes(searchParams.get('compare_to') || '') ? searchParams.get('compare_to') : 'prior') as 'prior' | 'month' | 'year';
 
   const [showCustom, setShowCustom] = useState(current === 'custom');
+  // "To" starts empty on purpose: defaulting it to today meant picking a
+  // "From" in a past month and tapping Apply silently asked for a range
+  // running up to today (a year of data for "last November").
   const [from, setFrom] = useState(dateFrom || '');
-  const [to, setTo] = useState(dateTo || getTodayStr());
+  const [to, setTo] = useState(dateTo || '');
+  const [month, setMonth] = useState(dateFrom && dateTo && dateFrom.slice(0, 7) === dateTo.slice(0, 7) ? dateFrom.slice(0, 7) : '');
   const [compare, setCompare] = useState(compareOn);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -36,16 +40,34 @@ export default function TimeframeSelector() {
     router.push(`${pathname}?${params.toString()}`);
   }
 
-  function handleCustomApply() {
-    if (!from || !to) return;
+  function applyRange(f: string, t: string) {
+    if (!f || !t) return;
     const params = new URLSearchParams(searchParams.toString());
     params.set('tf', 'custom');
-    params.set('date_from', from);
-    params.set('date_to', to);
+    params.set('date_from', f);
+    params.set('date_to', t);
     if (compare) params.set('compare', 'true');
     else params.delete('compare');
     router.push(`${pathname}?${params.toString()}`);
   }
+
+  function handleCustomApply() { applyRange(from, to); }
+
+  // Whole-month quick pick ("last November"): first to last day, capped at today.
+  function handleMonthPick(ym: string) {
+    setMonth(ym);
+    if (!/^\d{4}-\d{2}$/.test(ym)) return;
+    const [y, m] = ym.split('-').map(Number);
+    const first = `${ym}-01`;
+    const lastDay = new Date(y, m, 0).getDate();
+    let last = `${ym}-${String(lastDay).padStart(2, '0')}`;
+    const today = getTodayStr();
+    if (last > today) last = today;
+    setFrom(first); setTo(last);
+    applyRange(first, last);
+  }
+
+  const rangeDays = from && to && to >= from ? Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1 : 0;
 
   function handleCompareToggle(val: boolean) {
     setCompare(val);
@@ -146,12 +168,23 @@ export default function TimeframeSelector() {
       {showCustom && (
         <div ref={panelRef} className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2 sm:gap-3 bg-white border border-gray-200 rounded-xl p-3 shadow-md w-full sm:w-auto">
           <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-400 font-medium">Whole month</label>
+            <input
+              type="month"
+              value={month}
+              max={getTodayStr().slice(0, 7)}
+              onChange={e => handleMonthPick(e.target.value)}
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+          </div>
+          <span className="hidden sm:block text-[11px] text-gray-300 pb-2">or</span>
+          <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-400 font-medium">From</label>
             <input
               type="date"
               value={from}
               max={to || getTodayStr()}
-              onChange={e => setFrom(e.target.value)}
+              onChange={e => { setFrom(e.target.value); setMonth(''); }}
               className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-300"
             />
           </div>
@@ -162,17 +195,20 @@ export default function TimeframeSelector() {
               value={to}
               min={from}
               max={getTodayStr()}
-              onChange={e => setTo(e.target.value)}
+              onChange={e => { setTo(e.target.value); setMonth(''); }}
               className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-300"
             />
           </div>
-          <button
-            onClick={handleCustomApply}
-            disabled={!from || !to}
-            className="px-4 py-1.5 bg-violet-400 text-white text-xs font-semibold rounded-lg hover:bg-violet-500 disabled:opacity-40 transition-colors"
-          >
-            Apply
-          </button>
+          <div className="flex flex-col gap-1">
+            {rangeDays > 0 && <span className="text-[11px] text-gray-400">{rangeDays} day{rangeDays === 1 ? '' : 's'}{rangeDays > 120 ? ' · long ranges load slowly' : ''}</span>}
+            <button
+              onClick={handleCustomApply}
+              disabled={!from || !to}
+              className="px-4 py-1.5 bg-violet-400 text-white text-xs font-semibold rounded-lg hover:bg-violet-500 disabled:opacity-40 transition-colors"
+            >
+              Apply
+            </button>
+          </div>
         </div>
       )}
     </div>
