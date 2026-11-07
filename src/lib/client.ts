@@ -472,7 +472,8 @@ const KAILEEP: ClientProfile = {
     qbAccountMatch: 'kailee', grossMarginPct: 89, // per Airin, Sep 2026: ~89% gross margin across the board
     // "2026 Marketing Budgeting Sheet - SHOPIFY ONLY", tab FOR DASHBOARD (Oct 2026, per Angie).
     expensesSheet: { id: '1Zl7XNRfsruSxyGoPDcTGPYr3z7Pabu4E5qYdnbQkjDg', tab: 'FOR DASHBOARD', year: 2026 },
-    hiddenMonthlyCost: 8000, // agency retainer, folded into other marketing (not itemised)
+    // No hidden retainer: Airin carries the agency fee in the sheet's "PAID ADS"
+    // row from Nov 2026 (confirmed Nov 7, 2026), so adding it here double-counted it.
   },
   revenue: { includeReturnFees: true, merBasis: 'gross_less_discounts' }, // Kailee P charges a return fee and keeps it; MER on gross − discounts (before returns)
   windsor: {
@@ -537,10 +538,11 @@ const KAILEEP: ClientProfile = {
     // Seasonal guardrails agreed with Airin (Oct 30, 2026). Peak and slow
     // months come from 2024–2025 online-store sales: Jan–Aug averages ~30%
     // more per month than Sep–Dec; July is the biggest month. Fully loaded
-    // figures include the agency retainer (finance.hiddenMonthlyCost).
+    // figures count every non-media line on the budgeting sheet (the agency
+    // retainer is in its "PAID ADS" row) plus live ad spend.
     seasons: [
       { name: 'Peak season', months: [1, 2, 3, 4, 5, 6, 7, 8], targetMer: 6.5, merFloor: 6.0, merLabel: '6.5–7.5x', targetFullyLoadedMer: 4.25, fullyLoadedFloor: 3.8, fullyLoadedLabel: '4.25–4.5x', targetCac: 28, cacCeiling: 30, cacLabel: '$25–28', targetFullyLoadedCac: 35, fullyLoadedCacCeiling: 38, posture: 'Scale 10–15% a week when performance supports it; no increases while a floor is breached.' },
-      { name: 'Slow season', months: [9, 10, 11, 12], targetMer: 5.5, merFloor: 5.0, merLabel: '5.5x', targetFullyLoadedMer: 3.5, fullyLoadedFloor: 3.3, fullyLoadedLabel: '3.5–3.8x', targetCac: 30, cacCeiling: 35, cacLabel: '$28–30', targetFullyLoadedCac: 45, fullyLoadedCacCeiling: 50, posture: 'Hold: budget changes at most 10–15% a week, no increases while performance is below a floor. BFCM (Nov 25–30) is judged on its own.' },
+      { name: 'Slow season', months: [9, 10, 11, 12], targetMer: 5.5, merFloor: 5.0, merLabel: '5.5x', targetFullyLoadedMer: 3.5, fullyLoadedFloor: 3.3, fullyLoadedLabel: '3.5–3.8x', targetCac: 30, cacCeiling: 35, cacLabel: '$28–30', targetFullyLoadedCac: 42, fullyLoadedCacCeiling: 48, posture: 'Hold: budget changes at most 10–15% a week, no increases while performance is below a floor. BFCM (Nov 25–30) is judged on its own.' },
     ],
     // 90-day growth plan (Nov 5, 2026 memo to Airin). Revenue is gross sales
     // less discounts, all channels except Nordstrom (Airin's basis and the
@@ -552,11 +554,13 @@ const KAILEEP: ClientProfile = {
     // the traffic back (Google rebuild, brand defence vs Nordstrom, email
     // tagging, kids) with a 10% price rise on top. The floor is where the
     // plan changes (spend, fixed costs or both), not the target.
+    // Fully loaded CAC = live ad spend + the sheet's non-media lines (~$25.9K
+    // a month planned for Nov–Dec, retainer included) ÷ new customers.
     plan: [
-      { month: '2026-11', revenueGoal: 240000, floorGoal: 225000, newCustomerGoal: 1550, newCustomerFloor: 1500, adBudget: 44000, targetFullyLoadedCac: 50, fullyLoadedCacCeiling: 52, rule: 'Meta ramp read on Nov 7: continue only if blended CAC ≤ $28 and paid MER ≥ 5.3x, otherwise 15% back to Google. Google Shopping and non-brand rebuilt toward $28K by Dec 1. BFCM (Nov 25–30) judged on its own.' },
-      { month: '2026-12', revenueGoal: 270000, floorGoal: 250000, newCustomerGoal: 1715, newCustomerFloor: 1575, adBudget: 40000, adBudgetMax: 44000, targetFullyLoadedCac: 43, fullyLoadedCacCeiling: 48, aovTarget: 140, rule: 'Google-first at $28K (incl. kids), Meta $12–14K, Pinterest $3K top of funnel on breakeven, brand defence on "kailee p nordstrom". Start at $40K; lift toward $44K only if paid MER ≥ 6.0x on Dec 5 and again on Dec 12, extra into Dec 26–31. Under 5.5x on Dec 5 → hold at $40K. Target needs 6.75x paid MER (Oct 5.5x, last Dec 10.2x) and ~109K human sessions vs 100K last December.' },
-      { month: '2027-01', revenueGoal: 440000, floorGoal: 400000, newCustomerGoal: 2450, newCustomerFloor: 2300, adBudget: 44000, adBudgetMax: 50000, targetFullyLoadedCac: 32, fullyLoadedCacCeiling: 38, aovTarget: 155, rule: 'Target needs ~155K human sessions at this year\'s 1.9% conversion (last Jan 146K, Jan 2025 160K) and 10x paid MER (last Jan 9.5x plus the 10% price rise). Lift 10–15% on Jan 2, 9, 16 and 23 only while paid MER ≥ 6.0x and ads-only CAC < $30. Jan 9 reads conversion through the price increase; if paid MER is near October\'s 5.5x instead, fully loaded CAC is ~$50 and the fixed-base / spend decision goes to Airin that day.' },
-      { month: '2027-02', revenueGoal: 412000, floorGoal: 375000, newCustomerGoal: 2350, newCustomerFloor: 2250, adBudget: 42000, targetFullyLoadedCac: 32, fullyLoadedCacCeiling: 35, aovTarget: 155, rule: '$35 or better holds only if the fixed marketing base is back at the Q1 level (~$27.5K a month), women\'s returns are moving from 25.5% toward 21% of gross, and the price increase landed without a conversion drop. Feb 2 is the 90-day review: if Dec and Jan both came in under their floors, the plan changes, not the targets.' },
+      { month: '2026-11', revenueGoal: 240000, floorGoal: 225000, newCustomerGoal: 1550, newCustomerFloor: 1500, adBudget: 44000, targetFullyLoadedCac: 45, fullyLoadedCacCeiling: 48, rule: 'Meta ramp read on Nov 7: continue only if blended CAC ≤ $28 and paid MER ≥ 5.3x, otherwise 15% back to Google. Google Shopping and non-brand rebuilt toward $28K by Dec 1. BFCM (Nov 25–30) judged on its own.' },
+      { month: '2026-12', revenueGoal: 270000, floorGoal: 250000, newCustomerGoal: 1715, newCustomerFloor: 1575, adBudget: 40000, adBudgetMax: 44000, targetFullyLoadedCac: 38, fullyLoadedCacCeiling: 43, aovTarget: 140, rule: 'Google-first at $28K (incl. kids), Meta $12–14K, Pinterest $3K top of funnel on breakeven, brand defence on "kailee p nordstrom". Start at $40K; lift toward $44K only if paid MER ≥ 6.0x on Dec 5 and again on Dec 12, extra into Dec 26–31. Under 5.5x on Dec 5 → hold at $40K. Target needs 6.75x paid MER (Oct 5.5x, last Dec 10.2x) and ~109K human sessions vs 100K last December.' },
+      { month: '2027-01', revenueGoal: 440000, floorGoal: 400000, newCustomerGoal: 2450, newCustomerFloor: 2300, adBudget: 44000, adBudgetMax: 50000, targetFullyLoadedCac: 29, fullyLoadedCacCeiling: 35, aovTarget: 155, rule: 'Target needs ~155K human sessions at this year\'s 1.9% conversion (last Jan 146K, Jan 2025 160K) and 10x paid MER (last Jan 9.5x plus the 10% price rise). Lift 10–15% on Jan 2, 9, 16 and 23 only while paid MER ≥ 6.0x and ads-only CAC < $30. Jan 9 reads conversion through the price increase; if paid MER is near October\'s 5.5x instead, fully loaded CAC is ~$50 and the fixed-base / spend decision goes to Airin that day.' },
+      { month: '2027-02', revenueGoal: 412000, floorGoal: 375000, newCustomerGoal: 2350, newCustomerFloor: 2250, adBudget: 42000, targetFullyLoadedCac: 29, fullyLoadedCacCeiling: 35, aovTarget: 155, rule: '$35 or better holds only if the fixed marketing base is back at the Q1 level (~$27.5K a month), women\'s returns are moving from 25.5% toward 21% of gross, and the price increase landed without a conversion drop. Feb 2 is the 90-day review: if Dec and Jan both came in under their floors, the plan changes, not the targets.' },
     ],
     checkpoints: [
       { id: 'cp-2026-11-07', date: '2026-11-07', title: 'Meta ramp read', check: 'Blended new-customer CAC and paid MER after the Oct 31 changes (last 7 days was $62 on Nov 3).', decision: 'Continue the ramp if blended CAC is at or under $28 and paid MER at or above 5.3x; otherwise pull Meta back 15% and move it to Google non-brand search and Shopping.', owner: 'Angie' },
