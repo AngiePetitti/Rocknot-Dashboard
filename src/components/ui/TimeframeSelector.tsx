@@ -3,11 +3,15 @@
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { useState, useRef, useEffect } from 'react';
 import { TIMEFRAMES } from '@/src/lib/utils';
+import { useClient } from '@/src/components/ClientProvider';
 
 export default function TimeframeSelector() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // Kailee P only: whole-month quick pick, an empty "To" so both dates are
+  // deliberate, and the day count. Other clients keep the original panel.
+  const monthPick = useClient().id === 'kaileep';
   const current = searchParams.get('tf') || '30d';
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
@@ -19,7 +23,7 @@ export default function TimeframeSelector() {
   // "From" in a past month and tapping Apply silently asked for a range
   // running up to today (a year of data for "last November").
   const [from, setFrom] = useState(dateFrom || '');
-  const [to, setTo] = useState(dateTo || '');
+  const [to, setTo] = useState(dateTo || (monthPick ? '' : getTodayStr()));
   const [month, setMonth] = useState(dateFrom && dateTo && dateFrom.slice(0, 7) === dateTo.slice(0, 7) ? dateFrom.slice(0, 7) : '');
   const [compare, setCompare] = useState(compareOn);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -167,17 +171,21 @@ export default function TimeframeSelector() {
       {/* Custom date range panel */}
       {showCustom && (
         <div ref={panelRef} className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2 sm:gap-3 bg-white border border-gray-200 rounded-xl p-3 shadow-md w-full sm:w-auto">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-400 font-medium">Whole month</label>
-            <input
-              type="month"
-              value={month}
-              max={getTodayStr().slice(0, 7)}
-              onChange={e => handleMonthPick(e.target.value)}
-              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-300"
-            />
-          </div>
-          <span className="hidden sm:block text-[11px] text-gray-300 pb-2">or</span>
+          {monthPick && (
+            <>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-gray-400 font-medium">Whole month</label>
+                <input
+                  type="month"
+                  value={month}
+                  max={getTodayStr().slice(0, 7)}
+                  onChange={e => handleMonthPick(e.target.value)}
+                  className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-300"
+                />
+              </div>
+              <span className="hidden sm:block text-[11px] text-gray-300 pb-2">or</span>
+            </>
+          )}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-400 font-medium">From</label>
             <input
@@ -200,7 +208,7 @@ export default function TimeframeSelector() {
             />
           </div>
           <div className="flex flex-col gap-1">
-            {rangeDays > 0 && <span className="text-[11px] text-gray-400">{rangeDays} day{rangeDays === 1 ? '' : 's'}{rangeDays > 120 ? ' · long ranges load slowly' : ''}</span>}
+            {monthPick && rangeDays > 0 && <span className="text-[11px] text-gray-400">{rangeDays} day{rangeDays === 1 ? '' : 's'}{rangeDays > 120 ? ' · long ranges load slowly' : ''}</span>}
             <button
               onClick={handleCustomApply}
               disabled={!from || !to}
