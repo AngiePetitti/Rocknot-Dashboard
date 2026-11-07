@@ -10,6 +10,12 @@ interface Props {
   tf: string; dateFrom?: string; dateTo?: string;
   /** Overview figures for the same range. */
   netSales: number; adSpend: number; newCustomers: number; cogsPct: number | null;
+  /**
+   * The sales figure MER is divided from for this client (revenue.merBasis):
+   * net sales by default, gross sales less discounts for a client whose
+   * targets are set before returns. Contribution still uses net sales.
+   */
+  merSales?: number; merBasis?: 'net' | 'gross_less_discounts';
   /** Already-fetched expenses from the parent; when given, this card does not fetch. null = parent knows there is none. */
   data?: ExpensesPayload | null;
 }
@@ -19,7 +25,7 @@ interface Props {
  * sales and live ad spend, plus every other marketing cost from the team's
  * budgeting sheet (prorated to the range). Admin-only (the API 403s otherwise).
  */
-export default function MarketingExpenses({ tf, dateFrom, dateTo, netSales, adSpend, newCustomers, cogsPct, data: given }: Props) {
+export default function MarketingExpenses({ tf, dateFrom, dateTo, netSales, adSpend, newCustomers, cogsPct, merSales, merBasis, data: given }: Props) {
   const [fetched, setData] = useState<ExpensesPayload | null>(null);
   const data = given !== undefined ? given : fetched;
   const [hidden, setHidden] = useState(false);
@@ -47,8 +53,13 @@ export default function MarketingExpenses({ tf, dateFrom, dateTo, netSales, adSp
   const cogs = cogsPct != null ? netSales * (cogsPct / 100) : null;
   const contribution = cogs != null ? netSales - cogs - totalMarketing : null;
   const margin = contribution != null && netSales > 0 ? (contribution / netSales) * 100 : null;
-  const merAds = adSpend > 0 ? netSales / adSpend : null;
-  const merAll = totalMarketing > 0 ? netSales / totalMarketing : null;
+  // MER on the client's basis (the same figure the Overview's MER cards use);
+  // contribution and margin stay on net sales.
+  const gld = merBasis === 'gross_less_discounts';
+  const merBase = gld && merSales && merSales > 0 ? merSales : netSales;
+  const merLabel = gld ? 'gross sales less discounts' : 'net sales';
+  const merAds = adSpend > 0 ? merBase / adSpend : null;
+  const merAll = totalMarketing > 0 ? merBase / totalMarketing : null;
   const cacAds = newCustomers > 0 && adSpend > 0 ? adSpend / newCustomers : null;
   const cacAll = newCustomers > 0 && totalMarketing > 0 ? totalMarketing / newCustomers : null;
   const budgetPct = r.budget > 0 ? (totalMarketing / r.budget) * 100 : null;
@@ -69,7 +80,8 @@ export default function MarketingExpenses({ tf, dateFrom, dateTo, netSales, adSp
       </div>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <div className="space-y-1.5">
-          <Row label="Net sales" value={$(netSales)} />
+          {gld && merSales && merSales > 0 && <Row label="Gross sales less discounts" value={$(merSales)} sub="the basis for MER; goals and the Overview cards use it" />}
+          <Row label="Net sales" value={$(netSales)} sub={gld ? 'after returns; the basis for cost of goods and contribution' : undefined} />
           {cogs != null && <Row label={`Cost of goods (${cogsPct}%)`} value={`− ${$(cogs)}`} neg />}
           <Row label="Ad spend (live)" value={`− ${$(adSpend)}`} neg sub={sheetVsLive != null ? `sheet has ${$(r.sheetAdSpend)} for ads · live is ${sheetVsLive >= 0 ? '+' : '−'}${Math.abs(sheetVsLive).toFixed(0)}%` : undefined} />
           <div>
@@ -89,7 +101,7 @@ export default function MarketingExpenses({ tf, dateFrom, dateTo, netSales, adSp
             : <Row label="Net contribution" value="needs a gross margin on file" strong />}
         </div>
         <div className="grid grid-cols-2 gap-3 content-start">
-          <Tile label="Fully loaded MER" value={merAll != null ? `${merAll.toFixed(2)}x` : '—'} sub={merAds != null ? `${merAds.toFixed(2)}x on ad spend alone` : 'net sales ÷ all marketing'} />
+          <Tile label="Fully loaded MER" value={merAll != null ? `${merAll.toFixed(2)}x` : '—'} sub={merAds != null ? `${merAds.toFixed(2)}x on ad spend alone · ${merLabel} ${$(merBase)}` : `${merLabel} ÷ all marketing`} />
           <Tile label="Fully loaded CAC" value={cacAll != null ? $(cacAll) : '—'} sub={cacAds != null ? `${$(cacAds)} on ad spend alone · ${newCustomers.toLocaleString()} new customers` : 'all marketing ÷ new customers'} />
           <Tile label="Total marketing" value={$(totalMarketing)} sub={`${((totalMarketing / Math.max(netSales, 1)) * 100).toFixed(1)}% of net sales`} />
           <Tile label="Vs budget" value={budgetPct != null ? `${budgetPct.toFixed(0)}%` : '—'} sub={r.budget > 0 ? `${$(r.budget)} budgeted for these days` : 'no monthly budget row'} tone={budgetPct == null ? undefined : budgetPct > 105 ? 'bad' : budgetPct < 90 ? 'good' : undefined} />

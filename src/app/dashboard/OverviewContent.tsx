@@ -1131,6 +1131,7 @@ export default function OverviewContent() {
       {!isPartner && tfRaw !== 'today' && (
         <MarketingExpenses tf={tfRaw} dateFrom={dateFrom} dateTo={dateTo} data={expenses === undefined ? undefined : expenses}
           netSales={metrics.netSales ?? metrics.totalRevenue} adSpend={metrics.netAdSpend ?? metrics.totalAdSpend}
+          merSales={metrics.merNetSales} merBasis={metrics.merBasis}
           newCustomers={metrics.newCustomers ?? 0} cogsPct={profitBasis?.cogsPct ?? (client.finance.grossMarginPct != null ? 100 - client.finance.grossMarginPct : null)} />
       )}
 
