@@ -321,9 +321,14 @@ function aggregateRows(rows: WindsorRow[]) {
     pctReturning: totalOrders > 0 ? Math.round((totalRetCust / totalOrders) * 1000) / 10 : 0,
   };
 
+  const gldBasis = merBasis() === 'gross_less_discounts';
   const revenueData = dailyData.map(d => ({
     date: d.date,
     revenue: Math.round(d.shopifyRevenue),
+    // Per-day sales on each basis so the trend chart's MER line can follow
+    // the headline MER (BigQuery rows carry the same two fields).
+    netSales: Math.round(d.shopifyNetSales),
+    ...(gldBasis ? { grossLessDiscounts: Math.round(d.shopifyMerSales) } : {}),
     orders: Math.round(d.orders),
     adSpend: Math.round(d.adSpend),
   }));
@@ -862,7 +867,7 @@ export async function GET(request: NextRequest) {
             current.revenueData[0].revenue = Math.round(liveRevenue);
             current.revenueData[0].orders = liveOrders;
           } else {
-            current.revenueData = [{ date: currentParams.date_from, revenue: Math.round(liveRevenue), orders: liveOrders, adSpend: current.metrics.totalAdSpend }];
+            current.revenueData = [{ date: currentParams.date_from, revenue: Math.round(liveRevenue), netSales: Math.round(liveNetSales || liveRevenue), ...(merBasis() === 'gross_less_discounts' ? { grossLessDiscounts: Math.round(liveMerSales) } : {}), orders: liveOrders, adSpend: current.metrics.totalAdSpend }];
           }
         }
       }
