@@ -1469,7 +1469,7 @@ export default function OverviewContent() {
                 <p className="text-xs text-gray-400">Purple = Revenue · Pink = Ad Spend · Indigo = MER (own panel below)</p>
               </div>
             </div>
-            <RevenueChart data={revenueData} merGoal={MER_GOAL} />
+            <RevenueChart data={revenueData} merGoal={MER_GOAL} merBasis={metrics.merBasis ?? client.revenue.merBasis ?? 'net'} />
           </Card>
         )}
 

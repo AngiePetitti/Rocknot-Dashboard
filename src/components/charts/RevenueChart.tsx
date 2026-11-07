@@ -19,6 +19,8 @@ interface RevenueChartProps {
   data: DailyRevenue[];
   /** MER goal drawn as a dashed line on the MER panel. */
   merGoal?: number;
+  /** The sales basis the headline MER uses (client.revenue.merBasis); the daily line follows it. */
+  merBasis?: 'net' | 'gross_less_discounts';
 }
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -37,7 +39,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-export default function RevenueChart({ data, merGoal }: RevenueChartProps) {
+export default function RevenueChart({ data, merGoal, merBasis = 'net' }: RevenueChartProps) {
   const chartData = data.map(d => ({
     date: d.date.slice(5), // MM-DD
     Revenue: d.revenue,
@@ -51,7 +53,14 @@ export default function RevenueChart({ data, merGoal }: RevenueChartProps) {
   const win = rolling ? 7 : 1;
   const merData = data.map((d, i) => {
     const slice = data.slice(Math.max(0, i - win + 1), i + 1);
-    const sales = slice.reduce((s, x) => s + ((x as { netSales?: number }).netSales ?? x.revenue), 0);
+    // Same sales basis as the headline MER: gross sales less discounts for a
+    // client whose targets are set before returns (a refund batch processed
+    // on one day must not read as a MER dip there), net sales otherwise.
+    const sales = slice.reduce((s, x) => {
+      const r = x as { netSales?: number; grossLessDiscounts?: number };
+      const gld = merBasis === 'gross_less_discounts' ? r.grossLessDiscounts : undefined;
+      return s + (gld || r.netSales || x.revenue || 0);
+    }, 0);
     const spend = slice.reduce((s, x) => s + x.adSpend, 0);
     return { date: d.date.slice(5), MER: spend > 0 ? Math.round((sales / spend) * 100) / 100 : null };
   });
