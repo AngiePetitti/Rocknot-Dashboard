@@ -3,8 +3,14 @@ import type Anthropic from '@anthropic-ai/sdk';
 
 // ── Internal data access ─────────────────────────────────────────────────
 // The analyst queries the dashboard's own APIs. Fetches forward the caller's
-// session cookie (auth middleware) and use this deployment's origin.
+// session cookie (auth middleware) and use this deployment's origin. When the
+// caller authenticated with a bearer key instead of a cookie (agent platforms
+// hitting /api/insights/ask), there is no cookie to forward, so the server
+// authenticates its own internal tool calls with CRON_SECRET — the route that
+// invoked the tools already passed the middleware's auth check.
 export function makeFetcher(origin: string, cookie: string) {
+  const internalAuth = !cookie && (process.env.CRON_SECRET || '').trim()
+    ? { authorization: `Bearer ${(process.env.CRON_SECRET || '').trim()}` } : null;
   return async (path: string, init?: { method?: string; body?: Record<string, unknown> }): Promise<Record<string, unknown> | null> => {
     try {
       const res = await fetch(`${origin}${path}`, {
@@ -12,6 +18,7 @@ export function makeFetcher(origin: string, cookie: string) {
         method: init?.method || 'GET',
         headers: {
           ...(cookie ? { cookie } : {}),
+          ...(internalAuth || {}),
           ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
         },
         ...(init?.body ? { body: JSON.stringify(init.body) } : {}),
