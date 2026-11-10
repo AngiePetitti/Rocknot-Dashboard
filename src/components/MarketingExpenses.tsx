@@ -65,6 +65,12 @@ export default function MarketingExpenses({ tf, dateFrom, dateTo, netSales, adSp
   const budgetPct = r.budget > 0 ? (totalMarketing / r.budget) * 100 : null;
   const sheetVsLive = r.sheetAdSpend > 0 && adSpend > 0 ? ((adSpend - r.sheetAdSpend) / r.sheetAdSpend) * 100 : null;
   const monthsLabel = r.monthsCovered.map(m => `${m.month}${m.days < m.daysInMonth ? ` (${m.days}/${m.daysInMonth} days)` : ''}`).join(', ');
+  // One partial month (e.g. month to date): show each sheet line's full-month
+  // figure next to its prorated share so the numbers can be matched to the sheet.
+  const partial = r.monthsCovered.filter(m => !m.priorYear);
+  const oneMonth = partial.length === 1 && partial[0].days < partial[0].daysInMonth ? partial[0] : null;
+  const monthName = oneMonth ? new Date(Number(oneMonth.month.slice(0, 4)), Number(oneMonth.month.slice(5, 7)) - 1, 1).toLocaleString('en-US', { month: 'short' }) : '';
+  const sheetAdsFull = r.lines.filter(l => l.adPlatform).reduce((s, l) => s + l.full, 0);
   const $ = (v: number) => formatCurrency(v);
   const Row = ({ label, value, sub, strong, neg }: { label: string; value: string; sub?: string; strong?: boolean; neg?: boolean }) => (
     <div className={`flex justify-between gap-3 ${strong ? 'border-t border-gray-100 pt-2 mt-1' : ''}`}>
@@ -83,15 +89,15 @@ export default function MarketingExpenses({ tf, dateFrom, dateTo, netSales, adSp
           {gld && merSales && merSales > 0 && <Row label="Gross sales less discounts" value={$(merSales)} sub="the basis for MER; goals and the Overview cards use it" />}
           <Row label="Net sales" value={$(netSales)} sub={gld ? 'after returns; the basis for cost of goods and contribution' : undefined} />
           {cogs != null && <Row label={`Cost of goods (${cogsPct}%)`} value={`− ${$(cogs)}`} neg />}
-          <Row label="Ad spend (live)" value={`− ${$(adSpend)}`} neg sub={sheetVsLive != null ? `sheet has ${$(r.sheetAdSpend)} for ads · live is ${sheetVsLive >= 0 ? '+' : '−'}${Math.abs(sheetVsLive).toFixed(0)}%` : undefined} />
+          <Row label="Ad spend (live)" value={`− ${$(adSpend)}`} neg sub={sheetVsLive != null ? (oneMonth ? `Google, Meta and Pinterest from the platforms · the sheet's ad-platform rows total ${$(sheetAdsFull)} for ${monthName}, ${$(r.sheetAdSpend)} for these ${oneMonth.days} days · live is ${sheetVsLive >= 0 ? '+' : '−'}${Math.abs(sheetVsLive).toFixed(0)}%` : `sheet has ${$(r.sheetAdSpend)} for ads · live is ${sheetVsLive >= 0 ? '+' : '−'}${Math.abs(sheetVsLive).toFixed(0)}%`) : undefined} />
           <div>
             <button type="button" onClick={() => setOpen(o => !o)} className="w-full text-left">
-              <Row label={`Other marketing ${open ? '▾' : '▸'}`} value={`− ${$(other)}`} neg sub="agency, influencer/PR, tools, email/SMS, content, photoshoots, SEO — from the sheet, prorated by day" />
+              <Row label={`Other marketing ${open ? '▾' : '▸'}`} value={`− ${$(other)}`} neg sub={`agency (the PAID ADS row), influencer/PR, tools, email/SMS, content, photoshoots, SEO — from the sheet${oneMonth ? `, ${oneMonth.days} of ${oneMonth.daysInMonth} days of each ${monthName} figure` : ', prorated by day'}`} />
             </button>
             {open && (
               <ul className="mt-1 ml-3 pl-3 border-l border-gray-100 space-y-0.5">
                 {r.lines.filter(l => !l.adPlatform).sort((a, b) => b.amount - a.amount).map(l => (
-                  <li key={l.label} className="flex justify-between text-xs text-gray-500"><span>{l.label} <span className="text-gray-300">· {l.section}</span></span><span className="tabular-nums">{$(l.amount)}</span></li>
+                  <li key={l.label} className="flex justify-between gap-3 text-xs text-gray-500"><span>{l.label} <span className="text-gray-300">· {l.section}</span></span><span className="tabular-nums shrink-0">{$(l.amount)}{oneMonth && l.full !== l.amount && <span className="text-gray-300"> of {$(l.full)} for {monthName}</span>}</span></li>
                 ))}
               </ul>
             )}
