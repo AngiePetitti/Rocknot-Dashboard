@@ -995,13 +995,13 @@ export default function OverviewContent() {
         )}
       </div>
 
-      {/* New vs Returning Customer Cards — hidden on Today: the customer
-          match hasn't settled mid-day and would misreport the split */}
+      {/* Customer cards. On Today the CAC cards still show (the live Shopify
+          split feeds them) but the New/Returning count cards stay hidden: the
+          customer match hasn't settled mid-day and would misreport the split. */}
       {metrics.newCustomers !== undefined && metrics.newCustomers > 0 && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          {tfRaw !== 'today' && (
-            <>
-              {!isPartner && (<>
+          <>
+              {tfRaw !== 'today' && !isPartner && (<>
               <MetricCard
                 title="New Customers"
                 value={String(metrics.newCustomers)}
@@ -1020,11 +1020,11 @@ export default function OverviewContent() {
               <MetricCard
                 title="New Customer CAC"
                 value={metrics.newCustomers ? formatCurrency((metrics.netAdSpend ?? metrics.totalAdSpend) / metrics.newCustomers) : '—'}
-                subtitle={`${metrics.adCreditApplied ? 'Net ad spend (credits deducted)' : 'Ad spend'} ÷ new customers · target ${goalsNow.cacLabel}${CAC_CEILING != null ? ` · ceiling $${CAC_CEILING}` : ''}`}
+                subtitle={`${metrics.adCreditApplied ? 'Net ad spend (credits deducted)' : 'Ad spend'} ÷ ${tfRaw === 'today' ? `${metrics.newCustomers.toLocaleString()} new customers so far today` : 'new customers'} · target ${goalsNow.cacLabel}${CAC_CEILING != null ? ` · ceiling $${CAC_CEILING}` : ''}`}
                 accentColor="#c7d2fe"
                 valueColor={metrics.newCustomers ? cacTone((metrics.netAdSpend ?? metrics.totalAdSpend) / metrics.newCustomers) : undefined}
               />
-              {!isPartner && expenses && metrics.newCustomers > 0 && (() => {
+              {tfRaw !== 'today' && !isPartner && expenses && metrics.newCustomers > 0 && (() => {
                 // Fully loaded CAC: the same (ad spend + other marketing) ÷ new
                 // customers the Marketing cost detail card shows, lifted up next
                 // to the ads-only CAC. Only clients with an expense sheet have it.
@@ -1049,11 +1049,10 @@ export default function OverviewContent() {
                 value={(metrics.newCustomers ?? 0) + (metrics.returningCustomers ?? 0) > 0
                   ? formatCurrency((metrics.netAdSpend ?? metrics.totalAdSpend) / ((metrics.newCustomers ?? 0) + (metrics.returningCustomers ?? 0)))
                   : '—'}
-                subtitle="Ad spend ÷ all buyers"
+                subtitle={tfRaw === 'today' ? `Ad spend ÷ all ${((metrics.newCustomers ?? 0) + (metrics.returningCustomers ?? 0)).toLocaleString()} buyers so far today` : 'Ad spend ÷ all buyers'}
                 accentColor="#bbf7d0"
               />
-            </>
-          )}
+          </>
           {(() => {
             // Per-platform margin after COGS + that platform's spend, on its
             // attributed revenue: rev × (1 − COGS%) − spend. COGS% comes from
