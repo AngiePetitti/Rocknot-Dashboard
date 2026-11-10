@@ -1024,6 +1024,26 @@ export default function OverviewContent() {
                 accentColor="#c7d2fe"
                 valueColor={metrics.newCustomers ? cacTone((metrics.netAdSpend ?? metrics.totalAdSpend) / metrics.newCustomers) : undefined}
               />
+              {!isPartner && expenses && metrics.newCustomers > 0 && (() => {
+                // Fully loaded CAC: the same (ad spend + other marketing) ÷ new
+                // customers the Marketing cost detail card shows, lifted up next
+                // to the ads-only CAC. Only clients with an expense sheet have it.
+                const ads = metrics.adCreditApplied ? (metrics.netAdSpend ?? metrics.totalAdSpend) : metrics.totalAdSpend;
+                const otherMk = otherMarketingFor(expenses.range, ads);
+                if (otherMk == null) return null;
+                const fl = (ads + otherMk) / metrics.newCustomers;
+                const tgt = goalsNow.targetFullyLoadedCac; const ceil = goalsNow.fullyLoadedCacCeiling;
+                const tone = tgt == null ? undefined : fl <= tgt ? '#22c55e' : ceil != null && fl <= ceil ? '#d97706' : '#ef4444';
+                return (
+                  <MetricCard
+                    title="Fully Loaded CAC"
+                    value={formatCurrency(fl)}
+                    subtitle={`(${formatCurrency(ads, true)} ads + ${formatCurrency(otherMk, true)} other marketing) ÷ new customers${tgt != null ? ` · target $${tgt}` : ''}${ceil != null ? ` · ceiling $${ceil}` : ''}${expenses.range.includesPlan ? ' · sheet plan figures this month' : ''}`}
+                    accentColor="#ddd6fe"
+                    valueColor={tone}
+                  />
+                );
+              })()}
               <MetricCard
                 title="Blended CAC"
                 value={(metrics.newCustomers ?? 0) + (metrics.returningCustomers ?? 0) > 0
