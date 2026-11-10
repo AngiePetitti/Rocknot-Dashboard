@@ -55,7 +55,8 @@ export interface RangeExpenses {
   sheetAdSpend: number;
   totalMarketing: number;
   budget: number;
-  lines: Array<{ label: string; section: 'paid' | 'organic'; adPlatform: boolean; amount: number }>;
+  /** amount is prorated to the range; full is the un-prorated sum of the covered months (the figure as it sits in the sheet). */
+  lines: Array<{ label: string; section: 'paid' | 'organic'; adPlatform: boolean; amount: number; full: number }>;
   monthsCovered: Array<{ month: string; days: number; daysInMonth: number; basis: ExpenseMonth['basis']; priorYear?: boolean }>;
   /** True when part of the range is this month or later (sheet holds plan numbers there). */
   includesPlan: boolean;
@@ -156,7 +157,10 @@ export function parseExpenseSheet(csv: string, year: number, title: string): Exp
     const label = (r[0] || '').trim(); const n = norm(label);
     if (!label) continue;
     if (/^total organic/.test(n)) break;                 // end of the expense block
-    if (/^organic budget/.test(n)) { section = 'organic'; continue; }
+    // The organic block starts at an ORGANIC BUDGET row, or right after TOTAL
+    // PAID SPENT on sheets without one (FOR DASHBOARD). Without this, the
+    // organic "Test" row was read as an ad-platform line.
+    if (/^organic budget|^total paid/.test(n)) { section = 'organic'; continue; }
     if (SKIP_RE.test(n)) continue;
     const byMonth = rowVals(r);
     if (!Object.values(byMonth).some(v => v !== 0)) continue;
@@ -213,7 +217,8 @@ export function expensesForRange(sheet: ExpenseSheet, from: string, to: string):
     monthsCovered.push({ month: pm.month, days, daysInMonth: dim, basis: 'actual', priorYear: true });
   }
   const w = (byMonth: Record<string, number>) => Object.entries(weights).reduce((s, [m, f]) => s + (byMonth[m] || 0) * f, 0);
-  const lines = sheet.lines.map(l => ({ label: l.label, section: l.section, adPlatform: l.adPlatform, amount: Math.round(w(l.byMonth) * 100) / 100 })).filter(l => l.amount !== 0);
+  const full = (byMonth: Record<string, number>) => Object.keys(weights).reduce((s, m) => s + (byMonth[m] || 0), 0);
+  const lines = sheet.lines.map(l => ({ label: l.label, section: l.section, adPlatform: l.adPlatform, amount: Math.round(w(l.byMonth) * 100) / 100, full: Math.round(full(l.byMonth) * 100) / 100 })).filter(l => l.amount !== 0);
   const budget = Object.entries(weights).reduce((s, [m, f]) => s + ((sheet.months.find(x => x.month === m)?.budget || 0) * f), 0);
   const sheetAdSpend = lines.filter(l => l.adPlatform).reduce((s, l) => s + l.amount, 0);
   // Fixed monthly cost from the client profile, prorated by the share of each
