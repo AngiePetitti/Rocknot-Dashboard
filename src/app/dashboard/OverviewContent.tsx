@@ -238,7 +238,8 @@ export default function OverviewContent() {
   // panel; admin-only endpoint — undefined = loading, null = none/forbidden.
   const [expenses, setExpenses] = useState<ExpensesPayload | null | undefined>(undefined);
   useEffect(() => {
-    if (tfRaw === 'today') { setExpenses(null); return; }
+    // Today included: the API prorates the month's sheet lines to the one day
+    // (month figure ÷ days in the month), which is the fixed cost of a day.
     setExpenses(undefined);
     const params = new URLSearchParams({ tf: tfRaw });
     if (dateFrom) params.set('date_from', dateFrom);
@@ -1024,7 +1025,7 @@ export default function OverviewContent() {
                 accentColor="#c7d2fe"
                 valueColor={metrics.newCustomers ? cacTone((metrics.netAdSpend ?? metrics.totalAdSpend) / metrics.newCustomers) : undefined}
               />
-              {tfRaw !== 'today' && !isPartner && expenses && metrics.newCustomers > 0 && (() => {
+              {!isPartner && expenses && metrics.newCustomers > 0 && (() => {
                 // Fully loaded CAC: the same (ad spend + other marketing) ÷ new
                 // customers the Marketing cost detail card shows, lifted up next
                 // to the ads-only CAC. Only clients with an expense sheet have it.
@@ -1038,7 +1039,7 @@ export default function OverviewContent() {
                   <MetricCard
                     title="Fully Loaded CAC"
                     value={formatCurrency(fl)}
-                    subtitle={`(${formatCurrency(ads, true)} ads + ${formatCurrency(otherMk, true)} other marketing) ÷ new customers${tgt != null ? ` · target $${tgt}` : ''}${ceil != null ? ` · ceiling $${ceil}` : ''}${expenses.range.includesPlan ? ' · sheet plan figures this month' : ''}`}
+                    subtitle={`(${formatCurrency(ads, true)} ads + ${formatCurrency(otherMk, true)} other marketing${tfRaw === 'today' ? ', one day’s share of the month' : ''}) ÷ ${tfRaw === 'today' ? `${metrics.newCustomers.toLocaleString()} new customers so far today` : 'new customers'}${tgt != null ? ` · target $${tgt}` : ''}${ceil != null ? ` · ceiling $${ceil}` : ''}${expenses.range.includesPlan ? ' · sheet plan figures this month' : ''}`}
                     accentColor="#ddd6fe"
                     valueColor={tone}
                   />
