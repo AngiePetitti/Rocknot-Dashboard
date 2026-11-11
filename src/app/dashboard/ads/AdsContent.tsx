@@ -16,6 +16,7 @@ import { useClient } from '@/src/components/ClientProvider';
 import { PLATFORMS, effectiveGoals } from '@/src/lib/client';
 import NcacBreakdown from '@/src/components/NcacBreakdown';
 import FunnelSplit from '@/src/components/FunnelSplit';
+import type { NcacData } from '@/src/lib/ncac';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
   LineChart, Line, Legend,
@@ -113,12 +114,22 @@ export default function AdsContent() {
   const [showAllAds, setShowAllAds] = useState(false);
   const [reconcile, setReconcile] = useState<ReconcileResult | null>(null);
   const [cac, setCac] = useState<{ newCustomers: number; returningCustomers: number; totalAdSpend: number; creditApplied?: number } | null>(null);
+  // Shopify's own attribution (UTM, else referrer, one bucket per order) for
+  // clients whose Ad Performance headline runs on it instead of platform claims.
+  const shopifyBasis = client.ads.attributionBasis === 'shopify';
+  const [attr, setAttr] = useState<NcacData | null>(null);
 
   useEffect(() => {
     setStatus('loading');
     const adsParams = new URLSearchParams({ tf: tfRaw });
     if (dateFrom) adsParams.set('date_from', dateFrom);
     if (dateTo) adsParams.set('date_to', dateTo);
+    setAttr(null);
+    if (shopifyBasis) {
+      const ap = new URLSearchParams(adsParams);
+      if (compareOn) { ap.set('compare', 'true'); if (compareTo !== 'prior') ap.set('compare_to', compareTo); }
+      fetch(`/api/windsor/ncac?${ap}`, { cache: 'no-store' }).then(r => r.json()).then(d => { if (d && !d.error && d.shopifyAttributed) setAttr(d); }).catch(() => setAttr(null));
+    }
 
     // Each section loads independently so the page appears as soon as the
     // platform numbers are in — the slower creative analysis fills in after.
@@ -160,7 +171,7 @@ export default function AdsContent() {
       },
       () => setCac(null)
     );
-  }, [tfRaw, dateFrom, dateTo]);
+  }, [tfRaw, dateFrom, dateTo, shopifyBasis, compareOn, compareTo]);
 
   // Comparison window: the same two calls for the prior range, so every card
   // can say whether it moved up or down against the basis the operator picked.
@@ -196,6 +207,18 @@ export default function AdsContent() {
   const priorBest = bestPlatform && priorPlatforms ? priorPlatforms.find(p => p.platform === bestPlatform.platform) : null;
   const cmp = (current: number, prior: number | null | undefined, lowerIsBetter = false) =>
     compareOn && prior != null && prior > 0 ? { current, prior, label: deltaLabel, lowerIsBetter } : undefined;
+  // Shopify-attributed figures (when the client runs on that basis and the
+  // call came back): per platform and in total, with the comparison window.
+  const shopOf = (platform: string) => attr?.platforms.find(p => p.label.toLowerCase() === platform.toLowerCase())?.shopify;
+  const shopRevenue = attr ? attr.shopifyAttributed.revenue : null;
+  const shopOrders = attr ? attr.shopifyAttributed.orders : null;
+  const shopRoas = shopRevenue != null && totalSpend > 0 ? shopRevenue / totalSpend : null;
+  const shopPct = attr && attr.storeRevenue > 0 && shopRevenue != null ? Math.round((shopRevenue / attr.storeRevenue) * 100) : null;
+  const claimedPct = attr && attr.storeRevenue > 0 ? Math.round((totalRevenue / attr.storeRevenue) * 100) : null;
+  const priorShopRevenue = attr?.prior ? attr.prior.shopifyAttributed.revenue : null;
+  const priorShopRoas = attr?.prior && attr.prior.blended.spend > 0 ? attr.prior.shopifyAttributed.revenue / attr.prior.blended.spend : null;
+  const basisLabel = attr?.revenueBasis === 'gross_less_discounts' ? 'gross sales less discounts' : 'net sales';
+  const useShop = shopifyBasis && attr != null;
   const priorNewCac = priorCac && priorCac.newCustomers > 0 ? priorCac.totalAdSpend / priorCac.newCustomers : null;
   const priorBlendedCac = priorCac && priorCac.newCustomers + priorCac.returningCustomers > 0 ? priorCac.totalAdSpend / (priorCac.newCustomers + priorCac.returningCustomers) : null;
 
@@ -296,29 +319,62 @@ export default function AdsContent() {
               accentColor="#f9a8d4"
               comparison={cmp(totalSpend, priorSpend)}
             />
-            <MetricCard
-              title="Ad-Attributed Revenue"
-              value={formatCurrency(totalRevenue)}
-              subtitle="ROAS × Spend (Meta) + Conv. Value (Google)"
-              accentColor="#c4b5fd"
-              comparison={cmp(totalRevenue, priorRevenue)}
-            />
-            <MetricCard
-              title="Blended ROAS"
-              value={formatROAS(blendedROAS)}
-              subtitle="Revenue / Spend"
-              accentColor="#86efac"
-              valueColor={blendedROAS >= ROAS_GOAL ? '#22c55e' : '#ef4444'}
-              comparison={cmp(blendedROAS, priorROAS)}
-            />
-            <MetricCard
-              title="Best Platform"
-              value={bestPlatform ? formatROAS(bestPlatform.roas) : '—'}
-              subtitle={bestPlatform?.platform || 'No data'}
-              accentColor="#fde68a"
-              comparison={bestPlatform ? cmp(bestPlatform.roas, priorBest?.roas) : undefined}
-            />
+            {useShop ? (
+              <>
+                <MetricCard
+                  title="Ad-Attributed Revenue"
+                  value={formatCurrency(shopRevenue ?? 0)}
+                  subtitle={`Shopify's record on the order (UTM tag, else referrer) · ${(shopOrders ?? 0).toLocaleString()} orders${shopPct != null ? ` · ${shopPct}% of store revenue` : ''} · ${basisLabel}`}
+                  accentColor="#c4b5fd"
+                  comparison={cmp(shopRevenue ?? 0, priorShopRevenue)}
+                />
+                <MetricCard
+                  title="Blended ROAS"
+                  value={shopRoas != null ? formatROAS(shopRoas) : '—'}
+                  subtitle={`Shopify-attributed revenue ÷ spend · platforms report ${formatROAS(blendedROAS)}`}
+                  accentColor="#86efac"
+                  comparison={shopRoas != null ? cmp(shopRoas, priorShopRoas) : undefined}
+                />
+                <MetricCard
+                  title="Platform-Reported Revenue"
+                  value={formatCurrency(totalRevenue)}
+                  subtitle={`What Meta, Google and Pinterest each claim, added up${claimedPct != null ? ` · ${claimedPct}% of store revenue` : ''} · overlapping: the same order can be counted by more than one platform`}
+                  accentColor="#fde68a"
+                  comparison={cmp(totalRevenue, priorRevenue)}
+                />
+              </>
+            ) : (
+              <>
+                <MetricCard
+                  title="Ad-Attributed Revenue"
+                  value={formatCurrency(totalRevenue)}
+                  subtitle="ROAS × Spend (Meta) + Conv. Value (Google)"
+                  accentColor="#c4b5fd"
+                  comparison={cmp(totalRevenue, priorRevenue)}
+                />
+                <MetricCard
+                  title="Blended ROAS"
+                  value={formatROAS(blendedROAS)}
+                  subtitle="Revenue / Spend"
+                  accentColor="#86efac"
+                  valueColor={blendedROAS >= ROAS_GOAL ? '#22c55e' : '#ef4444'}
+                  comparison={cmp(blendedROAS, priorROAS)}
+                />
+                <MetricCard
+                  title="Best Platform"
+                  value={bestPlatform ? formatROAS(bestPlatform.roas) : '—'}
+                  subtitle={bestPlatform?.platform || 'No data'}
+                  accentColor="#fde68a"
+                  comparison={bestPlatform ? cmp(bestPlatform.roas, priorBest?.roas) : undefined}
+                />
+              </>
+            )}
           </div>
+          {useShop && (
+            <p className="text-[11px] text-gray-400 -mt-3 mb-5">
+              Revenue and ROAS on this page use Shopify&apos;s own attribution: the UTM tag on the order, or its referrer when there is no tag, one bucket per order, so the platforms add up to store revenue instead of each claiming the same sale. It under-credits Instagram and Pinterest, whose in-app clicks often arrive untagged as direct, so platform-reported figures stay visible beside it. CAC below is ad spend ÷ Shopify first-time buyers and needs no attribution at all.
+            </p>
+          )}
 
           {/* CAC — acquisition cost for the period (hidden on Today: the
               new/returning split hasn't settled mid-day) */}
@@ -327,7 +383,7 @@ export default function AdsContent() {
               <MetricCard
                 title="New Customer CAC"
                 value={cac.newCustomers ? formatCurrency(cac.totalAdSpend / cac.newCustomers) : '—'}
-                subtitle={`${cac.creditApplied ? 'Net ad spend (credits deducted)' : 'Ad spend'} ÷ ${cac.newCustomers} new customers · target ${goalsNow.cacLabel}${CAC_CEILING != null ? ` · ceiling $${CAC_CEILING}` : ''}${goalsNow.season ? ` · ${goalsNow.season.name}` : ''}`}
+                subtitle={`${cac.creditApplied ? 'Net ad spend (credits deducted)' : 'Ad spend'} ÷ ${cac.newCustomers} Shopify first-time buyers · target ${goalsNow.cacLabel}${CAC_CEILING != null ? ` · ceiling $${CAC_CEILING}` : ''}${goalsNow.season ? ` · ${goalsNow.season.name}` : ''}`}
                 accentColor="#c7d2fe"
                 valueColor={cac.newCustomers ? cacTone(cac.totalAdSpend / cac.newCustomers) : undefined}
                 comparison={cac.newCustomers ? cmp(cac.totalAdSpend / cac.newCustomers, priorNewCac, true) : undefined}
@@ -360,6 +416,42 @@ export default function AdsContent() {
                     ⚠ Revenue/ROAS unverified — synced via Windsor and known to run high vs Snap Ads Manager. Verify in Ads Manager before budget moves, or connect the Snap API (SNAP_* keys) to make this number match Ads Manager exactly.
                   </p>
                 )}
+                {useShop ? (() => {
+                  const s = shopOf(p.platform);
+                  const sRev = s?.revenue ?? 0; const sOrders = s?.orders ?? 0;
+                  const sRoas = p.spend > 0 ? sRev / p.spend : 0;
+                  return (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                      <div>
+                        <p className="text-gray-400 uppercase font-semibold mb-0.5">Spend</p>
+                        <p className="font-bold text-gray-800">{formatCurrency(p.spend)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400 uppercase font-semibold mb-0.5">ROAS (Shopify)</p>
+                        <p className="font-bold text-gray-800">{sRev > 0 ? formatROAS(sRoas) : '—'}</p>
+                        <p className="text-[10px] text-gray-400">platform reports {p.revenue > 0 ? formatROAS(p.roas) : '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400 uppercase font-semibold mb-0.5">Revenue (Shopify)</p>
+                        <p className="font-bold text-gray-800">{sRev > 0 ? formatCurrency(sRev) : '—'}</p>
+                        <p className="text-[10px] text-gray-400">platform claims {p.revenue > 0 ? formatCurrency(p.revenue) : '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400 uppercase font-semibold mb-0.5">Orders (Shopify)</p>
+                        <p className="font-bold text-gray-800">{sOrders.toLocaleString()}</p>
+                        <p className="text-[10px] text-gray-400">platform reports {(p.conversions ?? 0).toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400 uppercase font-semibold mb-0.5">Cost / Order</p>
+                        <p className="font-bold text-gray-800">{sOrders > 0 ? formatCurrency(p.spend / sOrders) : '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400 uppercase font-semibold mb-0.5">Clicks</p>
+                        <p className="font-bold text-gray-800">{p.clicks.toLocaleString()}</p>
+                      </div>
+                    </div>
+                  );
+                })() : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                   <div>
                     <p className="text-gray-400 uppercase font-semibold mb-0.5">Spend</p>
@@ -390,6 +482,7 @@ export default function AdsContent() {
                     <p className="font-bold text-gray-800">{p.revenue > 0 ? formatCurrency(p.revenue) : <span className="text-gray-400" title="No purchase value reported for this platform">—</span>}</p>
                   </div>
                 </div>
+                )}
                 {p.attribution && <p className="text-[10px] text-gray-400 mt-3 leading-snug">{p.attribution}</p>}
               </Card>
             ))}
@@ -399,8 +492,8 @@ export default function AdsContent() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
             <Card accentColor="#c4b5fd">
               <h2 className="text-sm font-bold text-gray-700 mb-1">ROAS by Platform</h2>
-              <p className="text-xs text-gray-400 mb-4">Red dashed line = {ROAS_GOAL}x goal</p>
-              <ROASChart data={platforms} goalLine={ROAS_GOAL} />
+              <p className="text-xs text-gray-400 mb-4">{useShop ? 'Shopify-attributed revenue ÷ spend' : `Red dashed line = ${ROAS_GOAL}x goal`}</p>
+              <ROASChart data={useShop ? platforms.map(p => { const s = shopOf(p.platform); return { ...p, revenue: s?.revenue ?? 0, roas: p.spend > 0 ? (s?.revenue ?? 0) / p.spend : 0 }; }) : platforms} goalLine={useShop ? null : ROAS_GOAL} />
             </Card>
 
             <Card accentColor="#f9a8d4">
@@ -448,7 +541,7 @@ export default function AdsContent() {
               <div className="flex items-center gap-2 mb-4">
                 <span className="text-lg">💡</span>
                 <h2 className="text-sm font-bold text-gray-700">Spend Recommendations</h2>
-                <span className="text-xs bg-yellow-100 text-yellow-700 font-semibold px-2 py-0.5 rounded-full">Based on live ROAS</span>
+                <span className="text-xs bg-yellow-100 text-yellow-700 font-semibold px-2 py-0.5 rounded-full">Based on platform-reported ROAS</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {recommendations.map(rec => (
