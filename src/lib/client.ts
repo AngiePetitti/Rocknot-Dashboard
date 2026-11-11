@@ -431,6 +431,20 @@ const ROCKNOT: ClientProfile = {
       { label: '🎨 Internal Design Folder', url: 'https://drive.google.com/drive/folders/1LGEZyg5zqCCLLWgpI4lfYUjsoLAC6ia4', tone: 'purple' },
     ],
   },
+  // Marketplace + app channels (Nov 2026, per Angie). Nordstrom dropship runs
+  // through the same Dscopify app as Kailee P: Shopify records orders at full
+  // retail, Nordstrom keeps a commission and bills per customer return,
+  // neither visible in Shopify (terms below copied from Kailee P's program —
+  // confirm Rocknot's actual rates). Excluded from store sales/CAC/AOV like
+  // Kailee's. The Rocknot mobile app (built with Shopney, Nov 2026 launch)
+  // lands as its own channel; app buyers ARE store customers, so it counts in
+  // the Overview's sales, orders, AOV and MER.
+  marketplaces: [
+    { key: 'nordstrom', label: 'Nordstrom', shopifyChannel: 'Dscopify Dropship', sourceMatch: 'dscopify', commissionPct: 20, returnFee: 5, returnWindowDays: 90,
+      description: 'Nordstrom Marketplace dropship · Shopify sales channel "Dscopify Dropship" · orders at full retail; Nordstrom keeps a commission and bills per return, neither in Shopify' },
+    { key: 'app', label: 'Rocknot App', shopifyChannel: 'Shopney - Mobile App', sourceMatch: 'shopney', commissionPct: null, returnFee: null, returnWindowDays: 30, countInMer: true, countInSales: true, icon: '📱',
+      description: 'Rocknot mobile app (Shopney) · Shopify sales channel "Shopney - Mobile App" · app buyers are store customers; counted in store sales and MER' },
+  ],
   alerts: { fromName: 'Rocknot Dashboard' },
   analyst: { name: 'Cleo' },
   seedsEnabled: true,
