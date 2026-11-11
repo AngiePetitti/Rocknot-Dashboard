@@ -15,7 +15,8 @@ import { PlatformSpend } from '@/src/lib/mockData';
 
 interface ROASChartProps {
   data: PlatformSpend[];
-  goalLine?: number;
+  /** Dashed goal line; null draws none and colours every bar in its platform colour. */
+  goalLine?: number | null;
 }
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -33,7 +34,8 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-export default function ROASChart({ data, goalLine = 3.5 }: ROASChartProps) {
+export default function ROASChart({ data, goalLine: goalProp = 3.5 }: ROASChartProps) {
+  const goalLine = goalProp == null ? 0 : goalProp;
   const chartData = data.map(d => ({
     platform: d.platform,
     roas: d.roas,
@@ -59,18 +61,20 @@ export default function ROASChart({ data, goalLine = 3.5 }: ROASChartProps) {
           width={38}
         />
         <Tooltip content={<CustomTooltip />} cursor={{ fill: '#f8fafc' }} />
-        <ReferenceLine
-          y={goalLine}
-          stroke="#ef4444"
-          strokeDasharray="4 4"
-          strokeWidth={1.5}
-          label={{ value: `Goal ${goalLine}x`, fill: '#ef4444', fontSize: 10, position: 'insideTopRight' }}
-        />
+        {goalLine > 0 && (
+          <ReferenceLine
+            y={goalLine}
+            stroke="#ef4444"
+            strokeDasharray="4 4"
+            strokeWidth={1.5}
+            label={{ value: `Goal ${goalLine}x`, fill: '#ef4444', fontSize: 10, position: 'insideTopRight' }}
+          />
+        )}
         <Bar dataKey="roas" radius={[6, 6, 0, 0]}>
           {chartData.map((entry, index) => (
             <Cell
               key={`cell-${index}`}
-              fill={entry.roas >= goalLine ? entry.color : '#fca5a5'}
+              fill={goalLine > 0 && entry.roas < goalLine ? '#fca5a5' : entry.color}
               opacity={0.85}
             />
           ))}

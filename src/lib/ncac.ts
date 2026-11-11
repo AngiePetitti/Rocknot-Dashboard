@@ -11,7 +11,7 @@
 // so it under-credits social. Spend is the de-duplicated, live-patched figure
 // the Ads tab shows.
 import { shopifyql } from '@/src/lib/shopifyql';
-import { storeOnlyWhere, clientPlatforms, type PlatformKey } from '@/src/lib/client';
+import { storeOnlyWhere, clientPlatforms, getClient, type PlatformKey } from '@/src/lib/client';
 import { getAdsOverview } from '@/src/lib/bqAds';
 
 export interface NcacPlatform {
@@ -25,13 +25,24 @@ export interface NcacPlatform {
   newCustomers: number;
   /** spend ÷ estimated new customers; null when nothing was reported. */
   ncac: number | null;
-  /** Shopify's own record (last-click on the order): a floor, not the headline. */
-  shopify: { newCustomers: number; orders: number; ncac: number | null };
+  /**
+   * Shopify's own record (last-click on the order: UTM tag, else referrer).
+   * One bucket per order, so revenue here never double counts across
+   * platforms; a floor for CAC, the headline for clients on the 'shopify'
+   * attribution basis. revenue is on the client's MER basis.
+   */
+  shopify: { newCustomers: number; orders: number; ncac: number | null; revenue: number; roas: number | null };
 }
 export interface NcacSummary {
   range: { from: string; to: string };
   platforms: NcacPlatform[];
   blended: { spend: number; newCustomers: number; ncac: number | null };
+  /** Sales basis for every revenue figure below. */
+  revenueBasis: 'net' | 'gross_less_discounts';
+  /** Store revenue in the range on that basis (online store only), for "% of store revenue". */
+  storeRevenue: number;
+  /** Sum of the platforms' Shopify-attributed revenue and orders. */
+  shopifyAttributed: { revenue: number; orders: number };
   /** First-time share of buyers in the range (Shopify: (customers − returning) ÷ customers). */
   newShare: number;
   attributedNewCustomers: number;
@@ -58,12 +69,19 @@ export function classifySource(utmSource: string, utmMedium: string, refSource: 
   return test(utmSource) || test(`${utmSource} ${utmMedium}`.trim()) || test(refName) || test(refSource);
 }
 
-interface SourceRow { utmSource: string; utmMedium: string; refSource: string; refName: string; orders: number; customers: number; returning: number }
+interface SourceRow { utmSource: string; utmMedium: string; refSource: string; refName: string; orders: number; customers: number; returning: number; revenue: number }
+
+// Revenue on the client's MER basis: gross sales less discounts (before
+// returns) for clients who plan on that, net sales otherwise. ShopifyQL
+// reports discounts as a negative amount, hence the abs().
+const revenueBasis = (): 'net' | 'gross_less_discounts' => (getClient().revenue.merBasis === 'gross_less_discounts' ? 'gross_less_discounts' : 'net');
+const revenueOf = (x: Record<string, unknown>): number =>
+  revenueBasis() === 'gross_less_discounts' ? Math.max(0, num(x.gross_sales) - Math.abs(num(x.discounts))) : num(x.net_sales);
 
 const toRow = (x: Record<string, unknown>): SourceRow => ({
   utmSource: low(x.utm_campaign_source), utmMedium: low(x.utm_campaign_medium),
   refSource: low(x.order_referrer_source), refName: low(x.order_referrer_name),
-  orders: num(x.orders), customers: num(x.customers), returning: num(x.returning_customers),
+  orders: num(x.orders), customers: num(x.customers), returning: num(x.returning_customers), revenue: revenueOf(x),
 });
 
 /**
@@ -74,13 +92,14 @@ const toRow = (x: Record<string, unknown>): SourceRow => ({
  * referrer), so per platform the larger of the two counts is used: the best
  * available last-click evidence of that platform's first-time buyers.
  */
-async function fetchSourceRows(from: string, to: string): Promise<{ referrer: SourceRow[]; utm: SourceRow[]; totals: { customers: number; returning: number; newCustomers: number; orders: number } }> {
+async function fetchSourceRows(from: string, to: string): Promise<{ referrer: SourceRow[]; utm: SourceRow[]; totals: { customers: number; returning: number; newCustomers: number; orders: number; revenue: number } }> {
   const where = storeOnlyWhere();
   const range = `SINCE ${from} UNTIL ${to}`;
+  const money = 'gross_sales, discounts, net_sales';
   const [referrer, utm, totals] = await Promise.all([
-    shopifyql(`FROM sales SHOW orders, customers, returning_customers GROUP BY order_referrer_source, order_referrer_name ${where} ${range} ORDER BY orders DESC LIMIT 400`, { timeoutMs: 20000 }).then(r => r.map(toRow)),
-    shopifyql(`FROM sales SHOW orders, customers, returning_customers GROUP BY utm_campaign_source, utm_campaign_medium ${where} ${range} ORDER BY orders DESC LIMIT 400`, { timeoutMs: 20000 }).then(r => r.map(toRow)).catch(() => [] as SourceRow[]),
-    shopifyql(`FROM sales SHOW orders, customers, returning_customers, new_customers ${where} ${range}`, { timeoutMs: 15000 }).then(r => ({ customers: num(r[0]?.customers), returning: num(r[0]?.returning_customers), newCustomers: num(r[0]?.new_customers), orders: num(r[0]?.orders) })).catch(() => ({ customers: 0, returning: 0, newCustomers: 0, orders: 0 })),
+    shopifyql(`FROM sales SHOW orders, customers, returning_customers, ${money} GROUP BY order_referrer_source, order_referrer_name ${where} ${range} ORDER BY orders DESC LIMIT 400`, { timeoutMs: 20000 }).then(r => r.map(toRow)),
+    shopifyql(`FROM sales SHOW orders, customers, returning_customers, ${money} GROUP BY utm_campaign_source, utm_campaign_medium ${where} ${range} ORDER BY orders DESC LIMIT 400`, { timeoutMs: 20000 }).then(r => r.map(toRow)).catch(() => [] as SourceRow[]),
+    shopifyql(`FROM sales SHOW orders, customers, returning_customers, new_customers, ${money} ${where} ${range}`, { timeoutMs: 15000 }).then(r => ({ customers: num(r[0]?.customers), returning: num(r[0]?.returning_customers), newCustomers: num(r[0]?.new_customers), orders: num(r[0]?.orders), revenue: r[0] ? revenueOf(r[0]) : 0 })).catch(() => ({ customers: 0, returning: 0, newCustomers: 0, orders: 0, revenue: 0 })),
   ]);
   return { referrer, utm, totals };
 }
@@ -91,7 +110,7 @@ export async function fetchNcac(from: string, to: string): Promise<NcacSummary> 
     getAdsOverview(from, to).catch(() => ({ platforms: [] as Array<{ platform: string; spend: number }>, dailySpend: [] })),
   ]);
   const spendByLabel = new Map(ads.platforms.map(p => [p.platform.toLowerCase(), p.spend]));
-  type Acc = { newCustomers: number; orders: number };
+  type Acc = { newCustomers: number; orders: number; revenue: number };
   const tally = (rows: SourceRow[]) => {
     const acc = new Map<PlatformKey, Acc>();
     const other = new Map<string, Acc>();
@@ -99,12 +118,12 @@ export async function fetchNcac(from: string, to: string): Promise<NcacSummary> 
       const fresh = Math.max(0, r.customers - r.returning);
       const k = classifySource(r.utmSource, r.utmMedium, r.refSource, r.refName);
       if (k) {
-        const cur = acc.get(k) || { newCustomers: 0, orders: 0 };
-        cur.newCustomers += fresh; cur.orders += r.orders; acc.set(k, cur);
+        const cur = acc.get(k) || { newCustomers: 0, orders: 0, revenue: 0 };
+        cur.newCustomers += fresh; cur.orders += r.orders; cur.revenue += r.revenue; acc.set(k, cur);
       } else {
         const label = [r.utmSource && `utm:${r.utmSource}`, r.refName || r.refSource].filter(Boolean).join(' · ') || 'direct / untracked';
-        const cur = other.get(label) || { newCustomers: 0, orders: 0 };
-        cur.newCustomers += fresh; cur.orders += r.orders; other.set(label, cur);
+        const cur = other.get(label) || { newCustomers: 0, orders: 0, revenue: 0 };
+        cur.newCustomers += fresh; cur.orders += r.orders; cur.revenue += r.revenue; other.set(label, cur);
       }
     }
     return { acc, other };
@@ -130,15 +149,20 @@ export async function fetchNcac(from: string, to: string): Promise<NcacSummary> 
     const purchases = Math.max(0, Math.round(reported - view));
     const est = Math.round(purchases * newShare);
     // Floor: what Shopify itself recorded on the order (UTM, else referrer).
-    const a = byRef.acc.get(p.key) || { newCustomers: 0, orders: 0 };
-    const b = byUtm.acc.get(p.key) || { newCustomers: 0, orders: 0 };
+    // The referrer and UTM views overlap, so per platform the larger of the
+    // two is used for customers and, separately, for revenue and orders.
+    const a = byRef.acc.get(p.key) || { newCustomers: 0, orders: 0, revenue: 0 };
+    const b = byUtm.acc.get(p.key) || { newCustomers: 0, orders: 0, revenue: 0 };
     const floor = b.newCustomers > a.newCustomers ? b : a;
+    const rev = b.revenue > a.revenue ? b : a;
+    const revenue = Math.round(rev.revenue);
     return {
       key: p.key, label: p.label, color: p.color, spend,
       purchases, clickOnly: view > 0, newCustomers: est, ncac: est > 0 ? spend / est : null,
-      shopify: { newCustomers: floor.newCustomers, orders: floor.orders, ncac: floor.newCustomers > 0 ? spend / floor.newCustomers : null },
+      shopify: { newCustomers: floor.newCustomers, orders: rev.orders, ncac: floor.newCustomers > 0 ? spend / floor.newCustomers : null, revenue, roas: spend > 0 ? Math.round((revenue / spend) * 100) / 100 : null },
     };
   });
+  const shopifyAttributed = { revenue: platforms.reduce((s, p) => s + p.shopify.revenue, 0), orders: platforms.reduce((s, p) => s + p.shopify.orders, 0) };
   const totalSpend = platforms.reduce((s, p) => s + p.spend, 0);
   const attributed = platforms.reduce((s, p) => s + p.newCustomers, 0);
   const otherSources = Array.from(byRef.other.entries()).map(([source, v]) => ({ source, ...v })).sort((a, b) => b.newCustomers - a.newCustomers).slice(0, 8);
@@ -146,6 +170,9 @@ export async function fetchNcac(from: string, to: string): Promise<NcacSummary> 
     range: { from, to },
     platforms,
     blended: { spend: totalSpend, newCustomers: allNew, ncac: allNew > 0 ? totalSpend / allNew : null },
+    revenueBasis: revenueBasis(),
+    storeRevenue: Math.round(totals.revenue),
+    shopifyAttributed,
     newShare,
     attributedNewCustomers: attributed,
     unattributed: { newCustomers: Math.max(0, allNew - attributed), orders: Math.max(0, totals.orders - platforms.reduce((s, p) => s + p.purchases, 0)) },

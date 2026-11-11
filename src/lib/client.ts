@@ -217,6 +217,15 @@ export interface ClientProfile {
   ads: {
     platforms: PlatformKey[];
     /**
+     * What the Ad Performance headline and platform cards call "revenue".
+     * 'platform' (default): each platform's own reported purchase value,
+     * which overlaps across platforms and with email/organic (Meta and Google
+     * can both claim one order). 'shopify': Shopify's record on the order
+     * (UTM tag, else referrer), one bucket per order, so it adds up to store
+     * revenue; platform claims stay visible as a secondary figure.
+     */
+    attributionBasis?: 'shopify' | 'platform';
+    /**
      * Case-insensitive substring of the Meta ad account name. Windsor's
      * facebook feed can carry every client in the agency workspace, so
      * BigQuery and REST rows are filtered to this account. Override with the
@@ -474,6 +483,10 @@ const KAILEEP: ClientProfile = {
   shopify: { defaultDomain: 'kailee-p.myshopify.com' },
   ads: {
     platforms: ['meta', 'google', 'pinterest'],
+    // Airin's call (Nov 2026): platform-reported revenue claimed 99% of store
+    // sales month to date, so the Ad Performance page leads with Shopify's
+    // own attribution and shows the platform claims beside it.
+    attributionBasis: 'shopify',
     // Meta ad account "Kailee P. Weddings" (Windsor account name matches on 'kailee').
     metaAccountNameMatch: 'kailee',
     metaAccountNameMode: 'contains',
