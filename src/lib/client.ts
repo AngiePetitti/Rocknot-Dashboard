@@ -217,12 +217,12 @@ export interface ClientProfile {
   ads: {
     platforms: PlatformKey[];
     /**
-     * What the Ad Performance headline and platform cards call "revenue".
-     * 'platform' (default): each platform's own reported purchase value,
-     * which overlaps across platforms and with email/organic (Meta and Google
-     * can both claim one order). 'shopify': Shopify's record on the order
-     * (UTM tag, else referrer), one bucket per order, so it adds up to store
-     * revenue; platform claims stay visible as a secondary figure.
+     * Whether the Ad Performance page adds a "What Shopify says" section.
+     * 'platform' (default): platform-reported figures only. 'shopify': the
+     * same page plus a section with Shopify's record on each order (UTM tag,
+     * else referrer, one bucket per order) beside the platform claims, since
+     * platform-reported revenue overlaps across platforms and with email and
+     * organic. Neither view replaces the other.
      */
     attributionBasis?: 'shopify' | 'platform';
     /**
@@ -484,8 +484,8 @@ const KAILEEP: ClientProfile = {
   ads: {
     platforms: ['meta', 'google', 'pinterest'],
     // Airin's call (Nov 2026): platform-reported revenue claimed 99% of store
-    // sales month to date, so the Ad Performance page leads with Shopify's
-    // own attribution and shows the platform claims beside it.
+    // sales month to date, so the Ad Performance page also shows Shopify's
+    // own attribution in its own section, without changing the platform cards.
     attributionBasis: 'shopify',
     // Meta ad account "Kailee P. Weddings" (Windsor account name matches on 'kailee').
     metaAccountNameMatch: 'kailee',
