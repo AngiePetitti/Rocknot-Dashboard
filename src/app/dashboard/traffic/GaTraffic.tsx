@@ -30,6 +30,11 @@ function SortTH<K extends string>({ k, label, sort, onToggle }: { k: K; label: s
   );
 }
 const TH = ({ children }: { children: React.ReactNode }) => <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-2">{children}</th>;
+function Delta({ current, prior }: { current: number; prior?: number }) {
+  if (prior === undefined || prior === 0) return null;
+  const dv = Math.round(((current - prior) / prior) * 1000) / 10;
+  return <span className={`text-[11px] font-semibold ml-1 ${dv >= 0 ? 'text-green-500' : 'text-red-500'}`}>{dv >= 0 ? '▲' : '▼'} {Math.abs(dv)}%</span>;
+}
 const TD = ({ children, right, className = '' }: { children: React.ReactNode; right?: boolean; className?: string }) => (
   <td className={`py-2 align-top ${right ? 'text-right pl-2 tabular-nums' : 'pr-2'} ${className}`}>{children}</td>
 );
@@ -44,7 +49,7 @@ function sortDims(rows: GaDimRow[], s: Sort<DimSort>): GaDimRow[] {
 }
 
 /** Sortable source / landing-page table with CVR colouring against the site average. */
-function DimTable({ rows, siteCvr, firstCol, mono, initial = 'sessions', limit = 15, totalSessions }: { rows: GaDimRow[]; siteCvr: number; firstCol: string; mono?: boolean; initial?: DimSort; limit?: number; totalSessions: number }) {
+function DimTable({ rows, siteCvr, firstCol, mono, initial = 'sessions', limit = 15, totalSessions, priorSessions }: { rows: GaDimRow[]; siteCvr: number; firstCol: string; mono?: boolean; initial?: DimSort; limit?: number; totalSessions: number; priorSessions?: Record<string, { sessions: number }> }) {
   const { sort, toggle } = useSort<DimSort>(initial);
   const [showAll, setShowAll] = useState(false);
   const sorted = useMemo(() => sortDims(rows, sort), [rows, sort]);
@@ -73,7 +78,7 @@ function DimTable({ rows, siteCvr, firstCol, mono, initial = 'sessions', limit =
                   <span className={mono ? '' : 'font-medium text-gray-800'}>{r.label}</span>
                   {r.secondary && <span className="text-[11px] text-gray-400"> / {r.secondary}</span>}
                 </TD>
-                <TD right>{n(r.sessions)}</TD>
+                <TD right>{n(r.sessions)}{priorSessions && <Delta current={r.sessions} prior={priorSessions[r.key]?.sessions ?? 0} />}</TD>
                 <TD right className="text-gray-500">{share(r.sessions, totalSessions)}</TD>
                 <TD right className="text-gray-600">{pct(r.engagedSessions, r.sessions)}</TD>
                 <TD right className="text-gray-600">{n(r.addToCarts)}</TD>
@@ -141,17 +146,26 @@ export default function GaTraffic({ data, rangeLabel }: { data: GaData | null; r
   const chart = data.daily.map(d => ({ date: d.date.slice(5), Sessions: d.sessions, Purchases: d.purchases }));
   const tickInterval = Math.max(0, Math.floor(chart.length / 6) - 1);
   const landingTotal = data.landingPages.reduce((s, r) => s + r.sessions, 0);
+  // Comparison (when the Overview's compare toggle is on): rates compare as
+  // rates, counts as counts, each against the same measure in the prior range.
+  const p = data.prior?.totals;
+  const vs = data.prior ? `vs ${data.prior.label} (${data.prior.range.from} → ${data.prior.range.to})` : '';
+  const cmp = (current: number, prior: number | undefined) => (data.prior && prior !== undefined && prior > 0 ? { current, prior, label: vs } : undefined);
+  const rate = (a: number, b: number) => (b > 0 ? a / b : 0);
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mt-4 mb-6">
-        <MetricCard title="GA4 Sessions" value={n(t.sessions)} subtitle={t.users > 0 ? `${n(t.users)} users${t.newUsers > 0 ? ` · ${n(t.newUsers)} new` : ''}` : `${data.daily.length} days`} accentColor="#818cf8" />
-        <MetricCard title="Engagement" value={pct(t.engagedSessions, t.sessions)} subtitle={`${n(t.engagedSessions)} engaged sessions`} accentColor="#f9a8d4" />
-        <MetricCard title="Add to Cart" value={pct(t.addToCarts, t.sessions)} subtitle={`${n(t.addToCarts)} add-to-cart events`} accentColor="#fbbf24" />
-        <MetricCard title="Purchases" value={n(t.purchases)} subtitle={`${pct(t.purchases, t.sessions)} of sessions · ${$(t.revenue)} GA4 revenue`} accentColor="#34d399" />
+        <MetricCard title="GA4 Sessions" value={n(t.sessions)} subtitle={t.users > 0 ? `${n(t.users)} users${t.newUsers > 0 ? ` · ${n(t.newUsers)} new` : ''}` : `${data.daily.length} days`} accentColor="#818cf8" comparison={cmp(t.sessions, p?.sessions)} />
+        <MetricCard title="Engagement" value={pct(t.engagedSessions, t.sessions)} subtitle={`${n(t.engagedSessions)} engaged sessions`} accentColor="#f9a8d4" comparison={p ? cmp(rate(t.engagedSessions, t.sessions), rate(p.engagedSessions, p.sessions)) : undefined} />
+        <MetricCard title="Add to Cart" value={pct(t.addToCarts, t.sessions)} subtitle={`${n(t.addToCarts)} add-to-cart events`} accentColor="#fbbf24" comparison={p ? cmp(rate(t.addToCarts, t.sessions), rate(p.addToCarts, p.sessions)) : undefined} />
+        <MetricCard title="Purchases" value={n(t.purchases)} subtitle={`${pct(t.purchases, t.sessions)} of sessions · ${$(t.revenue)} GA4 revenue`} accentColor="#34d399" comparison={cmp(t.purchases, p?.purchases)} />
         <div className="col-span-2 lg:col-span-1">
-          <MetricCard title="Page Views" value={n(t.pageViews)} subtitle={t.sessions > 0 ? `${(Math.round((t.pageViews / t.sessions) * 10) / 10).toFixed(1)} per session` : ''} accentColor="#22d3ee" />
+          <MetricCard title="Page Views" value={n(t.pageViews)} subtitle={t.sessions > 0 ? `${(Math.round((t.pageViews / t.sessions) * 10) / 10).toFixed(1)} per session` : ''} accentColor="#22d3ee" comparison={cmp(t.pageViews, p?.pageViews)} />
         </div>
       </div>
+      {data.prior && (
+        <p className="text-[11px] text-gray-400 -mt-3 mb-5">Comparison: {data.prior.label}, {data.prior.range.from} → {data.prior.range.to}, {n(data.prior.totals.sessions)} GA4 sessions. Change the basis (prior period, month over month, year over year) with the compare toggle at the top.</p>
+      )}
       {data.status === 'partial' && (
         <Card className="mb-6 border-amber-100"><p className="text-xs text-amber-700">Some Google Analytics blocks didn&apos;t load: {data.error}</p></Card>
       )}
@@ -202,7 +216,7 @@ export default function GaTraffic({ data, rangeLabel }: { data: GaData | null; r
                   <div key={c.key} title={`${c.label}: ${n(c.sessions)} sessions`} style={{ width: `${(c.sessions / Math.max(1, t.sessions)) * 100}%`, background: ['#818cf8', '#f9a8d4', '#fbbf24', '#34d399', '#a78bfa', '#22d3ee', '#fb923c', '#94a3b8', '#cbd5e1'][i % 9] }} />
                 ))}
               </div>
-              <DimTable rows={data.channels} siteCvr={siteCvr} firstCol="Channel" limit={12} totalSessions={t.sessions} />
+              <DimTable rows={data.channels} siteCvr={siteCvr} firstCol="Channel" limit={12} totalSessions={t.sessions} priorSessions={data.prior?.channels} />
             </>
           )}
         </Card>

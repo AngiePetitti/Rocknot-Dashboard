@@ -41,6 +41,8 @@ export interface GaData {
   pages: GaPageRow[];
   blocks: Record<'daily' | 'sources' | 'landing' | 'pages', { ok: boolean; error?: string; fieldSet?: string }>;
   attempts?: GaAttempt[];
+  /** Comparison range (prior period, same dates last month or last year): totals and per-channel sessions. */
+  prior?: { range: { from: string; to: string }; label: string; totals: GaTotals; channels: Record<string, { sessions: number; purchases: number }> } | null;
 }
 
 export function ga4Configured(): boolean {
@@ -139,7 +141,7 @@ function rollDims(rows: Array<Record<string, unknown>>, keyOf: (r: Record<string
 }
 
 /** Pull every GA4 block for a range. Blocks fail independently. */
-export async function fetchGa4(from: string, to: string, includeAttempts = false): Promise<GaData> {
+export async function fetchGa4(from: string, to: string, includeAttempts = false, prior?: { from: string; to: string; label: string } | null): Promise<GaData> {
   const range = { from, to };
   const base: GaData = {
     status: 'ok', range, account: windsorAccount('google_analytics'), totals: emptyTotals(), daily: [], channels: [], sources: [], landingPages: [], pages: [],
@@ -160,13 +162,33 @@ export async function fetchGa4(from: string, to: string, includeAttempts = false
   if (!connector) {
     return { ...base, status: 'error', error: `Windsor Google Analytics 4 returned no data — ${connectorErrors.join(' · ')}`, ...(includeAttempts ? { attempts } : {}) };
   }
-  const [sources, landing, pages] = await Promise.all([
+  const [sources, landing, pages, priorDaily, priorSources] = await Promise.all([
     windsorRows('sources', connector, from, to, attempts),
     windsorRows('landing', connector, from, to, attempts),
     windsorRows('pages', connector, from, to, attempts),
+    prior ? windsorRows('daily', connector, prior.from, prior.to, attempts) : Promise.resolve(null),
+    prior ? windsorRows('sources', connector, prior.from, prior.to, attempts) : Promise.resolve(null),
   ]);
 
   const out: GaData = { ...base, connector };
+  // Comparison range: totals from its daily rows, sessions per channel group
+  // from its sources rows. Missing data leaves prior null (no deltas shown).
+  if (prior && priorDaily?.rows) {
+    const pt = emptyTotals();
+    for (const r of priorDaily.rows) {
+      pt.sessions += m(r, 'sessions'); pt.users += users(r); pt.newUsers += m(r, 'new_users');
+      pt.engagedSessions += m(r, 'engaged_sessions'); pt.pageViews += m(r, 'screen_page_views');
+      pt.purchases += m(r, 'ecommerce_purchases'); pt.revenue += m(r, 'purchase_revenue');
+      pt.addToCarts += m(r, 'add_to_carts'); pt.conversions += m(r, 'conversions');
+    }
+    const channels: Record<string, { sessions: number; purchases: number }> = {};
+    if (priorSources?.rows) {
+      for (const c of rollDims(priorSources.rows, r => { const g = d(r, 'session_default_channel_group') || '(not set)'; return { key: g, label: g }; })) {
+        channels[c.key] = { sessions: c.sessions, purchases: c.purchases };
+      }
+    }
+    out.prior = { range: { from: prior.from, to: prior.to }, label: prior.label, totals: pt, channels };
+  } else if (prior) out.prior = null;
   // Daily + totals
   const byDay = new Map<string, GaDay>();
   for (const r of daily.rows!) {
