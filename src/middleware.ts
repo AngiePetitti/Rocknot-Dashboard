@@ -2,6 +2,17 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { partnerCanOpen } from '@/src/lib/access';
+import { getClient } from '@/src/lib/client';
+
+// The one hostname the sign-in cookie lives on: NextAuth finishes Google
+// sign-in on the NEXTAUTH_URL host and sets the cookie there. Opening the
+// dashboard on any other hostname (a per-deployment vercel.app URL, an old
+// alias, a bookmark with a different spelling) finds no cookie and asks for
+// sign-in again on every visit.
+function canonicalHost(): string | null {
+  const raw = (process.env.NEXTAUTH_URL || getClient().dashboardUrl || '').trim();
+  try { return raw ? new URL(raw).hostname.toLowerCase() : null; } catch { return null; }
+}
 
 // Gate every page and API route behind sign-in. Fails OPEN when auth isn't
 // configured yet (no secret / Google creds) so deploying this never locks out
@@ -12,6 +23,23 @@ export async function middleware(req: NextRequest) {
   if (!configured) return NextResponse.next();
 
   const { pathname } = req.nextUrl;
+
+  // Kailee P: every vercel.app hostname that is not the canonical one is sent
+  // to the canonical one (path and query kept) so the session cookie is set
+  // and read on a single host. Cron and agent calls use bearer tokens and
+  // never carry a cookie, so they are left on whatever host they hit.
+  if (getClient().id === 'kaileep' && !req.headers.get('authorization')) {
+    const host = req.nextUrl.hostname.toLowerCase();
+    const canonical = canonicalHost();
+    if (canonical && host !== canonical && host.endsWith('.vercel.app')) {
+      const url = req.nextUrl.clone();
+      url.protocol = 'https:';
+      url.hostname = canonical;
+      url.port = '';
+      return NextResponse.redirect(url, 308);
+    }
+  }
+
   // Always-allowed: the auth handshake and the login page itself.
   if (pathname.startsWith('/api/auth') || pathname.startsWith('/login')) return NextResponse.next();
   // Shareable creative briefs: public by unguessable id so designers can
