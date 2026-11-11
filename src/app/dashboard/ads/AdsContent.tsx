@@ -319,61 +319,88 @@ export default function AdsContent() {
               accentColor="#f9a8d4"
               comparison={cmp(totalSpend, priorSpend)}
             />
-            {useShop ? (
-              <>
-                <MetricCard
-                  title="Ad-Attributed Revenue"
-                  value={formatCurrency(shopRevenue ?? 0)}
-                  subtitle={`Shopify's record on the order (UTM tag, else referrer) · ${(shopOrders ?? 0).toLocaleString()} orders${shopPct != null ? ` · ${shopPct}% of store revenue` : ''} · ${basisLabel}`}
-                  accentColor="#c4b5fd"
-                  comparison={cmp(shopRevenue ?? 0, priorShopRevenue)}
-                />
-                <MetricCard
-                  title="Blended ROAS"
-                  value={shopRoas != null ? formatROAS(shopRoas) : '—'}
-                  subtitle={`Shopify-attributed revenue ÷ spend · platforms report ${formatROAS(blendedROAS)}`}
-                  accentColor="#86efac"
-                  comparison={shopRoas != null ? cmp(shopRoas, priorShopRoas) : undefined}
-                />
-                <MetricCard
-                  title="Platform-Reported Revenue"
-                  value={formatCurrency(totalRevenue)}
-                  subtitle={`What Meta, Google and Pinterest each claim, added up${claimedPct != null ? ` · ${claimedPct}% of store revenue` : ''} · overlapping: the same order can be counted by more than one platform`}
-                  accentColor="#fde68a"
-                  comparison={cmp(totalRevenue, priorRevenue)}
-                />
-              </>
-            ) : (
-              <>
-                <MetricCard
-                  title="Ad-Attributed Revenue"
-                  value={formatCurrency(totalRevenue)}
-                  subtitle="ROAS × Spend (Meta) + Conv. Value (Google)"
-                  accentColor="#c4b5fd"
-                  comparison={cmp(totalRevenue, priorRevenue)}
-                />
-                <MetricCard
-                  title="Blended ROAS"
-                  value={formatROAS(blendedROAS)}
-                  subtitle="Revenue / Spend"
-                  accentColor="#86efac"
-                  valueColor={blendedROAS >= ROAS_GOAL ? '#22c55e' : '#ef4444'}
-                  comparison={cmp(blendedROAS, priorROAS)}
-                />
-                <MetricCard
-                  title="Best Platform"
-                  value={bestPlatform ? formatROAS(bestPlatform.roas) : '—'}
-                  subtitle={bestPlatform?.platform || 'No data'}
-                  accentColor="#fde68a"
-                  comparison={bestPlatform ? cmp(bestPlatform.roas, priorBest?.roas) : undefined}
-                />
-              </>
-            )}
+            <MetricCard
+              title="Ad-Attributed Revenue"
+              value={formatCurrency(totalRevenue)}
+              subtitle={`ROAS × Spend (Meta) + Conv. Value (Google)${claimedPct != null ? ` · platforms claim ${claimedPct}% of store revenue` : ''}`}
+              accentColor="#c4b5fd"
+              comparison={cmp(totalRevenue, priorRevenue)}
+            />
+            <MetricCard
+              title="Blended ROAS"
+              value={formatROAS(blendedROAS)}
+              subtitle="Revenue / Spend"
+              accentColor="#86efac"
+              valueColor={blendedROAS >= ROAS_GOAL ? '#22c55e' : '#ef4444'}
+              comparison={cmp(blendedROAS, priorROAS)}
+            />
+            <MetricCard
+              title="Best Platform"
+              value={bestPlatform ? formatROAS(bestPlatform.roas) : '—'}
+              subtitle={bestPlatform?.platform || 'No data'}
+              accentColor="#fde68a"
+              comparison={bestPlatform ? cmp(bestPlatform.roas, priorBest?.roas) : undefined}
+            />
           </div>
-          {useShop && (
-            <p className="text-[11px] text-gray-400 -mt-3 mb-5">
-              Revenue and ROAS on this page use Shopify&apos;s own attribution: the UTM tag on the order, or its referrer when there is no tag, one bucket per order, so the platforms add up to store revenue instead of each claiming the same sale. It under-credits Instagram and Pinterest, whose in-app clicks often arrive untagged as direct, so platform-reported figures stay visible beside it. CAC below is ad spend ÷ Shopify first-time buyers and needs no attribution at all.
-            </p>
+
+          {/* What Shopify says — the same spend against Shopify's own record on
+              the order (UTM tag, else referrer), one bucket per order. Shown
+              as its own section so the platform figures above stay as they are. */}
+          {useShop && attr && (
+            <Card accentColor="#a5b4fc" className="mb-6">
+              <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+                <h2 className="text-sm font-bold text-gray-700">What Shopify says</h2>
+                <p className="text-[11px] text-gray-400">Shopify&apos;s record on each order: the UTM tag, else the referrer · one bucket per order, so these never double count · {basisLabel}</p>
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-4">
+                <MetricCard title="Shopify-Attributed Revenue" value={formatCurrency(shopRevenue ?? 0)} subtitle={`${(shopOrders ?? 0).toLocaleString()} orders${shopPct != null ? ` · ${shopPct}% of store revenue` : ''}`} accentColor="#c4b5fd" comparison={cmp(shopRevenue ?? 0, priorShopRevenue)} />
+                <MetricCard title="ROAS on Shopify Revenue" value={shopRoas != null ? formatROAS(shopRoas) : '—'} subtitle={`÷ the same ${formatCurrency(totalSpend)} of spend · platforms report ${formatROAS(blendedROAS)}`} accentColor="#86efac" comparison={shopRoas != null ? cmp(shopRoas, priorShopRoas) : undefined} />
+                <MetricCard title="Platforms Claim" value={formatCurrency(totalRevenue)} subtitle={`${claimedPct != null ? `${claimedPct}% of store revenue · ` : ''}overlapping: one order can be counted by two platforms`} accentColor="#fde68a" />
+                <MetricCard title="Gap" value={shopRevenue != null ? formatCurrency(Math.max(0, totalRevenue - shopRevenue)) : '—'} subtitle="claimed by the platforms but recorded by Shopify as email, organic, direct or another platform" accentColor="#fca5a5" />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[640px]">
+                  <thead><tr className="border-b border-gray-100">
+                    <th className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-2">Platform</th>
+                    <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Spend</th>
+                    <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Shopify revenue</th>
+                    <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Shopify ROAS</th>
+                    <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Shopify orders</th>
+                    <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Cost / order</th>
+                    <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Platform claims</th>
+                    <th className="text-right text-xs font-semibold text-gray-400 uppercase pb-2 pl-2">Platform ROAS</th>
+                  </tr></thead>
+                  <tbody>
+                    {platforms.map(p => {
+                      const s = shopOf(p.platform); const sRev = s?.revenue ?? 0; const sOrd = s?.orders ?? 0;
+                      return (
+                        <tr key={p.platform} className="border-b border-gray-50">
+                          <td className="py-2 pr-2"><span className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle" style={{ background: p.color }} /><span className="font-medium text-gray-800">{p.platform}</span></td>
+                          <td className="py-2 pl-2 text-right tabular-nums">{formatCurrency(p.spend)}</td>
+                          <td className="py-2 pl-2 text-right tabular-nums font-semibold text-gray-800">{sRev > 0 ? formatCurrency(sRev) : '—'}</td>
+                          <td className="py-2 pl-2 text-right tabular-nums font-semibold text-gray-800">{sRev > 0 && p.spend > 0 ? formatROAS(sRev / p.spend) : '—'}</td>
+                          <td className="py-2 pl-2 text-right tabular-nums">{sOrd.toLocaleString()}</td>
+                          <td className="py-2 pl-2 text-right tabular-nums">{sOrd > 0 ? formatCurrency(p.spend / sOrd) : '—'}</td>
+                          <td className="py-2 pl-2 text-right tabular-nums text-gray-500">{p.revenue > 0 ? formatCurrency(p.revenue) : '—'}</td>
+                          <td className="py-2 pl-2 text-right tabular-nums text-gray-500">{p.revenue > 0 ? formatROAS(p.roas) : '—'}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="font-semibold">
+                      <td className="py-2 pr-2 text-gray-800">All paid</td>
+                      <td className="py-2 pl-2 text-right tabular-nums">{formatCurrency(totalSpend)}</td>
+                      <td className="py-2 pl-2 text-right tabular-nums text-gray-800">{formatCurrency(shopRevenue ?? 0)}</td>
+                      <td className="py-2 pl-2 text-right tabular-nums text-gray-800">{shopRoas != null ? formatROAS(shopRoas) : '—'}</td>
+                      <td className="py-2 pl-2 text-right tabular-nums">{(shopOrders ?? 0).toLocaleString()}</td>
+                      <td className="py-2 pl-2 text-right tabular-nums">{shopOrders ? formatCurrency(totalSpend / shopOrders) : '—'}</td>
+                      <td className="py-2 pl-2 text-right tabular-nums text-gray-500">{formatCurrency(totalRevenue)}</td>
+                      <td className="py-2 pl-2 text-right tabular-nums text-gray-500">{formatROAS(blendedROAS)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-3">Platform figures credit any order the platform touched inside its window (Meta 7-day click / 1-day view, Google 30-day click, Pinterest 7-day click and engagement / 1-day view) and overlap with each other and with email, so added up they can exceed store revenue. Shopify credits the last thing the browser touched before checkout, once per order, and under-credits Instagram and Pinterest whose in-app clicks often arrive as direct. The truth sits between the two.</p>
+            </Card>
           )}
 
           {/* CAC — acquisition cost for the period (hidden on Today: the
@@ -416,42 +443,6 @@ export default function AdsContent() {
                     ⚠ Revenue/ROAS unverified — synced via Windsor and known to run high vs Snap Ads Manager. Verify in Ads Manager before budget moves, or connect the Snap API (SNAP_* keys) to make this number match Ads Manager exactly.
                   </p>
                 )}
-                {useShop ? (() => {
-                  const s = shopOf(p.platform);
-                  const sRev = s?.revenue ?? 0; const sOrders = s?.orders ?? 0;
-                  const sRoas = p.spend > 0 ? sRev / p.spend : 0;
-                  return (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-                      <div>
-                        <p className="text-gray-400 uppercase font-semibold mb-0.5">Spend</p>
-                        <p className="font-bold text-gray-800">{formatCurrency(p.spend)}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-400 uppercase font-semibold mb-0.5">ROAS (Shopify)</p>
-                        <p className="font-bold text-gray-800">{sRev > 0 ? formatROAS(sRoas) : '—'}</p>
-                        <p className="text-[10px] text-gray-400">platform reports {p.revenue > 0 ? formatROAS(p.roas) : '—'}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-400 uppercase font-semibold mb-0.5">Revenue (Shopify)</p>
-                        <p className="font-bold text-gray-800">{sRev > 0 ? formatCurrency(sRev) : '—'}</p>
-                        <p className="text-[10px] text-gray-400">platform claims {p.revenue > 0 ? formatCurrency(p.revenue) : '—'}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-400 uppercase font-semibold mb-0.5">Orders (Shopify)</p>
-                        <p className="font-bold text-gray-800">{sOrders.toLocaleString()}</p>
-                        <p className="text-[10px] text-gray-400">platform reports {(p.conversions ?? 0).toLocaleString()}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-400 uppercase font-semibold mb-0.5">Cost / Order</p>
-                        <p className="font-bold text-gray-800">{sOrders > 0 ? formatCurrency(p.spend / sOrders) : '—'}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-400 uppercase font-semibold mb-0.5">Clicks</p>
-                        <p className="font-bold text-gray-800">{p.clicks.toLocaleString()}</p>
-                      </div>
-                    </div>
-                  );
-                })() : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                   <div>
                     <p className="text-gray-400 uppercase font-semibold mb-0.5">Spend</p>
@@ -482,7 +473,6 @@ export default function AdsContent() {
                     <p className="font-bold text-gray-800">{p.revenue > 0 ? formatCurrency(p.revenue) : <span className="text-gray-400" title="No purchase value reported for this platform">—</span>}</p>
                   </div>
                 </div>
-                )}
                 {p.attribution && <p className="text-[10px] text-gray-400 mt-3 leading-snug">{p.attribution}</p>}
               </Card>
             ))}
@@ -492,8 +482,8 @@ export default function AdsContent() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
             <Card accentColor="#c4b5fd">
               <h2 className="text-sm font-bold text-gray-700 mb-1">ROAS by Platform</h2>
-              <p className="text-xs text-gray-400 mb-4">{useShop ? 'Shopify-attributed revenue ÷ spend' : `Red dashed line = ${ROAS_GOAL}x goal`}</p>
-              <ROASChart data={useShop ? platforms.map(p => { const s = shopOf(p.platform); return { ...p, revenue: s?.revenue ?? 0, roas: p.spend > 0 ? (s?.revenue ?? 0) / p.spend : 0 }; }) : platforms} goalLine={useShop ? null : ROAS_GOAL} />
+              <p className="text-xs text-gray-400 mb-4">Red dashed line = {ROAS_GOAL}x goal</p>
+              <ROASChart data={platforms} goalLine={ROAS_GOAL} />
             </Card>
 
             <Card accentColor="#f9a8d4">
@@ -541,7 +531,7 @@ export default function AdsContent() {
               <div className="flex items-center gap-2 mb-4">
                 <span className="text-lg">💡</span>
                 <h2 className="text-sm font-bold text-gray-700">Spend Recommendations</h2>
-                <span className="text-xs bg-yellow-100 text-yellow-700 font-semibold px-2 py-0.5 rounded-full">Based on platform-reported ROAS</span>
+                <span className="text-xs bg-yellow-100 text-yellow-700 font-semibold px-2 py-0.5 rounded-full">Based on live ROAS</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {recommendations.map(rec => (
