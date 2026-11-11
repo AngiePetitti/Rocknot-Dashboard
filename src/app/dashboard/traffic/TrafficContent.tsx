@@ -61,6 +61,7 @@ export default function TrafficContent() {
   const dateFrom = searchParams.get('date_from') || '';
   const dateTo = searchParams.get('date_to') || '';
   const compareOn = searchParams.get('compare') === 'true';
+  const compareTo = searchParams.get('compare_to') || '';
   const rangeLabel = tfRaw === 'custom' && dateFrom && dateTo ? `${dateFrom} → ${dateTo}` : (TIMEFRAME_LABELS[tfRaw] || 'Last 30 Days');
   const [data, setData] = useState<TrafficResponse | null>(null);
   // Google Analytics view (when the profile has a GA4 property). Fetched
@@ -75,14 +76,15 @@ export default function TrafficContent() {
     const p = new URLSearchParams({ tf: tfRaw });
     if (dateFrom) p.set('date_from', dateFrom);
     if (dateTo) p.set('date_to', dateTo);
-    if (compareOn) p.set('compare', 'true');
+    if (compareOn) { p.set('compare', 'true'); if (compareTo) p.set('compare_to', compareTo); }
     fetch(`/api/traffic?${p}`, { cache: 'no-store' }).then(r => r.json()).then(setData).catch(() => setData({ source: 'error', error: 'Failed to load' }));
     setGa(null);
     const g = new URLSearchParams({ tf: tfRaw });
     if (dateFrom) g.set('date_from', dateFrom);
     if (dateTo) g.set('date_to', dateTo);
+    if (compareOn) { g.set('compare', 'true'); if (compareTo) g.set('compare_to', compareTo); }
     fetch(`/api/traffic/ga4?${g}`, { cache: 'no-store' }).then(r => r.json()).then(setGa).catch(() => setGa({ status: 'error', error: 'Failed to load' } as GaData));
-  }, [tfRaw, dateFrom, dateTo, compareOn]);
+  }, [tfRaw, dateFrom, dateTo, compareOn, compareTo]);
   const gaAvailable = ga ? ga.status !== 'not_connected' : null;
   const showGa = view === 'ga' && gaAvailable !== false;
 
