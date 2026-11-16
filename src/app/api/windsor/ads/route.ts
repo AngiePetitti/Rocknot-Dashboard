@@ -3,7 +3,7 @@ import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { getAdsOverview } from '@/src/lib/bqAds';
 import { fetchMetaToday } from '@/src/lib/metaLive';
 import { fetchSnapToday } from '@/src/lib/snapLive';
-import { cacheHeaders } from '@/src/lib/cacheHeaders';
+import { cacheHeaders, settledEnd } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { keepClientMetaRows, hasPlatform, PLATFORMS, windsorParams, usesDirectData } from '@/src/lib/client';
 import { pinterestWindsorNote } from '@/src/lib/tiktokLive';
@@ -286,7 +286,7 @@ export async function GET(request: NextRequest) {
     try {
       const result = await getAdsOverview(params.date_from, params.date_to);
       const { platforms, dailySpend } = result;
-      return NextResponse.json({ source: 'bigquery_live', platforms, dailySpend, snapVerified: result.snapVerified !== false }, { headers: cacheHeaders(false, params.date_to < new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })) });
+      return NextResponse.json({ source: 'bigquery_live', platforms, dailySpend, snapVerified: result.snapVerified !== false }, { headers: cacheHeaders(false, settledEnd(params.date_to)) });
     } catch {
       // fall through to Windsor REST
     }

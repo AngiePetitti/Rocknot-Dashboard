@@ -19,7 +19,7 @@ function forPartner<T extends { metrics?: unknown }>(payload: T, partner: boolea
   // Daily new-customer counts stay: the CAC-over-time chart (an ads metric) needs them.
   return { ...payload, metrics: m };
 }
-import { cacheHeaders } from '@/src/lib/cacheHeaders';
+import { cacheHeaders, settledEnd } from '@/src/lib/cacheHeaders';
 import { mtdRange } from '@/src/lib/utils';
 import { fetchMetaToday, fetchMetaDaily } from '@/src/lib/metaLive';
 import { fetchSnapToday } from '@/src/lib/snapLive';
@@ -614,7 +614,7 @@ export async function GET(request: NextRequest) {
         metrics: current.metrics,
         revenueData: current.revenueData,
         ...(priorPeriod ? { priorPeriod, priorLabel, compareMode } : {}),
-      }, await partnerSession()), { headers: cacheHeaders(cur.date_to >= todayStr, cur.date_to < todayStr) });
+      }, await partnerSession()), { headers: cacheHeaders(cur.date_to >= todayStr, settledEnd(cur.date_to)) });
     } catch (err) {
       return NextResponse.json({ source: 'error', error: err instanceof Error ? err.message : 'Unknown error', timeframe: tf, metrics: null, revenueData: [] });
     }
@@ -694,7 +694,7 @@ export async function GET(request: NextRequest) {
         ...(trimmedToYesterday ? { dataLag: true, latestAvailableDate: yesterdayStr } : {}),
         ...(bqPrior ? { priorPeriod: bqPrior, priorLabel: bqPriorLabel, compareMode } : {}),
         ...(priorError ? { priorError } : {}),
-      }, await partnerSession()), { headers: cacheHeaders(false, Boolean(currentParams.date_to) && currentParams.date_to < todayStr) });
+      }, await partnerSession()), { headers: cacheHeaders(false, settledEnd(currentParams.date_to)) });
     }
 
     if (debug) {
