@@ -48,8 +48,13 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const marketplaceNav = (client.marketplaces || []).map(m => ({ href: `/dashboard/channel/${m.key}`, label: m.label, icon: m.icon || '🏬' }));
   // Subscription brands (Loop) get a Subscriptions tab after the channel tabs.
   if (client.subscriptions) marketplaceNav.push({ href: '/dashboard/subscriptions', label: 'Subscriptions', icon: '🔁' });
+  // Wholesale showrooms (outside sales teams) follow the channel tabs.
+  const showroomNav = (client.showrooms || []).map(s => ({ href: `/dashboard/showroom/${s.key}`, label: s.label, icon: s.icon || '🤝' }));
+  marketplaceNav.push(...showroomNav);
   const isPartner = session?.user?.role === 'partner';
-  const nav = isPartner
+  const nav = session?.user?.role === 'sales'
+    ? showroomNav
+    : isPartner
     ? visibleNav.filter(i => PARTNER_PAGES.includes(i.href))
     : marketplaceNav.length ? [visibleNav[0], ...marketplaceNav, ...visibleNav.slice(1)] : visibleNav;
 
@@ -136,7 +141,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       {/* Footer — signed-in user + sign out (only when authenticated) */}
       {session?.user && (
         <div className="px-4 py-3 border-t border-gray-100">
-          <div className="mb-2"><NotificationBell /></div>
+          {session.user.role !== 'sales' && <div className="mb-2"><NotificationBell /></div>}
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-full bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center shrink-0">
               {(session.user.email || '?').charAt(0).toUpperCase()}

@@ -1,3 +1,4 @@
+import { normalizeRole } from '@/src/lib/access';
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
   try {
     const { email, role } = await req.json() as { email?: string; role?: string };
     if (!email) return NextResponse.json({ error: 'Email required' }, { status: 400 });
-    await upsertUser(email, role === 'admin' ? 'admin' : role === 'partner' ? 'partner' : 'team');
+    await upsertUser(email, normalizeRole(role));
     return NextResponse.json({ users: await listUsers() });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 400 });

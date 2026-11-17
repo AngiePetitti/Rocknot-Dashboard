@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
-import { partnerCanOpen } from '@/src/lib/access';
+import { partnerCanOpen, salesCanOpen } from '@/src/lib/access';
 import { getClient } from '@/src/lib/client';
 
 // The one hostname the sign-in cookie lives on: NextAuth finishes Google
@@ -88,6 +88,17 @@ export async function middleware(req: NextRequest) {
       }
       const home = req.nextUrl.clone();
       home.pathname = '/dashboard';
+      home.search = '';
+      return NextResponse.redirect(home);
+    }
+    // Sales (showroom) logins see only the Showroom tabs.
+    if (token.role === 'sales' && !salesCanOpen(pathname)) {
+      const first = getClient().showrooms?.[0];
+      if (pathname.startsWith('/api/') || !first) {
+        return new NextResponse(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } });
+      }
+      const home = req.nextUrl.clone();
+      home.pathname = `/dashboard/showroom/${first.key}`;
       home.search = '';
       return NextResponse.redirect(home);
     }

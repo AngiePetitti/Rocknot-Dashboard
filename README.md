@@ -74,6 +74,7 @@ Core (every client):
 | `KLAVIYO_API_KEY` | Retention tab |
 | `QB_CLIENT_ID`, `QB_CLIENT_SECRET`, `QB_REFRESH_TOKEN`, `QB_REALM_ID` | QuickBooks P&L (Financials tab); set up via `/api/debug/qb-oauth` |
 | `CRON_SECRET`, `SLACK_RESTOCK_WEBHOOK_URL`, `RESEND_API_KEY`, `RESTOCK_EMAIL_TO`, `RESTOCK_EMAIL_FROM` | Monday restock alert (`vercel.json` cron) |
+| `BACK_IN_STOCK_EMAIL_TO`, `WHOLESALE_DTC_RESERVE_WEEKS` | Daily back-in-stock email (`/api/alerts/back-in-stock`): comma-separated owner addresses (falls back to `RESTOCK_EMAIL_TO`) and the weeks of store sales held back before anything is suggested for wholesale (default 8). The owners then send the revised list to the showroom rep from `/dashboard/wholesale-release` |
 
 Rocknot-only: `SNAP_CLIENT_ID`, `SNAP_CLIENT_SECRET`, `SNAP_REFRESH_TOKEN`,
 `SNAP_AD_ACCOUNT_ID` (live Snapchat spend).
