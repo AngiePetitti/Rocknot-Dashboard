@@ -1,7 +1,7 @@
 // Showroom tab (e.g. L&A Showroom, Dallas): the wholesale orders an outside
 // sales team has written, and the draft orders still waiting to become
 // orders. Both are read live from Shopify by the showroom's tag.
-import { showroomByKey, Showroom } from '@/src/lib/client';
+import { showroomByKey, shopifyDomain, Showroom } from '@/src/lib/client';
 import { adminGraphql } from '@/src/lib/shopifyAdmin';
 
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -9,6 +9,12 @@ const amount = (set: { shopMoney?: { amount?: string } } | null | undefined) => 
 /** Shopify search literal for a tag (tags may hold & and spaces). */
 const tagQuery = (tag: string) => `tag:'${tag.replace(/['\\]/g, '\\$&')}'`;
 const hasTag = (tags: string[] | undefined, tag: string) => (tags || []).some(t => t.toLowerCase() === tag.toLowerCase());
+
+/** Shopify admin page for an order or draft, from its gid (opens for people with a Shopify staff login). */
+function adminUrl(kind: 'orders' | 'draft_orders', gid: string): string {
+  const store = shopifyDomain().replace(/\.myshopify\.com$/, '');
+  return `https://admin.shopify.com/store/${store}/${kind}/${gid.split('/').pop()}`;
+}
 
 interface Address { company: string | null; city: string | null; provinceCode: string | null }
 
@@ -32,6 +38,8 @@ const cleanNote = (note: string | null) => (note || '').split('\n').filter(l => 
 
 export interface ShowroomOrder {
   id: string; name: string; createdAt: string;
+  /** The order in Shopify admin. */
+  url: string;
   account: string; accountKey: string; buyer: string; place: string;
   /** What the order stands at today (after edits and refunds). */
   total: number;
@@ -54,6 +62,8 @@ export interface ShowroomLine {
 }
 export interface ShowroomDraft {
   id: string; name: string; createdAt: string; updatedAt: string;
+  /** The draft in Shopify admin. */
+  url: string;
   account: string; accountKey: string; buyer: string; place: string;
   total: number; units: number;
   status: 'OPEN' | 'INVOICE_SENT';
@@ -175,6 +185,7 @@ export async function fetchShowroom(key: string): Promise<ShowroomData> {
     const account = accountName(n.shippingAddress, n.note, buyer);
     return {
       id: n.id, name: n.name, createdAt: n.createdAt,
+      url: adminUrl('orders', n.id),
       account, accountKey: accountKey(account), buyer, place: place(n.shippingAddress),
       total: amount(n.currentTotalPriceSet), originalTotal: amount(n.totalPriceSet), refunded: amount(n.totalRefundedSet),
       units: num(n.currentSubtotalLineItemsQuantity),
@@ -197,6 +208,7 @@ export async function fetchShowroom(key: string): Promise<ShowroomData> {
       });
       return {
         id: n.id, name: n.name, createdAt: n.createdAt, updatedAt: n.updatedAt,
+        url: adminUrl('draft_orders', n.id),
         account, accountKey: accountKey(account), buyer, place: place(n.shippingAddress),
         total: amount(n.totalPriceSet), units: num(n.totalQuantityOfLineItems),
         status: n.status as 'OPEN' | 'INVOICE_SENT', invoiceSentAt: n.invoiceSentAt,

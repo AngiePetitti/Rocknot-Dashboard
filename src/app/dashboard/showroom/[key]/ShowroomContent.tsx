@@ -94,7 +94,7 @@ function DraftRow({ d }: { d: ShowroomDraft }) {
     <Fragment>
       <tr className="border-t border-gray-100 align-top">
         <td className="py-2.5 pr-1"><Expander open={open} onClick={() => setOpen(o => !o)} label={`Items on ${d.name}`} /></td>
-        <td className="py-2.5 pr-3 font-semibold text-gray-800 whitespace-nowrap">{d.name}</td>
+        <td className="py-2.5 pr-3 font-semibold whitespace-nowrap"><a href={d.url} target="_blank" rel="noopener noreferrer" title="Open in Shopify" className="text-violet-700 underline decoration-violet-200 underline-offset-2 hover:decoration-violet-600 focus:outline-none focus:ring-2 focus:ring-violet-300 rounded">{d.name}</a></td>
         <td className="py-2.5 pr-3">
           <p className="font-medium text-gray-800">{d.account}</p>
           <p className="text-[11px] text-gray-400">{[d.buyer !== d.account ? d.buyer : '', d.place].filter(Boolean).join(' · ')}</p>
@@ -137,7 +137,7 @@ function OrderRow({ o, showroomKey }: { o: ShowroomOrder; showroomKey: string })
     <Fragment>
       <tr className={`border-t border-gray-100 align-top ${o.cancelled ? 'opacity-60' : ''}`}>
         <td className="py-2.5 pr-1"><Expander open={open} onClick={toggle} label={`Items on ${o.name}`} /></td>
-        <td className="py-2.5 pr-3 font-semibold text-gray-800 whitespace-nowrap">{o.name}</td>
+        <td className="py-2.5 pr-3 font-semibold whitespace-nowrap"><a href={o.url} target="_blank" rel="noopener noreferrer" title="Open in Shopify" className="text-violet-700 underline decoration-violet-200 underline-offset-2 hover:decoration-violet-600 focus:outline-none focus:ring-2 focus:ring-violet-300 rounded">{o.name}</a></td>
         <td className="py-2.5 pr-3">
           <p className="font-medium text-gray-800">{o.account} {o.firstOrder && <Chip tone="info">First order</Chip>}</p>
           <p className="text-[11px] text-gray-400">{[o.buyer !== o.account ? o.buyer : '', o.place].filter(Boolean).join(' · ')}</p>
