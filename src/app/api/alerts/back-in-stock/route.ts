@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { backInStockEmail, commitDetection, detectRestocks, emailConfigured, loadStock, ownerEmails, sendEmail, DEFAULT_RESERVE_WEEKS } from '@/src/lib/wholesaleRelease';
 import { isChatStoreConfigured } from '@/src/lib/chatStore';
+import { showrooms } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -11,6 +12,8 @@ export const maxDuration = 120;
 // could go to wholesale. Nothing is sent to the sales rep from here.
 //   ?dry=1  → report what it would send, without emailing or saving.
 export async function GET(req: NextRequest) {
+  // The cron runs on every client's deployment; only brands with a wholesale showroom use it.
+  if (!showrooms().length) return NextResponse.json({ ok: true, skipped: 'This dashboard has no wholesale showroom.' });
   const dry = req.nextUrl.searchParams.get('dry') === '1';
   const to = ownerEmails();
   if (!dry && !(emailConfigured() && to.length)) {
