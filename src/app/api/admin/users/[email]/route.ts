@@ -1,3 +1,4 @@
+import { normalizeRole } from '@/src/lib/access';
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions, authConfigured } from '@/src/lib/auth';
@@ -15,7 +16,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { email: str
   if (!(await requireAdmin())) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   try {
     const { role } = await req.json() as { role?: string };
-    await upsertUser(decodeURIComponent(params.email), role === 'admin' ? 'admin' : role === 'partner' ? 'partner' : 'team');
+    await upsertUser(decodeURIComponent(params.email), normalizeRole(role));
     return NextResponse.json({ users: await listUsers() });
   } catch (err) {
     return NextResponse.json({ error: String(err instanceof Error ? err.message : err) }, { status: 400 });

@@ -176,6 +176,17 @@ export interface ProductLine {
   isDefault?: boolean;
 }
 
+/** A wholesale showroom / outside sales team whose orders carry one Shopify tag. */
+export interface Showroom {
+  /** URL key: /dashboard/showroom/<key>. */
+  key: string;
+  label: string;
+  /** Shopify tag on every order and draft order this showroom writes. */
+  tag: string;
+  city?: string;
+  icon?: string;
+}
+
 export interface ClientProfile {
   id: ClientId;
   /** Brand name as written in prose: "Kailee P". */
@@ -314,6 +325,8 @@ export interface ClientProfile {
   lines?: ProductLine[];
   /** Marketplace channels reported on their own tab (Shopify sales_channel filter). */
   marketplaces?: MarketplaceChannel[];
+  /** Wholesale showrooms / outside sales teams, each with its own tab (Shopify order + draft-order tag). */
+  showrooms?: Showroom[];
   /** BFCM tab seeds: collection pages the sale drives traffic to (shown until an admin edits the plan's links). */
   bfcm?: { collections: Array<{ label: string; url: string }>; lastYear?: { from: string; to: string; earlyAccess?: { from: string; to: string } } };
   goals: {
@@ -453,6 +466,11 @@ const ROCKNOT: ClientProfile = {
       description: 'Nordstrom Marketplace dropship · Shopify sales channel "Dscopify Dropship" · orders at full retail; Nordstrom keeps a commission and bills per return, neither in Shopify' },
     { key: 'app', label: 'Rocknot App', shopifyChannel: 'Shopney - Mobile App', sourceMatch: 'shopney', commissionPct: null, returnFee: null, returnWindowDays: 30, countInMer: true, countInSales: true, icon: '📱',
       description: 'Rocknot mobile app (Shopney) · Shopify sales channel "Shopney - Mobile App" · app buyers are store customers; counted in store sales and MER' },
+  ],
+  // L&A Showroom (Dallas) sells Rocknot wholesale (Nov 2026, per Angie).
+  // Every order and draft order they write carries the Shopify tag "L&A".
+  showrooms: [
+    { key: 'la-showroom', label: 'L&A Showroom', tag: 'L&A', city: 'Dallas', icon: '🤝' },
   ],
   alerts: { fromName: 'Rocknot Dashboard' },
   analyst: { name: 'Cleo' },
@@ -929,6 +947,13 @@ export function marketplaceExclusionPredicate(profile: ClientProfile = getClient
   const rx = list.map(m => m.sourceMatch.replace(/[^a-z0-9_|.-]/gi, '')).filter(Boolean).join('|');
   if (!rx) return '';
   return `NOT REGEXP_CONTAINS(LOWER(IFNULL(CAST(order_source_name AS STRING), '')), r'${rx}')`;
+}
+/** Wholesale showrooms with their own tab ([] when the brand has none). */
+export function showrooms(profile: ClientProfile = getClient()): Showroom[] {
+  return profile.showrooms ?? [];
+}
+export function showroomByKey(key: string, profile: ClientProfile = getClient()): Showroom | null {
+  return showrooms(profile).find(s => s.key === key) ?? null;
 }
 export function marketplaceByKey(key: string, profile: ClientProfile = getClient()): MarketplaceChannel | null {
   return marketplaces(profile).find(m => m.key === key) ?? null;

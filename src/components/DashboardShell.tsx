@@ -5,12 +5,13 @@ import Sidebar from './Sidebar';
 import CleoChat from './CleoChat';
 import { useClient } from '@/src/components/ClientProvider';
 import { useSession } from 'next-auth/react';
+import { isRestricted } from '@/src/lib/access';
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const client = useClient();
   const { data: session } = useSession();
-  const isPartner = session?.user?.role === 'partner';
+  const isPartner = isRestricted(session?.user?.role);
 
   return (
     <div className="flex min-h-screen bg-gray-50">

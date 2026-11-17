@@ -45,7 +45,7 @@ export function useMyTasks(): { myTasks: BoardTask[]; myOverdue: BoardTask[]; my
 export default function MyTasksBanner() {
   const { data: session } = useSession();
   const { myTasks, myOverdue, myDueToday, todayPst } = useMyTasks();
-  if (session?.user?.role === 'partner' || myTasks.length === 0) return null;
+  if (session?.user?.role === 'partner' || session?.user?.role === 'sales' || myTasks.length === 0) return null;
   return (
     <Link
       href="/dashboard/tasks"
