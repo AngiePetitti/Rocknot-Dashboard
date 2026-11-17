@@ -5,6 +5,10 @@
       "schedule": "0 15 * * 1"
     },
     {
+      "path": "/api/alerts/back-in-stock",
+      "schedule": "0 14 * * *"
+    },
+    {
       "path": "/api/alerts/brief",
       "schedule": "0 12 * * *"
     },

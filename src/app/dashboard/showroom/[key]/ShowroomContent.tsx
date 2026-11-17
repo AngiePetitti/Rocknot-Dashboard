@@ -1,6 +1,8 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useSession } from 'next-auth/react';
 import Header from '@/src/components/Header';
 import Card from '@/src/components/ui/Card';
 import MetricCard from '@/src/components/ui/MetricCard';
@@ -169,6 +171,7 @@ const TH = 'py-2 pr-3 font-semibold';
 export default function ShowroomContent({ showroomKey }: { showroomKey: string }) {
   const [data, setData] = useState<Resp | null>(null);
   const [search, setSearch] = useState('');
+  const { data: session } = useSession();
 
   useEffect(() => {
     setData(null);
@@ -198,7 +201,12 @@ export default function ShowroomContent({ showroomKey }: { showroomKey: string }
       <Header
         title={label}
         subtitle={data?.showroom ? `${data.showroom.city ? `${data.showroom.city} · ` : ''}wholesale orders and draft orders tagged "${tag}" in Shopify · live` : 'Wholesale showroom'}
-      />
+      >
+        {/* Team only: the showroom's own logins cannot open the release page. */}
+        {session?.user?.role !== 'sales' && session?.user?.role !== 'partner' && (
+          <Link href="/dashboard/wholesale-release" className="inline-block text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 rounded-lg px-3 py-2">Back in stock: choose what opens to wholesale →</Link>
+        )}
+      </Header>
       {!data && <p className="text-xs text-gray-400 mb-4">Loading orders and drafts from Shopify…</p>}
       {data?.error && <Card className="mb-6 border-red-100"><p className="text-sm text-red-600">{data.error}</p></Card>}
 

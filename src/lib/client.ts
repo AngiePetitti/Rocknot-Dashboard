@@ -185,6 +185,8 @@ export interface Showroom {
   tag: string;
   city?: string;
   icon?: string;
+  /** The showroom's sales rep, who receives the wholesale release emails (address is saved on the Wholesale Release page). */
+  rep?: { name: string };
 }
 
 export interface ClientProfile {
@@ -470,7 +472,7 @@ const ROCKNOT: ClientProfile = {
   // L&A Showroom (Dallas) sells Rocknot wholesale (Nov 2026, per Angie).
   // Every order and draft order they write carries the Shopify tag "L&A".
   showrooms: [
-    { key: 'la-showroom', label: 'L&A Showroom', tag: 'L&A', city: 'Dallas', icon: '🤝' },
+    { key: 'la-showroom', label: 'L&A Showroom', tag: 'L&A', city: 'Dallas', icon: '🤝', rep: { name: 'Marty' } },
   ],
   alerts: { fromName: 'Rocknot Dashboard' },
   analyst: { name: 'Cleo' },
