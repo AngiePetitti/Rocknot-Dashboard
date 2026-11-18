@@ -7,7 +7,14 @@ import Card from '@/src/components/ui/Card';
 import MetricCard from '@/src/components/ui/MetricCard';
 import { useClient } from '@/src/components/ClientProvider';
 import { formatCurrency } from '@/src/lib/utils';
-import type { BfcmPlan, BfcmCheck, BfcmLink } from '@/src/lib/bfcm';
+import type { BfcmPlan, BfcmCheck, BfcmLink, BfcmOffer } from '@/src/lib/bfcm';
+
+// Open items are written as "To confirm …" so the team sees them as open.
+const isOpen = (v?: string) => !v || !v.trim() || /to confirm|tbd|\?$/i.test(v);
+const Cell = ({ v, open }: { v?: string; open?: boolean }) => {
+  const o = open ?? isOpen(v);
+  return o ? <span className="inline-block text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5">{v && v.trim() ? v : 'To confirm'}</span> : <span className="text-gray-800">{v}</span>;
+};
 
 interface Store { revenue: number; netSales: number; orders: number; aov: number; spend: number; mer: number; newCustomers: number; returningCustomers: number; sessions: number; cvr: number }
 interface Creative { id: string; name: string; platform: string; thumbnailUrl: string | null; adUrl: string | null; campaign: string; spend: number; revenue: number; roas: number; conversions: number; costPerConversion: number; ctr: number }
@@ -112,6 +119,40 @@ export default function BfcmContent() {
 
       {plan && (
         <>
+          {/* ── Sale details for the team: one row per phase, open items flagged ── */}
+          {(plan.saleDetails?.length || 0) > 0 && (() => {
+            const rows = plan.saleDetails || [];
+            const open = rows.reduce((s, o) => s + [o.deal, o.code, o.stackable, o.dates].filter(v => v && v !== '—' && isOpen(v)).length + (o.code ? 0 : 1), 0);
+            return (
+              <Card accentColor="#a78bfa" className="mb-4">
+                <div className="flex items-baseline justify-between gap-3 flex-wrap mb-2">
+                  <h3 className="text-sm font-bold text-gray-800">Sale details · what to put in emails, SMS and on site</h3>
+                  <p className="text-[11px] text-gray-400">{open > 0 ? <span className="text-amber-700 font-semibold">{open} item{open === 1 ? '' : 's'} still to confirm</span> : 'All details confirmed'} · {plan.updatedAt ? `updated ${plan.updatedAt.slice(0, 10)}${plan.updatedBy ? ` by ${plan.updatedBy.split('@')[0]}` : ''}` : 'seeded from the profile'}</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[760px]">
+                    <thead><tr className="border-b border-gray-100 text-xs font-semibold text-gray-400 uppercase">
+                      <th className="text-left pb-2 pr-3">Phase</th><th className="text-left pb-2 pr-3">Dates · timing</th><th className="text-left pb-2 pr-3">Deal</th><th className="text-left pb-2 pr-3">Products included</th><th className="text-left pb-2 pr-3">Code</th><th className="text-left pb-2">Stacks with the sale?</th>
+                    </tr></thead>
+                    <tbody>
+                      {rows.map(o => (
+                        <tr key={o.id} className="border-b border-gray-50 align-top">
+                          <td className="py-2 pr-3 font-semibold text-gray-800 whitespace-nowrap">{o.phase}</td>
+                          <td className="py-2 pr-3 text-gray-700"><Cell v={o.dates} />{o.timing && <span className="block text-[11px] text-gray-400 mt-0.5">{o.timing}</span>}</td>
+                          <td className="py-2 pr-3"><Cell v={o.deal} /></td>
+                          <td className="py-2 pr-3 text-gray-700">{o.products || <span className="text-gray-400">—</span>}</td>
+                          <td className="py-2 pr-3">{isOpen(o.code) ? <Cell v={o.code} /> : <code className="text-xs font-mono font-bold text-violet-700 bg-violet-50 rounded px-1.5 py-0.5">{o.code}</code>}</td>
+                          <td className="py-2 text-gray-700">{o.stackable === '—' || !o.stackable ? <span className="text-gray-400">—</span> : <Cell v={o.stackable} />}{o.notes && <span className="block text-[11px] text-gray-500 mt-0.5">{o.notes}</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-2">Amber = not settled yet; do not build copy on it. {isAdmin ? 'Edit plan to change any cell.' : 'Ask Angie before using an amber item.'}</p>
+              </Card>
+            );
+          })()}
+
           {/* ── The sale, front and center: offer, dates, goals ── */}
           {(plan.offers || plan.goals.revenue > 0) && (
             <div className="rounded-2xl border border-violet-200 bg-gradient-to-r from-violet-50 to-pink-50 px-4 py-3.5 mb-4">
@@ -180,6 +221,27 @@ export default function BfcmContent() {
                 </div>
                 <label className="text-xs text-gray-500 md:col-span-2">The plan (audiences, cadence, what we are doing differently this year)<textarea value={d.summary} onChange={e => setDraft({ ...d, summary: e.target.value })} rows={4} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></label>
                 <label className="text-xs text-gray-500 md:col-span-2">Offers (sitewide %, tiers, gift with purchase, codes, exclusions)<textarea value={d.offers} onChange={e => setDraft({ ...d, offers: e.target.value })} rows={3} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></label>
+                <div className="md:col-span-2">
+                  <p className="text-xs text-gray-500 mb-1">Sale details table (one row per phase or flash sale; write &quot;To confirm …&quot; in any cell that is still open and the tab flags it)</p>
+                  {(d.saleDetails || []).map((o, i) => {
+                    const set = (patch: Partial<BfcmOffer>) => setDraft({ ...d, saleDetails: (d.saleDetails || []).map((x, j) => (j === i ? { ...x, ...patch } : x)) });
+                    const inp = 'text-sm border border-gray-200 rounded-lg px-2 py-1.5 w-full';
+                    return (
+                      <div key={o.id} className="grid grid-cols-2 md:grid-cols-6 gap-2 mb-2 p-2 rounded-xl bg-gray-50 border border-gray-100">
+                        <input placeholder="Phase (e.g. Flash sale · Nov 28)" value={o.phase} onChange={e => set({ phase: e.target.value })} className={inp} />
+                        <input placeholder="Dates" value={o.dates} onChange={e => set({ dates: e.target.value })} className={inp} />
+                        <input placeholder="Timing (e.g. full day)" value={o.timing || ''} onChange={e => set({ timing: e.target.value })} className={inp} />
+                        <input placeholder="Deal (e.g. 20% off)" value={o.deal} onChange={e => set({ deal: e.target.value })} className={inp} />
+                        <input placeholder="Code" value={o.code || ''} onChange={e => set({ code: e.target.value })} className={inp} />
+                        <input placeholder="Stacks with the sale?" value={o.stackable || ''} onChange={e => set({ stackable: e.target.value })} className={inp} />
+                        <input placeholder="Products included" value={o.products || ''} onChange={e => set({ products: e.target.value })} className={`${inp} col-span-2 md:col-span-3`} />
+                        <input placeholder="Notes" value={o.notes || ''} onChange={e => set({ notes: e.target.value })} className={`${inp} col-span-2 md:col-span-2`} />
+                        <button onClick={() => setDraft({ ...d, saleDetails: (d.saleDetails || []).filter((_, j) => j !== i) })} className="text-xs text-red-500 px-1 text-left md:text-right">Remove</button>
+                      </div>
+                    );
+                  })}
+                  <button onClick={() => setDraft({ ...d, saleDetails: [...(d.saleDetails || []), { id: uid(), phase: '', dates: '', deal: '' }] })} className="text-xs font-semibold text-violet-600">+ Add a phase or flash sale</button>
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 md:col-span-2">
                   <label className="text-xs text-gray-500">Sale window revenue goal $ (not monthly)<input type="number" value={d.goals.revenue || ''} onChange={e => setDraft({ ...d, goals: { ...d.goals, revenue: Number(e.target.value) || 0 } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
                   <label className="text-xs text-gray-500">Sale window ad spend goal $<input type="number" value={d.goals.adSpend || ''} onChange={e => setDraft({ ...d, goals: { ...d.goals, adSpend: Number(e.target.value) || 0 } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>

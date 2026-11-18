@@ -315,7 +315,12 @@ export interface ClientProfile {
   /** Marketplace channels reported on their own tab (Shopify sales_channel filter). */
   marketplaces?: MarketplaceChannel[];
   /** BFCM tab seeds: collection pages the sale drives traffic to (shown until an admin edits the plan's links). */
-  bfcm?: { collections: Array<{ label: string; url: string }>; lastYear?: { from: string; to: string; earlyAccess?: { from: string; to: string } } };
+  bfcm?: {
+    collections: Array<{ label: string; url: string }>;
+    lastYear?: { from: string; to: string; earlyAccess?: { from: string; to: string } };
+    /** Sale details seeded onto the BFCM tab (see BfcmOffer in lib/bfcm); admins edit them on the tab from then on. */
+    saleDetails?: Array<{ id: string; phase: string; dates: string; timing?: string; deal: string; products?: string; code?: string; stackable?: string; notes?: string }>;
+  };
   goals: {
     /** Starting annual net-sales target shown until an admin saves one (0 = ask). */
     defaultAnnualTarget: number;
@@ -557,6 +562,15 @@ const KAILEEP: ClientProfile = {
     ],
     // BFCM 2025 (per Angie): gated VIP early access Nov 9–15, public sale Nov 27–30.
     lastYear: { from: '2025-11-27', to: '2025-11-30', earlyAccess: { from: '2025-11-09', to: '2025-11-15' } },
+    // BFCM 2026 sale details for the team (Karina's email brief, Nov 18).
+    // Flash-sale codes per Ting (Nov 18), each scheduled for the full day.
+    // "To confirm" items are Angie's / Airin's to settle; the tab flags them.
+    saleDetails: [
+      { id: 'early', phase: 'Early Access Sale', dates: 'Nov 25 – Nov 26', timing: 'All day, both days', deal: 'To confirm: up to 60% off', products: 'BFCM collections (all deals, women\'s, bridal, kids)', code: 'To confirm', stackable: '—', notes: 'To confirm: who gets access (VIP list, SMS subscribers, everyone) and how the code is delivered' },
+      { id: 'sale', phase: 'BFCM Sale', dates: 'Nov 27 – Nov 30', timing: 'All day; ends midnight Nov 30 unless extended on the Nov 29 call', deal: 'To confirm: up to 60% off', products: 'BFCM collections (all deals, women\'s, bridal, kids)', code: 'To confirm: automatic discount or code', stackable: '—' },
+      { id: 'flash-bridal', phase: 'Flash sale · Nov 28', dates: 'Nov 28', timing: 'Full day (scheduled in Shopify)', deal: '20% off', products: 'Regular-priced bridal shoes', code: 'FLASHBRIDAL20', stackable: 'To confirm with Airin: can it combine with the BFCM sale in the same order?' },
+      { id: 'flash-kids', phase: 'Flash sale · Nov 29', dates: 'Nov 29', timing: 'Full day (scheduled in Shopify)', deal: '25% off', products: 'Regular-priced kids\' shoes', code: 'FLASHKIDS25', stackable: 'To confirm with Airin: can it combine with the BFCM sale in the same order?' },
+    ],
   },
   // $4M 2026 net-sales target set Sep 2026. Paid MER 5x is the agency's number;
   // fully loaded MER and the contribution floor are the business's (Airin, Oct 2026).

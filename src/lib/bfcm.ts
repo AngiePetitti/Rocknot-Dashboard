@@ -8,6 +8,23 @@ import { getClient } from '@/src/lib/client';
 
 export interface BfcmLink { label: string; url: string }
 export interface BfcmCheck { id: string; text: string; done: boolean; owner?: string; due?: string; doneBy?: string; doneAt?: string }
+/**
+ * One line of the sale as the team needs it stated: a phase (early access,
+ * the sale, a flash sale) with its dates, timing, deal, products, code and
+ * whether it stacks. Anything still open is written as "To confirm …" and
+ * the tab highlights it, so email and site copy are never built on a guess.
+ */
+export interface BfcmOffer {
+  id: string;
+  phase: string;
+  dates: string;
+  timing?: string;
+  deal: string;
+  products?: string;
+  code?: string;
+  stackable?: string;
+  notes?: string;
+}
 export interface BfcmPlan {
   year: number;
   name: string;
@@ -20,6 +37,8 @@ export interface BfcmPlan {
   /** The plan in the team's words: offer structure, audiences, cadence. */
   summary: string;
   offers: string;
+  /** Structured sale details for the team (see BfcmOffer); seeded from the client profile until an admin edits them. */
+  saleDetails?: BfcmOffer[];
   goals: { revenue: number; adSpend: number; orders?: number; emailRevenue?: number };
   collections: BfcmLink[];
   checklist: BfcmCheck[];
@@ -72,6 +91,7 @@ export function defaultPlan(year = bfcmYear()): BfcmPlan {
     window: { from: blackFriday(year), to: cyberMonday(year) },
     earlyAccessFrom: addDays(blackFriday(year), -3),
     summary: '', offers: '',
+    saleDetails: (getClient().bfcm?.saleDetails || []).map(o => ({ ...o })),
     goals: { revenue: 0, adSpend: 0 },
     collections: [...(getClient().bfcm?.collections || [])], checklist: defaultChecklist(year), notes: '',
     ...(getClient().bfcm?.lastYear && year === bfcmYear() ? { lastYear: { ...getClient().bfcm!.lastYear!, source: 'manual' as const } } : {}),
@@ -88,7 +108,7 @@ export async function loadBfcmPlan(year = bfcmYear()): Promise<BfcmPlan> {
     const p = JSON.parse(raw) as Partial<BfcmPlan>;
     const d = defaultPlan(year);
     // Profile-seeded collection links show until an admin has saved their own list.
-    return { ...d, ...p, goals: { ...d.goals, ...(p.goals || {}) }, window: { ...d.window, ...(p.window || {}) }, collections: p.collections?.some(c => c.url) ? p.collections : d.collections, checklist: p.checklist?.length ? p.checklist : d.checklist, lastYear: p.lastYear?.from ? p.lastYear : d.lastYear };
+    return { ...d, ...p, goals: { ...d.goals, ...(p.goals || {}) }, window: { ...d.window, ...(p.window || {}) }, collections: p.collections?.some(c => c.url) ? p.collections : d.collections, checklist: p.checklist?.length ? p.checklist : d.checklist, lastYear: p.lastYear?.from ? p.lastYear : d.lastYear, saleDetails: p.saleDetails?.length ? p.saleDetails : d.saleDetails };
   } catch { return defaultPlan(year); }
 }
 
@@ -111,7 +131,8 @@ export function bfcmPlanText(plan: BfcmPlan, today: string): string {
   const phase = bfcmPhase(plan, today);
   const days = Math.round((Date.parse(plan.window.from) - Date.parse(today)) / 86400000);
   const open = plan.checklist.filter(c => !c.done);
-  return `${plan.name} — sale window ${plan.window.from} → ${plan.window.to}${plan.earlyAccessFrom ? ` (early access from ${plan.earlyAccessFrom})` : ''} · status: ${phase === 'before' ? `${days} days to go` : phase}.${plan.lastYear ? ` Last year's sale ran ${plan.lastYear.from} → ${plan.lastYear.to} (${plan.lastYear.source})${plan.lastYear.earlyAccess ? `, with gated VIP early access ${plan.lastYear.earlyAccess.from} → ${plan.lastYear.earlyAccess.to}` : ''}; the public window is the "vs last year" baseline.` : ''}
+  const details = (plan.saleDetails || []).map(o => `  - ${o.phase} (${o.dates}${o.timing ? `, ${o.timing}` : ''}): ${o.deal}${o.products ? ` on ${o.products}` : ''}${o.code ? ` · code ${o.code}` : ''}${o.stackable ? ` · stacks with the sale: ${o.stackable}` : ''}${o.notes ? ` · ${o.notes}` : ''}`).join('\n');
+  return `${plan.name} — sale window ${plan.window.from} → ${plan.window.to}${plan.earlyAccessFrom ? ` (early access from ${plan.earlyAccessFrom})` : ''} · status: ${phase === 'before' ? `${days} days to go` : phase}.${details ? `\nSale details:\n${details}` : ''}${plan.lastYear ? ` Last year's sale ran ${plan.lastYear.from} → ${plan.lastYear.to} (${plan.lastYear.source})${plan.lastYear.earlyAccess ? `, with gated VIP early access ${plan.lastYear.earlyAccess.from} → ${plan.lastYear.earlyAccess.to}` : ''}; the public window is the "vs last year" baseline.` : ''}
 Goals: revenue ${$(plan.goals.revenue)} · ad spend ${$(plan.goals.adSpend)}${plan.goals.adSpend > 0 ? ` · implied MER ${(plan.goals.revenue / plan.goals.adSpend).toFixed(1)}x` : ''}${plan.goals.orders ? ` · orders ${plan.goals.orders}` : ''}${plan.goals.emailRevenue ? ` · email/SMS revenue ${$(plan.goals.emailRevenue)}` : ''}.
 Plan: ${plan.summary || '(not written yet)'}
 Offers: ${plan.offers || '(not set)'}
