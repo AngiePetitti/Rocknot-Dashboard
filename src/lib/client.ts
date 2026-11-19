@@ -335,6 +335,8 @@ export interface ClientProfile {
     lastYear?: { from: string; to: string; earlyAccess?: { from: string; to: string } };
     /** Sale details seeded onto the BFCM tab (see BfcmOffer in lib/bfcm); admins edit them on the tab from then on. */
     saleDetails?: Array<{ id: string; phase: string; dates: string; timing?: string; deal: string; products?: string; code?: string; stackable?: string; notes?: string }>;
+    /** Bump when the seeded rows change: seeded rows (by id) are refreshed on the saved plan, admin-added rows are kept. */
+    saleDetailsVersion?: number;
   };
   goals: {
     /** Starting annual net-sales target shown until an admin saves one (0 = ask). */
@@ -582,14 +584,22 @@ const KAILEEP: ClientProfile = {
     ],
     // BFCM 2025 (per Angie): gated VIP early access Nov 9–15, public sale Nov 27–30.
     lastYear: { from: '2025-11-27', to: '2025-11-30', earlyAccess: { from: '2025-11-09', to: '2025-11-15' } },
-    // BFCM 2026 sale details for the team (Karina's email brief, Nov 18).
-    // Flash-sale codes per Ting (Nov 18), each scheduled for the full day.
-    // "To confirm" items are Angie's / Airin's to settle; the tab flags them.
+    // BFCM 2026 sale details for the team (Karina's email brief, Nov 18),
+    // from the discounts scheduled in Shopify (Angie's screenshot, Nov 19).
+    // Dates follow the plan (early access Nov 25–26, sale Nov 27–30); each
+    // discount's own schedule in Shopify is the source of truth and should
+    // match. "To confirm" items are Angie's / Airin's to settle; the tab flags them.
+    saleDetailsVersion: 2,
     saleDetails: [
-      { id: 'early', phase: 'Early Access Sale', dates: 'Nov 25 – Nov 26', timing: 'All day, both days', deal: 'To confirm: up to 60% off', products: 'BFCM collections (all deals, women\'s, bridal, kids)', code: 'To confirm', stackable: '—', notes: 'To confirm: who gets access (VIP list, SMS subscribers, everyone) and how the code is delivered' },
-      { id: 'sale', phase: 'BFCM Sale', dates: 'Nov 27 – Nov 30', timing: 'All day; ends midnight Nov 30 unless extended on the Nov 29 call', deal: 'To confirm: up to 60% off', products: 'BFCM collections (all deals, women\'s, bridal, kids)', code: 'To confirm: automatic discount or code', stackable: '—' },
-      { id: 'flash-bridal', phase: 'Flash sale · Nov 28', dates: 'Nov 28', timing: 'Full day (scheduled in Shopify)', deal: '20% off', products: 'Regular-priced bridal shoes', code: 'FLASHBRIDAL20', stackable: 'To confirm with Airin: can it combine with the BFCM sale in the same order?' },
-      { id: 'flash-kids', phase: 'Flash sale · Nov 29', dates: 'Nov 29', timing: 'Full day (scheduled in Shopify)', deal: '25% off', products: 'Regular-priced kids\' shoes', code: 'FLASHKIDS25', stackable: 'To confirm with Airin: can it combine with the BFCM sale in the same order?' },
+      { id: 'headline', phase: 'Headline offer', dates: 'Nov 25 – Nov 30', timing: 'Early access Nov 25–26, public sale Nov 27–30', deal: 'Up to 60% off', products: 'BFCM collections (all deals, women\'s, bridal, kids)', code: 'See the rows below', stackable: '—', notes: 'Confirmed by Angie, Nov 19: the line for emails, SMS and the site. The mechanics are the rows below.' },
+      { id: 'early-women', phase: 'Early Access · women\'s', dates: 'Nov 25 – Nov 26', timing: 'All day, both days (Shopify schedule to confirm)', deal: '30% off', products: 'Women\'s shoes, 2 collections (to confirm which: women\'s and bridal BFCM collections?)', code: 'EARLYBFCM30', stackable: '—', notes: 'To confirm: who gets early access (VIP list, SMS subscribers, everyone) and how the code is sent' },
+      { id: 'early-kids', phase: 'Early Access · kids', dates: 'Nov 25 – Nov 26', timing: 'All day, both days (Shopify schedule to confirm)', deal: 'To confirm: Shopify lists the code EARLYBFCM50 as "30% off Kids\' Event"; the name says 50%', products: 'Kids\' shoes (Kids\' Event)', code: 'EARLYBFCM50', stackable: '—' },
+      { id: 'sale-women', phase: 'BFCM Sale · women\'s', dates: 'Nov 27 – Nov 30', timing: 'All day; ends midnight Nov 30 unless extended on the Nov 29 call', deal: '30% off, automatic at checkout', products: 'Women\'s shoes, 2 collections (to confirm which)', code: 'No code (automatic)', stackable: '—' },
+      { id: 'sale-kids', phase: 'BFCM Sale · kids', dates: 'Nov 27 – Nov 30', timing: 'All day; ends midnight Nov 30 unless extended on the Nov 29 call', deal: '50% off, automatic at checkout', products: 'Kids\' shoes (Kids\' Event)', code: 'No code (automatic)', stackable: '—' },
+      { id: 'gwp-clutch', phase: 'BFCM gift · free clutch', dates: 'Nov 27 – Nov 30', timing: 'Automatic while scheduled', deal: 'Free clutch with purchase', products: 'To confirm: which orders qualify (minimum spend, which collections) and which clutch', code: 'No code (automatic)', stackable: 'To confirm: both gifts on one order, or one?' },
+      { id: 'gwp-bow', phase: 'BFCM gift · free bow', dates: 'Nov 27 – Nov 30', timing: 'Automatic while scheduled', deal: 'Free bow with purchase', products: 'To confirm: which orders qualify and which bow', code: 'No code (automatic)', stackable: 'To confirm: both gifts on one order, or one?' },
+      { id: 'flash-bridal', phase: 'Flash sale · Nov 28', dates: 'Nov 28', timing: 'Full day (scheduled in Shopify)', deal: '20% off', products: 'Bridal shoes at regular price only', code: 'FLASHBRIDAL20', stackable: 'No. Does not combine with sale products or the BFCM discounts; regular-priced bridal shoes only', notes: 'Confirmed by Angie, Nov 19' },
+      { id: 'flash-kids', phase: 'Flash sale · Nov 29', dates: 'Nov 29', timing: 'Full day (scheduled in Shopify)', deal: '25% off', products: 'Kids\' shoes at regular price only', code: 'FLASHKIDS25', stackable: 'No. Does not combine with sale products or the BFCM discounts; regular-priced kids\' shoes only', notes: 'Confirmed by Angie, Nov 19' },
     ],
   },
   // $4M 2026 net-sales target set Sep 2026. Paid MER 5x is the agency's number;
