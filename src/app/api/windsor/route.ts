@@ -614,7 +614,7 @@ export async function GET(request: NextRequest) {
         metrics: current.metrics,
         revenueData: current.revenueData,
         ...(priorPeriod ? { priorPeriod, priorLabel, compareMode } : {}),
-      }, await partnerSession()), { headers: cacheHeaders(cur.date_to >= todayStr, settledEnd(cur.date_to)) });
+      }, await partnerSession()), { headers: !hasSales ? cacheHeaders(true) : cacheHeaders(cur.date_to >= todayStr, settledEnd(cur.date_to)) });
     } catch (err) {
       return NextResponse.json({ source: 'error', error: err instanceof Error ? err.message : 'Unknown error', timeframe: tf, metrics: null, revenueData: [] });
     }
@@ -680,6 +680,14 @@ export async function GET(request: NextRequest) {
         }
       }
 
+      // A short range ending yesterday whose Shopify numbers came from a
+      // fallback (or came back empty) is a degraded answer that will heal on
+      // its own as ShopifyQL recovers or Windsor syncs — never CDN-cache it,
+      // or the broken view outlives the outage (the recurring "yesterday
+      // revenue is missing" bug).
+      const shortRecent = currentParams.date_to >= yesterdayStr &&
+        (Date.parse(currentParams.date_to) - Date.parse(currentParams.date_from)) <= 2 * 86400000;
+      const suspect = shortRecent && (overview.revenueSource === 'none' || overview.shopifySource !== 'shopifyql' || overview.metrics.totalOrders === 0);
       return NextResponse.json(forPartner({
         source: 'bigquery_live',
         timeframe: tf,
@@ -694,7 +702,7 @@ export async function GET(request: NextRequest) {
         ...(trimmedToYesterday ? { dataLag: true, latestAvailableDate: yesterdayStr } : {}),
         ...(bqPrior ? { priorPeriod: bqPrior, priorLabel: bqPriorLabel, compareMode } : {}),
         ...(priorError ? { priorError } : {}),
-      }, await partnerSession()), { headers: cacheHeaders(false, settledEnd(currentParams.date_to)) });
+      }, await partnerSession()), { headers: suspect ? cacheHeaders(true) : cacheHeaders(false, settledEnd(currentParams.date_to)) });
     }
 
     if (debug) {
@@ -1052,7 +1060,7 @@ export async function GET(request: NextRequest) {
       ...(shopifyLiveError && current.metrics.totalRevenue === 0 ? { shopifyLiveError } : {}),
       ...(priorPeriod ? { priorPeriod, priorLabel, compareMode } : {}),
       ...(lastWindsorError ? { adsError: `Windsor API error: ${lastWindsorError} — if the API key was rotated, update WINDSOR_API_KEY in Vercel and redeploy.` } : {}),
-    }, await partnerSession()), { headers: cacheHeaders(includesToday) });
+    }, await partnerSession()), { headers: (current.metrics.totalOrders === 0 || current.revenueSource !== 'shopify' || latestAvailableDate) ? cacheHeaders(true) : cacheHeaders(includesToday) });
 
   } catch (err) {
     return NextResponse.json({
