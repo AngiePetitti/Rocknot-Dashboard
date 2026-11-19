@@ -39,6 +39,8 @@ export interface BfcmPlan {
   offers: string;
   /** Structured sale details for the team (see BfcmOffer); seeded from the client profile until an admin edits them. */
   saleDetails?: BfcmOffer[];
+  /** The profile seed version the saved rows were last refreshed from. */
+  saleDetailsVersion?: number;
   goals: { revenue: number; adSpend: number; orders?: number; emailRevenue?: number };
   collections: BfcmLink[];
   checklist: BfcmCheck[];
@@ -92,6 +94,7 @@ export function defaultPlan(year = bfcmYear()): BfcmPlan {
     earlyAccessFrom: addDays(blackFriday(year), -3),
     summary: '', offers: '',
     saleDetails: (getClient().bfcm?.saleDetails || []).map(o => ({ ...o })),
+    saleDetailsVersion: getClient().bfcm?.saleDetailsVersion ?? 1,
     goals: { revenue: 0, adSpend: 0 },
     collections: [...(getClient().bfcm?.collections || [])], checklist: defaultChecklist(year), notes: '',
     ...(getClient().bfcm?.lastYear && year === bfcmYear() ? { lastYear: { ...getClient().bfcm!.lastYear!, source: 'manual' as const } } : {}),
@@ -108,7 +111,24 @@ export async function loadBfcmPlan(year = bfcmYear()): Promise<BfcmPlan> {
     const p = JSON.parse(raw) as Partial<BfcmPlan>;
     const d = defaultPlan(year);
     // Profile-seeded collection links show until an admin has saved their own list.
-    return { ...d, ...p, goals: { ...d.goals, ...(p.goals || {}) }, window: { ...d.window, ...(p.window || {}) }, collections: p.collections?.some(c => c.url) ? p.collections : d.collections, checklist: p.checklist?.length ? p.checklist : d.checklist, lastYear: p.lastYear?.from ? p.lastYear : d.lastYear, saleDetails: p.saleDetails?.length ? p.saleDetails : d.saleDetails };
+    // Sale details: the saved rows, unless the profile seed has moved on, in
+    // which case the seeded rows are refreshed (matched by id, or replaced
+    // wholesale when the ids changed) and rows an admin added by hand stay.
+    const seed = d.saleDetails || [];
+    const seedIds = new Set(seed.map(o => o.id));
+    const savedRows = p.saleDetails || [];
+    const seedVersion = d.saleDetailsVersion ?? 1;
+    let saleDetails: BfcmOffer[];
+    if (!savedRows.length) saleDetails = seed;
+    else if ((p.saleDetailsVersion ?? 1) >= seedVersion) saleDetails = savedRows;
+    else {
+      // Seeded ids are words or hyphenated ('early-kids'); rows added on the
+      // tab get a random base-36 id with no hyphen, so they are kept.
+      const wasSeeded = (id: string) => seedIds.has(id) || id.includes('-') || id === 'early' || id === 'sale';
+      const added = savedRows.filter(o => !wasSeeded(o.id));
+      saleDetails = [...seed, ...added];
+    }
+    return { ...d, ...p, goals: { ...d.goals, ...(p.goals || {}) }, window: { ...d.window, ...(p.window || {}) }, collections: p.collections?.some(c => c.url) ? p.collections : d.collections, checklist: p.checklist?.length ? p.checklist : d.checklist, lastYear: p.lastYear?.from ? p.lastYear : d.lastYear, saleDetails, saleDetailsVersion: Math.max(seedVersion, p.saleDetailsVersion ?? 1) };
   } catch { return defaultPlan(year); }
 }
 
