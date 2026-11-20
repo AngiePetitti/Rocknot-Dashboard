@@ -136,9 +136,17 @@ export async function fetchChannel(key: string, from: string, to: string, prior?
 /** Net / total sales and orders per marketplace channel for the range — what the
  *  store-only MER card subtracts from the all-channel figures. [] when none. */
 export interface MarketplaceTotals { key: string; label: string; netSales: number; totalSales: number; orders: number; returnFees: number; /** Counted in MER (profile countInMer or countInSales). */ inMer: boolean; /** Already inside the Overview's sales figures (profile countInSales). */ inSales: boolean }
+// Memoized for 10 minutes per range: these side-cards fire one ShopifyQL
+// query PER channel on every Overview load and were crowding the main sales
+// query out of Shopify's analytics rate limit (the recurring stale-yesterday
+// bug on Rocknot, which has two channels).
+const mkMemo = new Map<string, { t: number; data: MarketplaceTotals[] }>();
 export async function fetchMarketplaceTotals(from: string, to: string): Promise<MarketplaceTotals[]> {
   const list = marketplaces();
   if (!list.length || !trafficConfigured()) return [];
+  const memoKey = `${getClient().id}|${from}|${to}`;
+  const hit = mkMemo.get(memoKey);
+  if (hit && Date.now() - hit.t < 10 * 60 * 1000) return hit.data;
   const out = await Promise.all(list.map(async m => {
     try {
       const rows = await shopifyql(`FROM sales SHOW orders, net_sales, total_sales, return_fees WHERE sales_channel = ${lit(m.shopifyChannel)} SINCE ${from} UNTIL ${to}`, 12000);
@@ -148,5 +156,8 @@ export async function fetchMarketplaceTotals(from: string, to: string): Promise<
       return null;
     }
   }));
-  return out.filter((x): x is MarketplaceTotals => x !== null);
+  const data = out.filter((x): x is MarketplaceTotals => x !== null);
+  // Only memoize complete answers: a throttled run should retry next load.
+  if (data.length === list.length) mkMemo.set(memoKey, { t: Date.now(), data });
+  return data;
 }
