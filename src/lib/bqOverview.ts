@@ -1,6 +1,6 @@
 import { runQuery, getDataset, dedupedOrdersCte, tableExists, dailyShopifySalesSql, shopifyOrdersFilter, googleSource, metaSource } from '@/src/lib/bigquery';
 import { AD_CREDITS, creditAppliedInRange } from '@/src/lib/adCredits';
-import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees, storeOnlyWhere, salesWhere, merBasis } from '@/src/lib/client';
+import { shopifyDomain, metaAccountSql, hasPlatform, includeReturnFees, storeOnlyWhere, salesWhere, merBasis, marketplaces } from '@/src/lib/client';
 import { fetchHumanConversion } from '@/src/lib/traffic';
 import { fetchMarketplaceTotals, MarketplaceTotals } from '@/src/lib/channel';
 import { runShopifyQLRaw } from '@/src/lib/shopifyql';
@@ -276,6 +276,48 @@ export async function fetchShopifyCustomerSplit(from: string, to: string): Promi
   return { newCustomers, returningCustomers, newRevenue, returningRevenue };
 }
 
+// ── Real-time cross-check for the Yesterday view ─────────────────────────
+// Shopify's ANALYTICS API (ShopifyQL) shares a tight rate limit with every
+// other report query this app and Cleo make, and its tables can run behind
+// the admin's live data in the morning. The Orders API has neither problem.
+// When a one-day range ending yesterday reports materially fewer orders than
+// the Orders API shows, the report copy is stale or throttled — rebuild the
+// headline numbers from the orders themselves (net = subtotal after
+// discounts, before shipping/tax; same-day refunds are the only drift).
+async function fetchOrdersApiDay(date: string): Promise<{ orders: number; netPlaced: number; totalSales: number } | null> {
+  const { adminGraphql } = await import('@/src/lib/shopifyAdmin');
+  const skip = marketplaces().filter(m => !m.countInSales).map(m => new RegExp(m.sourceMatch, 'i'));
+  let after: string | null = null;
+  let orders = 0, netPlaced = 0, totalSales = 0;
+  for (let page = 0; page < 8; page++) {
+    const r: {
+      orders: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: Array<{
+        sourceName: string | null; test: boolean; cancelledAt: string | null;
+        currentSubtotalPriceSet: { shopMoney: { amount: string } };
+        currentTotalPriceSet: { shopMoney: { amount: string } };
+      }> };
+    } = await adminGraphql(`
+      query($q: String!, $after: String) {
+        orders(first: 250, after: $after, query: $q) {
+          pageInfo { hasNextPage endCursor }
+          nodes { sourceName test cancelledAt
+            currentSubtotalPriceSet { shopMoney { amount } }
+            currentTotalPriceSet { shopMoney { amount } } }
+        }
+      }`, { q: `created_at:${date}`, after }, 15000);
+    for (const o of r.orders.nodes) {
+      if (o.test || o.cancelledAt) continue;
+      if (skip.some(re => re.test(o.sourceName || ''))) continue;
+      orders += 1;
+      netPlaced += parseFloat(o.currentSubtotalPriceSet?.shopMoney?.amount || '0') || 0;
+      totalSales += parseFloat(o.currentTotalPriceSet?.shopMoney?.amount || '0') || 0;
+    }
+    if (!r.orders.pageInfo.hasNextPage) break;
+    after = r.orders.pageInfo.endCursor;
+  }
+  return { orders, netPlaced, totalSales };
+}
+
 export async function getOverview(dateFrom: string, dateTo: string): Promise<OverviewResult> {
   const ds = getDataset();
   const rowFilter = await shopifyOrdersFilter();
@@ -520,6 +562,32 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   if (!(shopifyDaysQl && shopifyDaysQl.length > 0)) {
     try { shopifyTotals = await fetchShopifyTotals(dateFrom, dateTo); }
     catch (e: unknown) { shopifyQlError = `${shopifyQlError ? shopifyQlError + ' / ' : ''}totals: ${e instanceof Error ? e.message : String(e)}`; }
+  }
+
+  // Yesterday cross-check: for a one-day range ending yesterday or today,
+  // compare the report's order count against the real-time Orders API. If the
+  // report is short by 15%+ (throttled, or its tables still catching up in
+  // the morning), rebuild that day's numbers from the orders themselves.
+  if (dateFrom === dateTo) {
+    try {
+      const laToday = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      const recent = (Date.parse(laToday) - Date.parse(dateTo)) <= 86400000 && dateTo <= laToday;
+      if (recent) {
+        const reported = shopifyDays.length ? shopifyDays.reduce((s, d) => s + d.orders, 0) : (shopifyTotals?.orders ?? 0);
+        const live = await fetchOrdersApiDay(dateTo);
+        if (live && live.orders > 0 && reported < live.orders * 0.85) {
+          const rebuilt: ShopifyDay = {
+            date: dateTo, orders: live.orders,
+            netSales: live.netPlaced, returnFees: 0,
+            grossLessDiscounts: live.netPlaced, aovBasis: live.netPlaced,
+            totalSales: live.totalSales,
+          };
+          shopifyDays.length = 0; shopifyDays.push(rebuilt);
+          shopifyTotals = null;
+          shopifyQlError = `${shopifyQlError ? shopifyQlError + ' / ' : ''}report showed ${reported} orders vs ${live.orders} live; rebuilt from the Orders API`;
+        }
+      }
+    } catch { /* cross-check is best effort — never take the page down */ }
   }
 
   const snapByDate: Record<string, { spend: number; revenue: number }> = {};
