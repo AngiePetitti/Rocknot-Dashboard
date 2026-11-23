@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Header from '@/src/components/Header';
 import CallNotesImporter from '@/src/components/CallNotesImporter';
 
@@ -132,21 +132,38 @@ export default function TasksContent() {
     [tasks, filterAssignee]
   );
 
-  async function api(method: string, body?: Record<string, unknown>, query?: string) {
+  // Saves go through Google Sheets and take seconds. Two rules keep quick
+  // successive drags from reverting each other:
+  //   1. Writes run ONE AT A TIME (a queue) — two concurrent saves each load
+  //      the pre-move board server-side and the slower one erases the faster
+  //      one's change.
+  //   2. The server's returned board only replaces local state when no newer
+  //      write is pending — otherwise the stale snapshot visually undoes the
+  //      optimistic moves made while the request was in flight.
+  const writeQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const pendingWrites = useRef(0);
+  function api(method: string, body?: Record<string, unknown>, query?: string): Promise<boolean> {
     setError(null);
-    try {
-      const res = await fetch(`/api/tasks${query || ''}`, {
-        method,
-        ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
-      });
-      const d = await res.json();
-      if (!res.ok || d.error) throw new Error(d.error || 'Request failed');
-      if (Array.isArray(d.tasks)) setTasks(d.tasks);
-      return true;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed');
-      return false;
-    }
+    pendingWrites.current += 1;
+    const run = writeQueue.current.then(async () => {
+      try {
+        const res = await fetch(`/api/tasks${query || ''}`, {
+          method,
+          ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+        });
+        const d = await res.json();
+        if (!res.ok || d.error) throw new Error(d.error || 'Request failed');
+        if (pendingWrites.current === 1 && Array.isArray(d.tasks)) setTasks(d.tasks);
+        return true;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Request failed');
+        return false;
+      } finally {
+        pendingWrites.current -= 1;
+      }
+    });
+    writeQueue.current = run.catch(() => {});
+    return run;
   }
 
   async function createTask() {
