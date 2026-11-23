@@ -9,7 +9,7 @@ import { normalizeRole } from '@/src/lib/access';
 import { getClient } from '@/src/lib/client';
 import { getKVStrict, setKV } from '@/src/lib/chatStore';
 
-const SHEET_ID = (process.env.CALENDAR_SHEET_ID || '').trim();
+const SHEET_ID = (process.env.CALENDAR_SHEET_ID || '').replace(/\s+/g, '');
 const TAB = 'Users';
 
 function envList(name: string): string[] {
@@ -53,7 +53,7 @@ async function api(path: string, init?: RequestInit): Promise<any> {
     cache: 'no-store',
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json?.error?.message || `Sheets ${res.status}`);
+  if (!res.ok) throw new Error(json?.error?.message || `Google Sheets error ${res.status}. Check that CALENDAR_SHEET_ID is the Sheet's id and the Sheet is shared with the service account.`);
   return json;
 }
 
@@ -104,7 +104,10 @@ async function seedProfileAdmins(users: StoredUser[]): Promise<StoredUser[]> {
   }
 }
 
+const NOT_CONFIGURED = 'Team & Access needs a Google Sheet to save people in. Set CALENDAR_SHEET_ID (and GCP_SERVICE_ACCOUNT_KEY) in Vercel, share that Sheet with the service account as Editor, then redeploy.';
+
 async function writeStoredUsers(users: StoredUser[]): Promise<void> {
+  if (!storeConfigured()) throw new Error(NOT_CONFIGURED);
   await ensureTab();
   await api(`/values/${TAB}!A2:B:clear`, { method: 'POST', body: '{}' });
   await api(`/values/${TAB}!A1?valueInputOption=RAW`, {
