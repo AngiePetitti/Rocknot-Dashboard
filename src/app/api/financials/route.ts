@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
   // Admin-only, enforced server-side — P&L never reaches non-admin sessions.
   if (authConfigured()) {
     const session = await getServerSession(authOptions);
-    if (session?.user?.role !== 'admin') {
+    if (session?.user?.role !== 'admin' && session?.user?.role !== 'viewer') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
   }

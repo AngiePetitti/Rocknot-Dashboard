@@ -52,7 +52,7 @@ export default function AdminUsers({ currentEmail }: { currentEmail: string }) {
     <div className="space-y-5">
       <Card accentColor="#818cf8">
         <h2 className="text-sm font-bold text-gray-700 mb-1">Add a person</h2>
-        <p className="text-xs text-gray-400 mb-3">They sign in with this Google email. Admins see everything incl. Financials; Team sees everything except Financials. Sales (showroom) sees only the Showroom tab.</p>
+        <p className="text-xs text-gray-400 mb-3">They sign in with this Google email. Admins see everything incl. Financials; Team sees everything except Financials. Sales (showroom) sees only the Showroom tab. Viewer sees everything incl. Financials but can&apos;t change anything.</p>
         <div className="flex flex-col sm:flex-row gap-2">
           <input
             type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)}
@@ -63,6 +63,7 @@ export default function AdminUsers({ currentEmail }: { currentEmail: string }) {
             <option value="team">Team</option>
             <option value="partner">{ROLE_LABELS.partner}</option>
                       <option value="sales">{ROLE_LABELS.sales}</option>
+                      <option value="viewer">{ROLE_LABELS.viewer}</option>
             <option value="admin">Admin</option>
           </select>
           <button onClick={addUser} disabled={busy || !newEmail.trim()} className="text-sm font-semibold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 rounded-lg px-4 py-2">Add</button>
@@ -86,13 +87,14 @@ export default function AdminUsers({ currentEmail }: { currentEmail: string }) {
                   {u.locked && <p className="text-[10px] text-gray-400">{u.source === 'owner' ? 'Agency owner — permanent' : 'Permanent admin (set in env) — manage in Vercel'}</p>}
                 </div>
                 {u.locked ? (
-                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${u.role === 'partner' || u.role === 'sales' ? 'bg-amber-50 text-amber-700' : 'bg-violet-50 text-violet-700'}`} title={ROLE_HELP[u.role]}>{ROLE_LABELS[u.role] || u.role}</span>
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${u.role === 'partner' || u.role === 'sales' || u.role === 'viewer' ? 'bg-amber-50 text-amber-700' : 'bg-violet-50 text-violet-700'}`} title={ROLE_HELP[u.role]}>{ROLE_LABELS[u.role] || u.role}</span>
                 ) : (
                   <>
                     <select value={u.role} disabled={busy} onChange={e => changeRole(u.email, e.target.value as Role)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
                       <option value="team">Team</option>
                       <option value="partner">{ROLE_LABELS.partner}</option>
                       <option value="sales">{ROLE_LABELS.sales}</option>
+                      <option value="viewer">{ROLE_LABELS.viewer}</option>
                       <option value="admin">Admin</option>
                     </select>
                     <button onClick={() => remove(u.email)} disabled={busy} className="text-xs text-red-500 hover:text-red-700 font-medium">Remove</button>

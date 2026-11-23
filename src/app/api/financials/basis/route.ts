@@ -20,7 +20,7 @@ const WINDSOR_API_KEY = (process.env.WINDSOR_API_KEY || '').trim();
 export async function GET(req: NextRequest) {
   if (authConfigured()) {
     const session = await getServerSession(authOptions);
-    if (session?.user?.role !== 'admin') {
+    if (session?.user?.role !== 'admin' && session?.user?.role !== 'viewer') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
   }
