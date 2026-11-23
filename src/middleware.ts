@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
-import { partnerCanOpen, salesCanOpen } from '@/src/lib/access';
+import { partnerCanOpen, salesCanOpen, viewerCanWrite } from '@/src/lib/access';
 import { getClient } from '@/src/lib/client';
 
 // The one hostname the sign-in cookie lives on: NextAuth finishes Google
@@ -90,6 +90,18 @@ export async function middleware(req: NextRequest) {
       home.pathname = '/dashboard';
       home.search = '';
       return NextResponse.redirect(home);
+    }
+    // Viewers see everything except Team & Access and can't change anything.
+    if (token.role === 'viewer') {
+      if (pathname.startsWith('/api/admin') || !viewerCanWrite(pathname, req.method)) {
+        return new NextResponse(JSON.stringify({ error: 'You have view-only access, so you can\'t make changes.' }), { status: 403, headers: { 'content-type': 'application/json' } });
+      }
+      if (pathname.startsWith('/dashboard/admin')) {
+        const home = req.nextUrl.clone();
+        home.pathname = '/dashboard';
+        home.search = '';
+        return NextResponse.redirect(home);
+      }
     }
     // Sales (showroom) logins see only the Showroom tabs.
     if (token.role === 'sales' && !salesCanOpen(pathname)) {

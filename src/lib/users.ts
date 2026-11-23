@@ -112,7 +112,7 @@ async function writeStoredUsers(users: StoredUser[]): Promise<void> {
   await api(`/values/${TAB}!A2:B:clear`, { method: 'POST', body: '{}' });
   await api(`/values/${TAB}!A1?valueInputOption=RAW`, {
     method: 'PUT',
-    body: JSON.stringify({ values: [['Email', 'Role'], ...users.map(u => [u.email, u.role === 'admin' ? 'Admin' : u.role === 'partner' ? 'Partner' : u.role === 'sales' ? 'Sales' : 'Team'])] }),
+    body: JSON.stringify({ values: [['Email', 'Role'], ...users.map(u => [u.email, u.role === 'admin' ? 'Admin' : u.role === 'partner' ? 'Partner' : u.role === 'sales' ? 'Sales' : u.role === 'viewer' ? 'Viewer' : 'Team'])] }),
   });
   cache = { at: Date.now(), users };
 }

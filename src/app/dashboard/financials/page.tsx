@@ -12,7 +12,7 @@ export default async function FinancialsPage() {
   // Only ask NextAuth for a session when sign-in is configured: without
   // NEXTAUTH_SECRET it throws in production and the whole page errors.
   const session = authConfigured() ? await getServerSession(authOptions) : null;
-  const isAdmin = !authConfigured() || session?.user?.role === 'admin';
+  const isAdmin = !authConfigured() || session?.user?.role === 'admin' || session?.user?.role === 'viewer';
 
   if (!isAdmin) {
     return (

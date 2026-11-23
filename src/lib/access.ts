@@ -9,12 +9,16 @@
 //   sales   — an outside wholesale sales team (e.g. a showroom): only the
 //             Showroom tabs (their own orders and pending drafts). Enforced
 //             server-side the same way as partner.
-export type Role = 'admin' | 'team' | 'partner' | 'sales';
+//   viewer  — sees everything an admin sees (Financials included) except
+//             Team & Access, and can't change anything: the middleware
+//             refuses every write to the API (see viewerCanWrite).
+export type Role = 'admin' | 'team' | 'partner' | 'sales' | 'viewer';
 
-export const ROLE_LABELS: Record<Role, string> = { admin: 'Admin', team: 'Team', partner: 'Partner (agency)', sales: 'Sales (showroom)' };
+export const ROLE_LABELS: Record<Role, string> = { admin: 'Admin', team: 'Team', partner: 'Partner (agency)', sales: 'Sales (showroom)', viewer: 'Viewer (read-only)' };
 export const ROLE_HELP: Record<Role, string> = {
   admin: 'Everything, including Financials and Team & Access.',
   team: 'Every tab except Financials and Team & Access.',
+  viewer: 'Sees every tab, Financials included, but cannot change anything. No Team & Access.',
   sales: 'Showroom tabs only: their orders and pending draft orders. No store sales, ads, customers, financials or AI.',
   partner: 'Overview (ads view), Ad Performance, Attribution and Traffic only. No customers, retention, products, inventory, returns, financials, goals, tasks, AI or marketplace tabs.',
 };
@@ -53,7 +57,23 @@ export function salesCanOpen(pathname: string): boolean {
 /** Any stored or submitted role string → a Role (unknown values are 'team'). */
 export function normalizeRole(raw: string | null | undefined): Role {
   const r = (raw || '').toLowerCase().trim();
-  return r === 'admin' ? 'admin' : r === 'partner' ? 'partner' : r === 'sales' ? 'sales' : 'team';
+  return r === 'admin' ? 'admin' : r === 'partner' ? 'partner' : r === 'sales' ? 'sales' : r === 'viewer' ? 'viewer' : 'team';
+}
+
+/** Roles that may see the Financials tab and its data. */
+export function canSeeFinancials(role: string | null | undefined): boolean {
+  return role === 'admin' || role === 'viewer';
+}
+
+/** API writes a viewer may still make: asking Cleo and their own push opt-in, which change no shared data. */
+const VIEWER_WRITES = ['/api/insights/ask', '/api/insights/chat', '/api/insights/chat/history', '/api/push/subscribe'];
+
+/** May a read-only viewer make this request? Reads always; writes only from the list above. */
+export function viewerCanWrite(pathname: string, method: string): boolean {
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true;
+  const p = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
+  if (p.startsWith('/api/auth')) return true;
+  return VIEWER_WRITES.includes(p);
 }
 
 /** True for logins that see a fixed slice of the dashboard (no Cleo, tasks or alerts). */

@@ -41,9 +41,10 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const { data: session, status } = useSession();
   const client = useClient();
   const isAdmin = session?.user?.role === 'admin';
+  const isViewer = session?.user?.role === 'viewer';
   // Hide admin-only items unless the user is an admin. When auth isn't wired up
   // (unauthenticated session), show everything so the pre-auth site is intact.
-  const visibleNav = navItems.filter(i => !i.adminOnly || isAdmin || status === 'unauthenticated');
+  const visibleNav = navItems.filter(i => !i.adminOnly || isAdmin || status === 'unauthenticated' || (isViewer && i.href === '/dashboard/financials'));
   // Marketplace channels (e.g. Nordstrom) get their own tab, right after Overview.
   const marketplaceNav = (client.marketplaces || []).map(m => ({ href: `/dashboard/channel/${m.key}`, label: m.label, icon: m.icon || '🏬' }));
   // Subscription brands (Loop) get a Subscriptions tab after the channel tabs.
