@@ -517,6 +517,12 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // The per-day Shopify report is THE number this page is judged on — run it
   // alone first so the secondary Shopify queries below never compete with it
   // for Shopify's ShopifyQL rate limit.
+  // Orders API cross-check for a one-day recent range: kicked off HERE so it
+  // runs concurrently with everything else (it previously ran serially at the
+  // end and added seconds to every Yesterday load).
+  const laTodayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const wantsOrdersCheck = dateFrom === dateTo && dateTo <= laTodayStr && (Date.parse(laTodayStr) - Date.parse(dateTo)) <= 86400000;
+  const ordersCheckPromise = wantsOrdersCheck ? fetchOrdersApiDay(dateTo).catch(() => null) : Promise.resolve(null);
   const shopifyDaysQl = await fetchShopifyDaily(dateFrom, dateTo).catch((e: unknown) => { shopifyQlError = String(e instanceof Error ? e.message : e); return null; });
   const [shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows, pinterestRows, shopifySplit, marketplaceTotals] = await Promise.all([
     runQuery<{ date: string; orders: number; total_sales: number | null; net_sales: number | null; net_sales_placed: number | null }>(bqShopifySql, params)
@@ -568,13 +574,11 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // compare the report's order count against the real-time Orders API. If the
   // report is short by 15%+ (throttled, or its tables still catching up in
   // the morning), rebuild that day's numbers from the orders themselves.
-  if (dateFrom === dateTo) {
+  if (wantsOrdersCheck) {
     try {
-      const laToday = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-      const recent = (Date.parse(laToday) - Date.parse(dateTo)) <= 86400000 && dateTo <= laToday;
-      if (recent) {
+      {
         const reported = shopifyDays.length ? shopifyDays.reduce((s, d) => s + d.orders, 0) : (shopifyTotals?.orders ?? 0);
-        const live = await fetchOrdersApiDay(dateTo);
+        const live = await ordersCheckPromise;
         if (live && live.orders > 0 && reported < live.orders * 0.85) {
           const rebuilt: ShopifyDay = {
             date: dateTo, orders: live.orders,
