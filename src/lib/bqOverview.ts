@@ -514,17 +514,21 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   type PlatformDayRow = { date: string; spend: number | null; revenue: number | null };
   const noPlatformRows = Promise.resolve([] as PlatformDayRow[]);
   let shopifyQlError: string | undefined;
-  // The per-day Shopify report is THE number this page is judged on — run it
-  // alone first so the secondary Shopify queries below never compete with it
-  // for Shopify's ShopifyQL rate limit.
   // Orders API cross-check for a one-day recent range: kicked off HERE so it
   // runs concurrently with everything else (it previously ran serially at the
   // end and added seconds to every Yesterday load).
   const laTodayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const wantsOrdersCheck = dateFrom === dateTo && dateTo <= laTodayStr && (Date.parse(laTodayStr) - Date.parse(dateTo)) <= 86400000;
   const ordersCheckPromise = wantsOrdersCheck ? fetchOrdersApiDay(dateTo).catch(() => null) : Promise.resolve(null);
-  const shopifyDaysQl = await fetchShopifyDaily(dateFrom, dateTo).catch((e: unknown) => { shopifyQlError = String(e instanceof Error ? e.message : e); return null; });
-  const [shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows, pinterestRows, shopifySplit, marketplaceTotals] = await Promise.all([
+  // The per-day Shopify report stays protected from ShopifyQL rate-limit
+  // contention: the OTHER ShopifyQL queries (conversion, customer split,
+  // channel totals) are chained BEHIND it. But the BigQuery queries never
+  // touch that rate limit, so they start immediately instead of idling for
+  // the report's 1-2 seconds — that wait was pure page latency.
+  const qlDailyPromise = fetchShopifyDaily(dateFrom, dateTo).catch((e: unknown) => { shopifyQlError = String(e instanceof Error ? e.message : e); return null; });
+  const afterQlDaily = <T,>(fn: () => Promise<T>): Promise<T> => qlDailyPromise.then(() => fn());
+  const [shopifyDaysQl, shopifyDaysBq, adsRows, custRows, custDaily, conversionRate, snapRows, pinterestRows, shopifySplit, marketplaceTotals] = await Promise.all([
+    qlDailyPromise,
     runQuery<{ date: string; orders: number; total_sales: number | null; net_sales: number | null; net_sales_placed: number | null }>(bqShopifySql, params)
       .then(rows => rows.map(r => ({
         date: r.date,
@@ -541,7 +545,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       .catch((err: unknown) => { adsQueryError = String(err); return [] as AdsRow[]; }),
     runQuery<CustomerRow>(customerSql, params).catch(() => [] as CustomerRow[]),
     runQuery<{ date: string; new_customers: number | null; buyers: number | null }>(customerDailySql, params).catch(() => [] as Array<{ date: string; new_customers: number | null; buyers: number | null }>),
-    fetchHumanConversion(dateFrom, dateTo).catch(() => null),
+    afterQlDaily(() => fetchHumanConversion(dateFrom, dateTo)).catch(() => null),
     hasPlatform('snapchat')
       ? runQuery<PlatformDayRow>(snapSql, params).catch(() => [] as PlatformDayRow[])
       : noPlatformRows,
@@ -554,8 +558,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
     // Shopify's own new/returning customer counts — complete history, guest and
     // app-created orders included. BigQuery's split (history only as far back
     // as the Windsor sync, orders without a customer id excluded) is the fallback.
-    fetchShopifyCustomerSplit(dateFrom, dateTo).catch(() => null),
-    fetchMarketplaceTotals(dateFrom, dateTo).catch(() => [] as MarketplaceTotals[]),
+    afterQlDaily(() => fetchShopifyCustomerSplit(dateFrom, dateTo)).catch(() => null),
+    afterQlDaily(() => fetchMarketplaceTotals(dateFrom, dateTo)).catch(() => [] as MarketplaceTotals[]),
   ]);
 
   const shopifyDays: ShopifyDay[] =
