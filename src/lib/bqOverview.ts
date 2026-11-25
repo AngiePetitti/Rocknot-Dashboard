@@ -284,6 +284,36 @@ export async function fetchShopifyCustomerSplit(from: string, to: string): Promi
 // the Orders API shows, the report copy is stale or throttled — rebuild the
 // headline numbers from the orders themselves (net = subtotal after
 // discounts, before shipping/tax; same-day refunds are the only drift).
+/**
+ * Shared Yesterday cross-check, used by EVERY Overview path (the BigQuery
+ * path for Windsor clients and the direct Shopify path for Skimpies), so a
+ * fix to the Yesterday view lands on every dashboard at once.
+ *
+ * startOrdersCheck() kicks the Orders API read off immediately (call it
+ * before the other queries so it runs concurrently, never serially at the
+ * end); applyOrdersCheck() swaps in the rebuilt day when the report is short.
+ */
+export function wantsOrdersCheck(dateFrom: string, dateTo: string): boolean {
+  const laToday = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  return dateFrom === dateTo && dateTo <= laToday && (Date.parse(laToday) - Date.parse(dateTo)) <= 86400000;
+}
+export type OrdersCheck = { orders: number; netPlaced: number; totalSales: number } | null;
+export function startOrdersCheck(dateFrom: string, dateTo: string): Promise<OrdersCheck> {
+  return wantsOrdersCheck(dateFrom, dateTo) ? fetchOrdersApiDay(dateTo).catch(() => null) : Promise.resolve(null);
+}
+/** Rebuilds `days` in place from the Orders API when the report is 15%+ short. Returns a note when it did. */
+export function applyOrdersCheck(days: ShopifyDay[], date: string, reported: number, live: OrdersCheck): string | null {
+  if (!live || live.orders <= 0 || reported >= live.orders * 0.85) return null;
+  days.length = 0;
+  days.push({
+    date, orders: live.orders,
+    netSales: live.netPlaced, returnFees: 0,
+    grossLessDiscounts: live.netPlaced, aovBasis: live.netPlaced,
+    totalSales: live.totalSales,
+  });
+  return `report showed ${reported} orders vs ${live.orders} live; rebuilt from the Orders API`;
+}
+
 async function fetchOrdersApiDay(date: string): Promise<{ orders: number; netPlaced: number; totalSales: number } | null> {
   const { adminGraphql } = await import('@/src/lib/shopifyAdmin');
   const skip = marketplaces().filter(m => !m.countInSales).map(m => new RegExp(m.sourceMatch, 'i'));
@@ -517,9 +547,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // Orders API cross-check for a one-day recent range: kicked off HERE so it
   // runs concurrently with everything else (it previously ran serially at the
   // end and added seconds to every Yesterday load).
-  const laTodayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  const wantsOrdersCheck = dateFrom === dateTo && dateTo <= laTodayStr && (Date.parse(laTodayStr) - Date.parse(dateTo)) <= 86400000;
-  const ordersCheckPromise = wantsOrdersCheck ? fetchOrdersApiDay(dateTo).catch(() => null) : Promise.resolve(null);
+  const checkOrders = wantsOrdersCheck(dateFrom, dateTo);
+  const ordersCheckPromise = startOrdersCheck(dateFrom, dateTo);
   // The per-day Shopify report stays protected from ShopifyQL rate-limit
   // contention: the OTHER ShopifyQL queries (conversion, customer split,
   // channel totals) are chained BEHIND it. But the BigQuery queries never
@@ -578,22 +607,13 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   // compare the report's order count against the real-time Orders API. If the
   // report is short by 15%+ (throttled, or its tables still catching up in
   // the morning), rebuild that day's numbers from the orders themselves.
-  if (wantsOrdersCheck) {
+  if (checkOrders) {
     try {
-      {
-        const reported = shopifyDays.length ? shopifyDays.reduce((s, d) => s + d.orders, 0) : (shopifyTotals?.orders ?? 0);
-        const live = await ordersCheckPromise;
-        if (live && live.orders > 0 && reported < live.orders * 0.85) {
-          const rebuilt: ShopifyDay = {
-            date: dateTo, orders: live.orders,
-            netSales: live.netPlaced, returnFees: 0,
-            grossLessDiscounts: live.netPlaced, aovBasis: live.netPlaced,
-            totalSales: live.totalSales,
-          };
-          shopifyDays.length = 0; shopifyDays.push(rebuilt);
-          shopifyTotals = null;
-          shopifyQlError = `${shopifyQlError ? shopifyQlError + ' / ' : ''}report showed ${reported} orders vs ${live.orders} live; rebuilt from the Orders API`;
-        }
+      const reported = shopifyDays.length ? shopifyDays.reduce((s, d) => s + d.orders, 0) : (shopifyTotals?.orders ?? 0);
+      const note = applyOrdersCheck(shopifyDays, dateTo, reported, await ordersCheckPromise);
+      if (note) {
+        shopifyTotals = null;
+        shopifyQlError = `${shopifyQlError ? shopifyQlError + ' / ' : ''}${note}`;
       }
     } catch { /* cross-check is best effort — never take the page down */ }
   }
