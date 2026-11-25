@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parseCompareMode, priorRangeFor } from '@/src/lib/timeframes';
 import { Timeframe } from '@/src/lib/mockData';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
-import { getOverview, fetchShopifyDaily, fetchShopifyTotals, fetchShopifyCustomerSplit } from '@/src/lib/bqOverview';
+import { getOverview, fetchShopifyDaily, fetchShopifyTotals, fetchShopifyCustomerSplit, startOrdersCheck, applyOrdersCheck, ShopifyDay } from '@/src/lib/bqOverview';
 import { fetchMarketplaceTotals } from '@/src/lib/channel';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/src/lib/auth';
@@ -498,14 +498,43 @@ interface DirectPeriod {
   shopifyError: string | null;
 }
 
-async function directPeriod(from: string, to: string, lite = false): Promise<DirectPeriod> {
-  const [shopify, meta, split] = await Promise.all([
-    fetchShopifyDaily(from, to)
-      .then(rows => ({ rows, err: null as string | null }))
-      .catch((e: unknown) => ({ rows: [] as Awaited<ReturnType<typeof fetchShopifyDaily>>, err: e instanceof Error ? e.message : String(e) })),
-    hasPlatform('meta') ? fetchMetaDaily(from, to).catch(() => null) : Promise.resolve(null),
-    lite ? Promise.resolve(null) : fetchShopifyCustomerSplit(from, to).catch(() => null),
-  ]);
+// Same Yesterday treatment the Rocknot / Kailee P (BigQuery) path gets, via
+// the shared helpers in bqOverview.ts:
+//  - the per-day Shopify report runs first and the OTHER ShopifyQL queries
+//    (customer split, marketplace channel totals) are chained behind it, so
+//    they never crowd it out of Shopify's analytics rate limit;
+//  - Meta and the Orders API cross-check start immediately, concurrently;
+//  - marketplace totals no longer run serially after everything else (they
+//    used to add a full extra ShopifyQL round trip to every load);
+//  - a one-day range ending yesterday/today is cross-checked against the
+//    real-time Orders API and rebuilt when the report is 15%+ short.
+// `gate`: hold this period's ShopifyQL queries until another period's report
+// is in (the comparison period waits for the current one's).
+function directPeriod(from: string, to: string, lite = false, gate: Promise<unknown> = Promise.resolve()): { done: Promise<DirectPeriod>; reportDone: Promise<unknown> } {
+  const ordersCheck = startOrdersCheck(from, to);
+  const metaP = hasPlatform('meta') ? fetchMetaDaily(from, to).catch(() => null) : Promise.resolve(null);
+  const shopifyP = gate.then(() => fetchShopifyDaily(from, to))
+    .then(rows => ({ rows, err: null as string | null }))
+    .catch((e: unknown) => ({ rows: [] as ShopifyDay[], err: e instanceof Error ? e.message : String(e) }));
+  const afterReport = <T,>(fn: () => Promise<T>): Promise<T> => shopifyP.then(() => fn());
+  const splitP = lite ? Promise.resolve(null) : afterReport(() => fetchShopifyCustomerSplit(from, to)).catch(() => null);
+  const mkP = lite ? Promise.resolve([]) : afterReport(() => fetchMarketplaceTotals(from, to)).catch(() => []);
+  return { done: buildDirectPeriod(from, to, shopifyP, metaP, splitP, mkP, ordersCheck), reportDone: shopifyP };
+}
+
+async function buildDirectPeriod(
+  from: string, to: string,
+  shopifyP: Promise<{ rows: ShopifyDay[]; err: string | null }>,
+  metaP: Promise<Awaited<ReturnType<typeof fetchMetaDaily>> | null>,
+  splitP: Promise<Awaited<ReturnType<typeof fetchShopifyCustomerSplit>> | null>,
+  mkP: Promise<Awaited<ReturnType<typeof fetchMarketplaceTotals>>>,
+  ordersCheck: ReturnType<typeof startOrdersCheck>,
+): Promise<DirectPeriod> {
+  const [shopify, meta, split, mk, live] = await Promise.all([shopifyP, metaP, splitP, mkP, ordersCheck]);
+  let shopifyErr = shopify.err;
+  const days = [...shopify.rows];
+  const note = applyOrdersCheck(days, to, days.reduce((s, d) => s + d.orders, 0), live);
+  if (note) shopifyErr = `${shopifyErr ? shopifyErr + ' / ' : ''}${note}`;
 
   const byDate = new Map<string, { date: string; revenue: number; orders: number; adSpend: number }>();
   const day = (date: string) => {
@@ -513,7 +542,7 @@ async function directPeriod(from: string, to: string, lite = false): Promise<Dir
     return byDate.get(date)!;
   };
   let totalSales = 0, netSales = 0, returnFees = 0, aovBasis = 0, orders = 0, grossLessDiscounts = 0;
-  for (const d of shopify.rows) {
+  for (const d of days) {
     totalSales += d.totalSales; netSales += d.netSales; returnFees += d.returnFees; aovBasis += d.aovBasis; orders += d.orders; grossLessDiscounts += d.grossLessDiscounts || 0;
     const r = day(d.date); r.revenue += d.totalSales; r.orders += d.orders;
   }
@@ -527,7 +556,6 @@ async function directPeriod(from: string, to: string, lite = false): Promise<Dir
   const net = netSales || totalSales;
   // Marketplace channels flagged countInSales are already in the sales above;
   // those flagged only countInMer add their net sales to MER's numerator.
-  const mk = lite ? [] : await fetchMarketplaceTotals(from, to).catch(() => []);
   const merBase = merBasis() === 'gross_less_discounts' ? (grossLessDiscounts || net) : net;
   const merNet = merBase + mk.filter(m => m.inMer && !m.inSales).reduce((s, m) => s + m.netSales, 0);
   const metrics: Record<string, number> = {
@@ -558,7 +586,7 @@ async function directPeriod(from: string, to: string, lite = false): Promise<Dir
   return {
     metrics,
     revenueData: Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date)).map(r => ({ ...r, revenue: Math.round(r.revenue), adSpend: Math.round(r.adSpend) })),
-    shopifyError: shopify.err,
+    shopifyError: shopifyErr,
   };
 }
 
@@ -582,7 +610,11 @@ export async function GET(request: NextRequest) {
       const cur = isCustom && dateFrom && dateTo ? { date_from: dateFrom, date_to: dateTo } : buildCurrentParams(tf, todayStr, yesterdayStr);
       // lite=1: totals only (the Overview's forecast) — skips the customer split.
       const lite = searchParams.get('lite') === '1';
-      const current = await directPeriod(cur.date_from, cur.date_to, lite);
+      // Current and comparison periods run concurrently (the comparison used
+      // to wait for the whole current period). Only the comparison's ShopifyQL
+      // queries wait, for the current report, to stay inside the rate limit.
+      const curRun = directPeriod(cur.date_from, cur.date_to, lite);
+      let priorRun: ReturnType<typeof directPeriod> | null = null;
       let priorPeriod = null, priorLabel = '';
       if (withCompare) {
         let pr: { from: string; to: string; label: string };
@@ -597,12 +629,17 @@ export async function GET(request: NextRequest) {
           const p = buildPriorParams(tf, todayStr, yesterdayStr);
           pr = { from: p.params.date_from, to: p.params.date_to, label: p.label };
         }
-        const prior = await directPeriod(pr.from, pr.to);
-        const m = prior.metrics;
-        priorPeriod = { totalRevenue: m.totalRevenue, totalAdSpend: m.totalAdSpend, totalOrders: m.totalOrders, aov: m.aov, mer: m.mer, metaSpend: m.metaSpend, googleSpend: m.googleSpend, newCustomers: m.newCustomers, returningCustomers: m.returningCustomers };
+        priorRun = directPeriod(pr.from, pr.to, false, curRun.reportDone);
         priorLabel = pr.label;
       }
+      const current = await curRun.done;
+      if (priorRun) {
+        const prior = await priorRun.done;
+        const m = prior.metrics;
+        priorPeriod = { totalRevenue: m.totalRevenue, totalAdSpend: m.totalAdSpend, totalOrders: m.totalOrders, aov: m.aov, mer: m.mer, metaSpend: m.metaSpend, googleSpend: m.googleSpend, newCustomers: m.newCustomers, returningCustomers: m.returningCustomers };
+      }
       const hasSales = current.metrics.totalRevenue > 0 || current.metrics.totalOrders > 0;
+      const shortRecent = cur.date_to >= yesterdayStr && (Date.parse(cur.date_to) - Date.parse(cur.date_from)) <= 2 * 86400000;
       return NextResponse.json(forPartner({
         source: 'direct_live',
         timeframe: tf,
@@ -614,7 +651,12 @@ export async function GET(request: NextRequest) {
         metrics: current.metrics,
         revenueData: current.revenueData,
         ...(priorPeriod ? { priorPeriod, priorLabel, compareMode } : {}),
-      }, await partnerSession()), { headers: !hasSales ? cacheHeaders(true) : cacheHeaders(cur.date_to >= todayStr, settledEnd(cur.date_to)) });
+      }, await partnerSession()), {
+        // Same rule as the BigQuery path: a short recent range whose report
+        // failed or had to be rebuilt is degraded and heals on its own, so it
+        // is never CDN-cached (the stale-Yesterday bug).
+        headers: !hasSales || (shortRecent && current.shopifyError) ? cacheHeaders(true) : cacheHeaders(cur.date_to >= todayStr, settledEnd(cur.date_to)),
+      });
     } catch (err) {
       return NextResponse.json({ source: 'error', error: err instanceof Error ? err.message : 'Unknown error', timeframe: tf, metrics: null, revenueData: [] });
     }
