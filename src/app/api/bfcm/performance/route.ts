@@ -36,10 +36,19 @@ export async function GET(req: NextRequest) {
   const q = `tf=custom&date_from=${from}&date_to=${to}`;
   const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
   const ea = plan.lastYear?.earlyAccess;
+  // Store totals per window: BigQuery overview where the client has it
+  // (Rocknot, Kailee P); otherwise the Overview's direct path (Skimpies:
+  // Shopify + Meta live), so the tab works on every dashboard.
+  type Ov = Awaited<ReturnType<typeof getOverview>>;
+  const overviewFor = (f: string, t: string): Promise<Ov | null> => isBigQueryConfigured()
+    ? getOverview(f, t).catch(() => null)
+    : get(`/api/windsor?tf=custom&date_from=${f}&date_to=${t}`)
+        .then(r => (r && r.metrics ? { metrics: r.metrics, revenueData: r.revenueData || [], revenueSource: 'shopify', shopifySource: 'direct' } as unknown as Ov : null))
+        .catch(() => null);
   const [ov, pyOv, eaOv, ads, creatives, products, retention] = await Promise.all([
-    isBigQueryConfigured() ? getOverview(from, to).catch(() => null) : Promise.resolve(null),
-    isBigQueryConfigured() ? getOverview(pyFrom, pyTo).catch(() => null) : Promise.resolve(null),
-    isBigQueryConfigured() && ea ? getOverview(ea.from, ea.to).catch(() => null) : Promise.resolve(null),
+    overviewFor(from, to),
+    overviewFor(pyFrom, pyTo),
+    ea ? overviewFor(ea.from, ea.to) : Promise.resolve(null),
     isBigQueryConfigured() ? getAdsOverview(from, to).catch(() => null) : Promise.resolve(null),
     get(`/api/windsor/creatives?${q}`).catch(() => null),
     get(`/api/windsor/products?${q}`).catch(() => null),
@@ -52,10 +61,13 @@ export async function GET(req: NextRequest) {
   // from early access, per Angie; revenue keeps counting from early access.
   const spendGoalFrom = previewLastYear ? ly.from : (plan.adSpendFrom || plan.window.from);
   const goalSpendSoFar = days.daily.filter(d => d.date >= spendGoalFrom).reduce((t, d) => t + (d.adSpend || 0), 0);
+  // MER goal progress: revenue (gross − discounts) ÷ ad spend over the same
+  // days the ad spend goal counts, so both sides cover one window.
+  const merRevenue = days.daily.filter(d => d.date >= spendGoalFrom).reduce((t, d) => t + (d.grossLessDiscounts || 0), 0);
   const m = ov?.metrics; const pm = pyOv?.metrics;
   const store = (x: typeof m) => x ? {
     // Revenue on this tab is gross sales minus discounts (before returns), per Angie.
-    revenue: num(x.grossLessDiscounts) || num(x.totalRevenue), totalSales: num(x.totalRevenue), netSales: num(x.netSales ?? x.totalRevenue), orders: num(x.totalOrders), aov: num(x.aov),
+    revenue: num(x.grossLessDiscounts) || num(x.totalRevenue), totalSales: num(x.totalSales ?? x.totalRevenue), netSales: num(x.netSales ?? x.totalRevenue), orders: num(x.totalOrders), aov: num(x.aov),
     spend: num(x.netAdSpend ?? x.totalAdSpend), mer: num(x.mer), newCustomers: num(x.newCustomers), returningCustomers: num(x.returningCustomers),
     sessions: num((x as unknown as { humanSessions?: number }).humanSessions), cvr: num(x.conversionRate),
   } : null;
@@ -83,6 +95,7 @@ export async function GET(req: NextRequest) {
     }),
     dailySource: days.source, merBasis: merBasis(),
     adSpendGoal: { from: spendGoalFrom, spend: Math.round(goalSpendSoFar) },
+    merGoal: { from: spendGoalFrom, revenue: Math.round(merRevenue), spend: Math.round(goalSpendSoFar), mer: goalSpendSoFar > 0 ? Math.round((merRevenue / goalSpendSoFar) * 100) / 100 : 0 },
     platforms: ads?.platforms || [],
     creatives: { best, worst, total: crs.length, error: creatives?.error || null },
     products: prods, productsError: products?.error || null,

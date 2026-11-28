@@ -43,7 +43,8 @@ export interface BfcmPlan {
   saleDetails?: BfcmOffer[];
   /** The profile seed version the saved rows were last refreshed from. */
   saleDetailsVersion?: number;
-  goals: { revenue: number; adSpend: number; orders?: number; emailRevenue?: number };
+  /** mer: target MER; defaults to revenue goal ÷ ad spend goal when unset. */
+  goals: { revenue: number; adSpend: number; orders?: number; emailRevenue?: number; mer?: number };
   collections: BfcmLink[];
   checklist: BfcmCheck[];
   notes: string;
