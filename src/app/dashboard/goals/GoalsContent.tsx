@@ -653,7 +653,7 @@ export default function GoalsContent() {
           <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-gray-100">
-                {['Month', 'Actual / Forecast', 'Revenue Goal', 'vs Goal', '± vs Goal', 'Ad Budget', 'Actual Spend', 'Units Needed'].map(h => (
+                {['Month', 'Actual / Forecast', 'Last Year', 'Revenue Goal', 'vs Goal', '± vs Goal', 'Ad Budget', 'Actual Spend', 'Units Needed'].map(h => (
                   <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -688,6 +688,24 @@ export default function GoalsContent() {
                       {shown !== undefined ? (
                         <>{formatCurrency(shown)}{isCurrent && <span className="text-[10px] text-gray-400 ml-1">proj.</span>}</>
                       ) : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="py-2.5 pr-4 whitespace-nowrap">
+                      {(() => {
+                        const ly = lastYear[`${year - 1}${k.slice(4)}`];
+                        if (!ly?.revenue && !ly?.adSpend) return <span className="text-gray-300">—</span>;
+                        const yoy = ly?.revenue && shown !== undefined && shown > 0 ? ((shown - ly.revenue) / ly.revenue) * 100 : null;
+                        return (
+                          <span className="text-xs text-gray-500">
+                            {ly?.revenue ? formatCurrency(ly.revenue) : '—'}
+                            {yoy !== null && (
+                              <span className={`ml-1 font-semibold ${yoy >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                {yoy >= 0 ? '▲' : '▼'}{Math.abs(yoy).toFixed(0)}%
+                              </span>
+                            )}
+                            <span className="block text-[10px] text-gray-400">{ly?.adSpend ? `${formatCurrency(ly.adSpend)} ads` : ''}</span>
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="py-2.5 pr-4 whitespace-nowrap">
                       {/* A finished month's goal is history — hit or missed,
@@ -784,6 +802,15 @@ export default function GoalsContent() {
                     <td className="py-2.5 pr-4 text-gray-800 whitespace-nowrap">
                       {formatCurrency(actualTotal)}
                       <span className="text-[10px] text-gray-400 font-normal ml-1">so far{currentForecast ? ' incl. proj.' : ''}</span>
+                    </td>
+                    <td className="py-2.5 pr-4 whitespace-nowrap">
+                      {(() => {
+                        const lyRev = months.reduce((s, k2) => s + (lastYear[`${year - 1}${k2.slice(4)}`]?.revenue || 0), 0);
+                        const lySpend = months.reduce((s, k2) => s + (lastYear[`${year - 1}${k2.slice(4)}`]?.adSpend || 0), 0);
+                        return lyRev > 0 ? (
+                          <span className="text-xs text-gray-500">{formatCurrency(lyRev)}<span className="block text-[10px] text-gray-400">{lySpend > 0 ? `${formatCurrency(lySpend)} ads` : ''}</span></span>
+                        ) : '—';
+                      })()}
                     </td>
                     <td className="py-2.5 pr-4 text-gray-800 whitespace-nowrap">{goalTotal > 0 ? formatCurrency(goalTotal) : '—'}</td>
                     <td className="py-2.5 pr-4 whitespace-nowrap">
