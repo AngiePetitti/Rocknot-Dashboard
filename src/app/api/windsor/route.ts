@@ -2,7 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parseCompareMode, priorRangeFor } from '@/src/lib/timeframes';
 import { Timeframe } from '@/src/lib/mockData';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
-import { getOverview, fetchShopifyDaily, fetchShopifyTotals, fetchShopifyCustomerSplit } from '@/src/lib/bqOverview';
+import { getOverview, fetchShopifyDaily, fetchShopifyTotals, fetchShopifyCustomerSplit, fetchOrdersApiDay } from '@/src/lib/bqOverview';
+
+// True for a one-day range landing on today or yesterday (LA time) — the days
+// Shopify's analytics feed can trail its own admin, badly so under Black
+// Friday order volume. Those days get a real-time Orders API cross-check.
+function oneDayRecent(from: string, to: string): boolean {
+  if (from !== to) return false;
+  const laToday = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  return to <= laToday && (Date.parse(laToday) - Date.parse(to)) <= 86400000;
+}
 import { fetchMarketplaceTotals } from '@/src/lib/channel';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/src/lib/auth';
@@ -512,12 +521,13 @@ interface DirectPeriod {
 }
 
 async function directPeriod(from: string, to: string, lite = false): Promise<DirectPeriod> {
-  const [shopify, meta, split] = await Promise.all([
+  const [shopify, meta, split, ordersCheck] = await Promise.all([
     fetchShopifyDaily(from, to)
       .then(rows => ({ rows, err: null as string | null }))
       .catch((e: unknown) => ({ rows: [] as Awaited<ReturnType<typeof fetchShopifyDaily>>, err: e instanceof Error ? e.message : String(e) })),
     hasPlatform('meta') ? fetchMetaDaily(from, to).catch(() => null) : Promise.resolve(null),
     lite ? Promise.resolve(null) : fetchShopifyCustomerSplit(from, to).catch(() => null),
+    oneDayRecent(from, to) ? fetchOrdersApiDay(to).catch(() => null) : Promise.resolve(null),
   ]);
 
   const byDate = new Map<string, { date: string; revenue: number; orders: number; adSpend: number }>();
@@ -529,6 +539,15 @@ async function directPeriod(from: string, to: string, lite = false): Promise<Dir
   for (const d of shopify.rows) {
     totalSales += d.totalSales; netSales += d.netSales; returnFees += d.returnFees; aovBasis += d.aovBasis; orders += d.orders; grossLessDiscounts += d.grossLessDiscounts || 0;
     const r = day(d.date); r.revenue += d.grossLessDiscounts || d.totalSales; r.orders += d.orders;
+  }
+  // The analytics feed trails the admin under load; when the Orders API has
+  // 15%+ more orders for the day, rebuild the day from the orders themselves.
+  if (ordersCheck && ordersCheck.orders > orders * 1.15) {
+    totalSales = ordersCheck.totalSales; netSales = ordersCheck.netPlaced;
+    grossLessDiscounts = ordersCheck.netPlaced; aovBasis = ordersCheck.netPlaced;
+    returnFees = 0; orders = ordersCheck.orders;
+    byDate.clear();
+    const r = day(to); r.revenue = ordersCheck.netPlaced; r.orders = ordersCheck.orders;
   }
   let metaSpend = 0, metaRevenue = 0;
   for (const d of meta ?? []) {
@@ -775,6 +794,8 @@ export async function GET(request: NextRequest) {
     const shopifyLivePromise = fetchShopifyDaily(currentParams.date_from, currentParams.date_to)
       .then(rows => ({ rows, err: null as string | null }))
       .catch((e: unknown) => ({ rows: [] as Awaited<ReturnType<typeof fetchShopifyDaily>>, err: String(e instanceof Error ? e.message : e) }));
+    const ordersCheckPromise = oneDayRecent(currentParams.date_from, currentParams.date_to)
+      ? fetchOrdersApiDay(currentParams.date_to).catch(() => null) : Promise.resolve(null);
     const metaLivePromise = isTodayRange ? fetchMetaToday().catch(() => null) : Promise.resolve(null);
     // Snap: direct Marketing API when SNAP_* creds are set; otherwise
     // Windsor's per-platform live endpoint (fresher than the general feed).
@@ -896,6 +917,31 @@ export async function GET(request: NextRequest) {
           } else {
             current.revenueData = [{ date: currentParams.date_from, revenue: Math.round(liveGld || liveRevenue), totalSales: Math.round(liveRevenue), netSales: Math.round(liveNetSales || liveRevenue), ...(merBasis() === 'gross_less_discounts' ? { grossLessDiscounts: Math.round(liveMerSales) } : {}), orders: liveOrders, adSpend: current.metrics.totalAdSpend }];
           }
+        }
+      }
+
+      // Under heavy order volume (Black Friday) the analytics feed trails
+      // the admin even when it answers. When the Orders API shows 15%+ more
+      // orders for the day, rebuild the headlines from the orders themselves.
+      const ordersCheck = await ordersCheckPromise;
+      if (ordersCheck && ordersCheck.orders > current.metrics.totalOrders * 1.15) {
+        const merSales = ordersCheck.netPlaced;
+        current.metrics.totalRevenue = Math.round(ordersCheck.netPlaced);
+        current.metrics.totalSales = Math.round(ordersCheck.totalSales);
+        current.metrics.grossLessDiscounts = Math.round(ordersCheck.netPlaced);
+        current.metrics.netSales = Math.round(ordersCheck.netPlaced);
+        current.metrics.merNetSales = Math.round(merSales);
+        current.metrics.merBasis = merBasis();
+        current.metrics.returnFees = 0;
+        current.metrics.totalOrders = ordersCheck.orders;
+        current.revenueSource = 'shopify';
+        current.metrics.aov = ordersCheck.orders > 0 ? Math.round((ordersCheck.netPlaced / ordersCheck.orders) * 100) / 100 : 0;
+        current.metrics.mer = current.metrics.totalAdSpend > 0 ? Math.round((merSales / current.metrics.totalAdSpend) * 100) / 100 : 0;
+        if (current.revenueData.length > 0) {
+          current.revenueData[0].revenue = Math.round(ordersCheck.netPlaced);
+          current.revenueData[0].orders = ordersCheck.orders;
+        } else {
+          current.revenueData = [{ date: currentParams.date_from, revenue: Math.round(ordersCheck.netPlaced), netSales: Math.round(ordersCheck.netPlaced), orders: ordersCheck.orders, adSpend: current.metrics.totalAdSpend }];
         }
       }
     }
