@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
   const m = ov?.metrics; const pm = pyOv?.metrics;
   const store = (x: typeof m) => x ? {
     // Revenue on this tab is gross sales minus discounts (before returns), per Angie.
-    revenue: num(x.grossLessDiscounts) || num(x.totalRevenue), totalSales: num(x.totalRevenue), netSales: num(x.netSales ?? x.totalRevenue), orders: num(x.totalOrders), aov: num(x.aov),
+    revenue: num(x.grossLessDiscounts) || num(x.totalRevenue), totalSales: num(x.totalSales ?? x.totalRevenue), netSales: num(x.netSales ?? x.totalRevenue), orders: num(x.totalOrders), aov: num(x.aov),
     spend: num(x.netAdSpend ?? x.totalAdSpend), mer: num(x.mer), newCustomers: num(x.newCustomers), returningCustomers: num(x.returningCustomers),
     sessions: num((x as unknown as { humanSessions?: number }).humanSessions), cvr: num(x.conversionRate),
   } : null;

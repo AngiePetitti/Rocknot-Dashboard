@@ -48,6 +48,7 @@ interface LineRow {
 
 interface LiveMetrics {
   totalRevenue: number;
+  totalSales?: number;
   netSales?: number;
   returnFees?: number;
   totalOrders: number;
@@ -909,7 +910,7 @@ export default function OverviewContent() {
             </button>
             {showDefs && (
               <ul className="text-[11px] text-gray-500 mt-2 space-y-1 list-disc pl-4">
-                <li>Net sales = after discounts and returns, before taxes and shipping ({formatCurrency(metrics.netSales ?? metrics.totalRevenue)}; total sales {formatCurrency(metrics.totalRevenue)}){(metrics.returnFees ?? 0) > 0 ? `; includes ${formatCurrency(metrics.returnFees!)} in return fees the store keeps` : ''}.</li>
+                <li>Net sales = after discounts and returns, before taxes and shipping ({formatCurrency(metrics.netSales ?? metrics.totalRevenue)}; revenue = gross − discounts before returns {formatCurrency(metrics.totalRevenue)}{metrics.totalSales != null ? `; Shopify total sales ${formatCurrency(metrics.totalSales)}` : ''}){(metrics.returnFees ?? 0) > 0 ? `; includes ${formatCurrency(metrics.returnFees!)} in return fees the store keeps` : ''}.</li>
                 {gld && <li>Gross sales less discounts = what was sold at the price paid, before any returns ({formatCurrency(netS)}). Both MERs on this dashboard use it, so a return processed later does not lower the agency&apos;s number; returns show on their own line and in the Returns tab.</li>}
                 <li>Paid media MER = {gld ? 'gross sales less discounts' : 'net sales'} ÷ {metrics.adCreditApplied ? 'net ad spend' : 'ad spend'} on every platform{(metrics.adCreditApplied ?? 0) > 0 ? ` (${formatCurrency(metrics.adCreditApplied!)} Snapchat ad credit deducted; gross ${formatCurrency(metrics.totalAdSpend)})` : ''}. Goal {goalsNow.merLabel}{MER_FLOOR != null ? `, floor ${MER_FLOOR}x` : ''} is the agency&apos;s target.</li>
                 {goalsNow.season && <li>Targets shown are for <b>{goalsNow.season.name}</b> ({goalsNow.season.months}), agreed with the client: paid MER {goalsNow.merLabel}{MER_FLOOR != null ? ` (floor ${MER_FLOOR}x)` : ''}{goalsNow.fullyLoadedLabel ? `, fully loaded MER ${goalsNow.fullyLoadedLabel}${flFloor != null ? ` (floor ${flFloor}x)` : ''}` : ''}, new-customer CAC {goalsNow.cacLabel}{CAC_CEILING != null ? ` (ceiling $${CAC_CEILING})` : ''}.{goalsNow.season.posture ? ` ${goalsNow.season.posture}` : ''} The season follows the end date of the selected range.</li>}
@@ -930,9 +931,9 @@ export default function OverviewContent() {
       {/* Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard
-          title="Shopify Total Sales"
+          title="Revenue"
           value={formatCurrency(metrics.totalRevenue)}
-          subtitle={`${metrics.totalOrders} orders`}
+          subtitle={`gross − discounts · ${metrics.totalOrders} orders`}
           accentColor="#c4b5fd"
           comparison={
             // No intraday delta on the Today view — a partial day has no

@@ -132,7 +132,11 @@ interface WindsorRow {
 }
 
 interface AggregatedMetrics {
+  /** Gross sales − discounts, before returns (falls back to Shopify total sales). */
   totalRevenue: number;
+  /** Shopify's total sales (after returns, incl. tax and shipping). */
+  totalSales?: number;
+  grossLessDiscounts?: number;
   netSales?: number;
   /** The sales figure MER was actually divided from (see merBasis). */
   merNetSales?: number;
@@ -169,6 +173,8 @@ interface DayBucket {
   shopifyNetSales: number;
   /** MER numerator for the day: net sales, or gross − discounts when the profile says so. */
   shopifyMerSales: number;
+  /** Gross sales − discounts (before returns): the dashboard's revenue. */
+  shopifyGld: number;
   metaRevenue: number;
   googleRevenue: number;
   tiktokRevenue: number;
@@ -186,7 +192,7 @@ interface DayBucket {
 }
 
 function emptyBucket(date: string): DayBucket {
-  return { date, shopifyRevenue: 0, shopifyNetSales: 0, shopifyMerSales: 0, metaRevenue: 0, googleRevenue: 0, tiktokRevenue: 0, snapchatRevenue: 0, pinterestRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, snapchatSpend: 0, pinterestSpend: 0, newCustomers: 0, returningCustomers: 0 };
+  return { date, shopifyRevenue: 0, shopifyNetSales: 0, shopifyMerSales: 0, shopifyGld: 0, metaRevenue: 0, googleRevenue: 0, tiktokRevenue: 0, snapchatRevenue: 0, pinterestRevenue: 0, orders: 0, adSpend: 0, metaSpend: 0, googleSpend: 0, tiktokSpend: 0, snapchatSpend: 0, pinterestSpend: 0, newCustomers: 0, returningCustomers: 0 };
 }
 
 function aggregateRows(rows: WindsorRow[]) {
@@ -225,6 +231,7 @@ function aggregateRows(rows: WindsorRow[]) {
       // Gross − discounts (before returns) is the order's subtotal_price.
       const subtotal = Number(row.order_subtotal_price || 0);
       byDate[date].shopifyMerSales += merBasis() === 'gross_less_discounts' ? (subtotal || netRaw) : netRaw;
+      byDate[date].shopifyGld += subtotal || netRaw;
       byDate[date].orders += Math.round(Number(row.order_count || 0));
     } else {
       if (src.includes('facebook') || src.includes('meta')) {
@@ -273,7 +280,10 @@ function aggregateRows(rows: WindsorRow[]) {
 
   // Total revenue is Shopify-only — no fallback to ad attribution.
   // Per-platform attributed revenue is reported separately for the platform table.
-  const totalRevenue = shopifyRevenueTotal;
+  // Revenue = gross sales − discounts, before returns (per Angie, Nov 2026);
+  // Shopify's total sales stays alongside as totalSales.
+  const gldTotal = dailyData.reduce((s, d) => s + d.shopifyGld, 0);
+  const totalRevenue = gldTotal || shopifyRevenueTotal;
 
   const totalAdSpend    = dailyData.reduce((s, d) => s + d.adSpend, 0);
   const totalOrders     = Math.round(dailyData.reduce((s, d) => s + d.orders, 0));
@@ -294,6 +304,8 @@ function aggregateRows(rows: WindsorRow[]) {
   const totalMerSales = dailyData.reduce((s, d) => s + d.shopifyMerSales, 0) || totalNetSales;
   const metrics: AggregatedMetrics = {
     totalRevenue: Math.round(totalRevenue),
+    totalSales: Math.round(shopifyRevenueTotal),
+    grossLessDiscounts: Math.round(gldTotal),
     netSales: Math.round(totalNetSales),
     merNetSales: Math.round(totalMerSales),
     merBasis: merBasis(),
@@ -324,7 +336,8 @@ function aggregateRows(rows: WindsorRow[]) {
   const gldBasis = merBasis() === 'gross_less_discounts';
   const revenueData = dailyData.map(d => ({
     date: d.date,
-    revenue: Math.round(d.shopifyRevenue),
+    revenue: Math.round(d.shopifyGld || d.shopifyRevenue),
+    totalSales: Math.round(d.shopifyRevenue),
     // Per-day sales on each basis so the trend chart's MER line can follow
     // the headline MER (BigQuery rows carry the same two fields).
     netSales: Math.round(d.shopifyNetSales),
@@ -515,7 +528,7 @@ async function directPeriod(from: string, to: string, lite = false): Promise<Dir
   let totalSales = 0, netSales = 0, returnFees = 0, aovBasis = 0, orders = 0, grossLessDiscounts = 0;
   for (const d of shopify.rows) {
     totalSales += d.totalSales; netSales += d.netSales; returnFees += d.returnFees; aovBasis += d.aovBasis; orders += d.orders; grossLessDiscounts += d.grossLessDiscounts || 0;
-    const r = day(d.date); r.revenue += d.totalSales; r.orders += d.orders;
+    const r = day(d.date); r.revenue += d.grossLessDiscounts || d.totalSales; r.orders += d.orders;
   }
   let metaSpend = 0, metaRevenue = 0;
   for (const d of meta ?? []) {
@@ -531,7 +544,10 @@ async function directPeriod(from: string, to: string, lite = false): Promise<Dir
   const merBase = merBasis() === 'gross_less_discounts' ? (grossLessDiscounts || net) : net;
   const merNet = merBase + mk.filter(m => m.inMer && !m.inSales).reduce((s, m) => s + m.netSales, 0);
   const metrics: Record<string, number> = {
-    totalRevenue: Math.round(totalSales),
+    // Revenue = gross sales − discounts, before returns (per Angie, Nov 2026).
+    totalRevenue: Math.round(grossLessDiscounts || totalSales),
+    totalSales: Math.round(totalSales),
+    grossLessDiscounts: Math.round(grossLessDiscounts),
     netSales: Math.round(net),
     returnFees: Math.round(returnFees),
     totalOrders: orders,
@@ -858,7 +874,9 @@ export async function GET(request: NextRequest) {
         const liveMerSales = merBasis() === 'gross_less_discounts' ? (liveGld || liveNetSales || liveRevenue) : (liveNetSales || liveRevenue);
         const liveAovBasis = shopifyLive.reduce((s, d) => s + d.aovBasis, 0);
         if (liveRevenue > 0 || liveOrders > 0) {
-          current.metrics.totalRevenue = Math.round(liveRevenue);
+          current.metrics.totalRevenue = Math.round(liveGld || liveRevenue);
+          current.metrics.totalSales = Math.round(liveRevenue);
+          current.metrics.grossLessDiscounts = Math.round(liveGld);
           current.metrics.netSales = Math.round(liveNetSales || liveRevenue);
           current.metrics.merNetSales = Math.round(liveMerSales);
           current.metrics.merBasis = merBasis();
@@ -873,10 +891,10 @@ export async function GET(request: NextRequest) {
           current.metrics.mer = current.metrics.totalAdSpend > 0
             ? Math.round((liveMerSales / current.metrics.totalAdSpend) * 100) / 100 : 0;
           if (current.revenueData.length > 0) {
-            current.revenueData[0].revenue = Math.round(liveRevenue);
+            current.revenueData[0].revenue = Math.round(liveGld || liveRevenue);
             current.revenueData[0].orders = liveOrders;
           } else {
-            current.revenueData = [{ date: currentParams.date_from, revenue: Math.round(liveRevenue), netSales: Math.round(liveNetSales || liveRevenue), ...(merBasis() === 'gross_less_discounts' ? { grossLessDiscounts: Math.round(liveMerSales) } : {}), orders: liveOrders, adSpend: current.metrics.totalAdSpend }];
+            current.revenueData = [{ date: currentParams.date_from, revenue: Math.round(liveGld || liveRevenue), totalSales: Math.round(liveRevenue), netSales: Math.round(liveNetSales || liveRevenue), ...(merBasis() === 'gross_less_discounts' ? { grossLessDiscounts: Math.round(liveMerSales) } : {}), orders: liveOrders, adSpend: current.metrics.totalAdSpend }];
           }
         }
       }

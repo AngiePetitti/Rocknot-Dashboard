@@ -9,7 +9,10 @@ import { shopifyConfigured, shopifyToken } from '@/src/lib/shopifyAuth';
 export interface OverviewResult {
   adsError?: string;
   metrics: {
+    /** Gross sales − discounts, before returns (falls back to Shopify total sales). */
     totalRevenue: number;
+    /** Shopify's total sales (after returns, incl. tax and shipping). */
+    totalSales?: number;
     netSales?: number;
     /** Gross sales minus discounts, before returns. */
     grossLessDiscounts?: number;
@@ -348,7 +351,7 @@ export async function freshShopifyDays(from: string, to: string, base: OverviewD
           if (!d.date || d.date < from || d.date > to) continue;
           byDate[d.date] = {
             ...(byDate[d.date] || blank(d.date)),
-            revenue: Math.round(d.totalSales), netSales: Math.round(d.netSales),
+            revenue: Math.round(d.grossLessDiscounts || d.totalSales), netSales: Math.round(d.netSales),
             grossLessDiscounts: Math.round(d.grossLessDiscounts), orders: d.orders,
           };
         }
@@ -366,7 +369,7 @@ export async function freshShopifyDays(from: string, to: string, base: OverviewD
     const live = await fetchOrdersApiDay(row.date).catch(() => null);
     if (!live || live.orders <= row.orders) return row;
     patched = true;
-    return { ...row, revenue: Math.round(live.totalSales), netSales: Math.round(live.netPlaced), grossLessDiscounts: Math.round(live.netPlaced), orders: live.orders };
+    return { ...row, revenue: Math.round(live.netPlaced), netSales: Math.round(live.netPlaced), grossLessDiscounts: Math.round(live.netPlaced), orders: live.orders };
   }));
   return { daily, source: patched ? 'orders_api' : 'synced', ...(error ? { error } : {}) };
 }
@@ -753,13 +756,14 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const revenueData = dayDates.map(date => {
     const a = adsByDate[date];
     const s = shopifyByDate[date];
-    const revenue = s ? s.totalSales : 0;
+    // Revenue = gross sales − discounts, before returns (per Angie, Nov 2026).
+    const revenue = s ? (s.grossLessDiscounts || s.totalSales) : 0;
     const orders = s ? s.orders : 0;
     const snap = snapByDate[date];
     const pin = pinterestByDate[date];
     const adSpend = Number(a?.meta_spend || 0) + Number(a?.google_spend || 0) + Number(a?.tiktok_spend || 0) + (snap?.spend || 0) + (pin?.spend || 0);
 
-    totalRevenue += revenue;
+    totalRevenue += s ? s.totalSales : 0;
     totalNetSales += s ? s.netSales : 0;
     totalGld += s ? (s.grossLessDiscounts || 0) : 0;
     totalReturnFees += s ? s.returnFees : 0;
@@ -830,7 +834,8 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
   const totalMerSales = merBasis() === 'gross_less_discounts' ? (totalGld || totalNetSales) : totalNetSales;
   return {
     metrics: {
-      totalRevenue: Math.round(totalRevenue),
+      totalRevenue: Math.round(totalGld || totalRevenue),
+      totalSales: Math.round(totalRevenue),
       totalOrders,
       totalAdSpend: Math.round(totalAdSpend * 100) / 100,
       netSales: Math.round(totalNetSales),
