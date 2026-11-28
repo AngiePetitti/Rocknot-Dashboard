@@ -28,6 +28,7 @@ interface Perf {
   daily: Array<{ date: string; revenue: number; totalSales?: number; netSales?: number; orders: number; adSpend: number; mer?: number }>;
   dailySource?: 'shopify' | 'orders_api' | 'synced';
   merBasis?: 'net' | 'gross_less_discounts';
+  adSpendGoal?: { from: string; spend: number };
   platforms: Array<{ platform: string; spend: number; revenue: number; roas: number; conversions: number; costPerConversion: number; color: string }>;
   creatives: { best: Creative[]; worst: Creative[]; total: number; error: string | null };
   products: Array<{ id: string; name: string; unitsSold: number; revenue: number; percentOfTotal: number }>; productsError: string | null;
@@ -102,7 +103,9 @@ export default function BfcmContent() {
   const goalRev = plan?.goals.revenue || 0; const goalSpend = plan?.goals.adSpend || 0;
   const impliedMer = goalSpend > 0 ? goalRev / goalSpend : null;
   const revPct = st && goalRev > 0 ? Math.min(100, (st.revenue / goalRev) * 100) : 0;
-  const spendPct = st && goalSpend > 0 ? Math.min(100, (st.spend / goalSpend) * 100) : 0;
+  // Ad spend counts toward the goal from the public sale start, not early access.
+  const goalSpendSoFar = perf?.adSpendGoal ? perf.adSpendGoal.spend : (st?.spend || 0);
+  const spendPct = st && goalSpend > 0 ? Math.min(100, (goalSpendSoFar / goalSpend) * 100) : 0;
   const phaseLabel = phase === 'live' ? '🔴 Sale is live' : phase === 'early_access' ? '🟠 Early access' : phase === 'after' ? '✅ Sale finished' : `⏳ ${daysToGo} days to go`;
 
   const Delta = ({ cur, prev, lowerBetter }: { cur: number; prev: number; lowerBetter?: boolean }) => {
@@ -282,7 +285,7 @@ export default function BfcmContent() {
                 </div>
                 <div className="grid grid-cols-2 gap-3 content-start">
                   <Tile label="Revenue goal" value={goalRev ? $(goalRev) : '—'} sub={st && goalRev ? `${$(st.revenue)} so far · ${revPct.toFixed(0)}%` : 'gross − discounts over the sale window'} bar={st && goalRev ? revPct : undefined} tone="violet" />
-                  <Tile label="Ad spend goal" value={goalSpend ? $(goalSpend) : '—'} sub={st && goalSpend ? `${$(st.spend)} so far · ${spendPct.toFixed(0)}%` : impliedMer ? `implies ${impliedMer.toFixed(1)}x MER` : 'all platforms'} bar={st && goalSpend ? spendPct : undefined} tone="amber" />
+                  <Tile label="Ad spend goal" value={goalSpend ? $(goalSpend) : '—'} sub={st && goalSpend ? `${$(goalSpendSoFar)} since ${perf?.adSpendGoal?.from.slice(5) || 'launch'} · ${spendPct.toFixed(0)}%` : impliedMer ? `implies ${impliedMer.toFixed(1)}x MER` : 'all platforms'} bar={st && goalSpend ? spendPct : undefined} tone="amber" />
                   {plan.goals.orders ? <Tile label="Orders goal" value={n(plan.goals.orders)} sub={st ? `${n(st.orders)} so far` : ''} /> : null}
                   {plan.goals.emailRevenue ? <Tile label="Email + SMS goal" value={$(plan.goals.emailRevenue)} sub={perf?.owned?.overview ? `${$(perf.owned.overview.email.revenue + perf.owned.overview.sms.revenue)} so far` : ''} /> : null}
                 </div>
@@ -337,7 +340,7 @@ export default function BfcmContent() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-4">
                 <MetricCard title="Revenue" value={$(st.revenue)} accentColor="#c4b5fd" subtitle={`gross − discounts · ${n(st.orders)} orders · net sales ${$(st.netSales)}`} comparison={py ? { current: st.revenue, prior: py.revenue, label: 'vs last year' } : undefined} />
                 <MetricCard title="MER" value={st.mer ? `${st.mer.toFixed(2)}x` : '—'} accentColor="#a7f3d0" subtitle={`${perf.merBasis === 'gross_less_discounts' ? 'gross − discounts' : 'net sales'} ÷ ad spend${impliedMer ? ` · goal ${impliedMer.toFixed(1)}x` : ''}`} comparison={py && py.mer ? { current: st.mer, prior: py.mer, label: 'vs last year' } : undefined} />
-                <MetricCard title="Ad spend" value={$(st.spend)} accentColor="#fdba74" subtitle={goalSpend ? `${spendPct.toFixed(0)}% of the ${$(goalSpend)} budget` : 'all platforms'} comparison={py ? { current: st.spend, prior: py.spend, label: 'vs last year' } : undefined} />
+                <MetricCard title="Ad spend" value={$(st.spend)} accentColor="#fdba74" subtitle={goalSpend ? `${$(goalSpendSoFar)} (${spendPct.toFixed(0)}%) of the ${$(goalSpend)} budget since ${perf?.adSpendGoal?.from.slice(5) || 'launch'}` : 'all platforms'} comparison={py ? { current: st.spend, prior: py.spend, label: 'vs last year' } : undefined} />
                 <MetricCard title="AOV" value={$(st.aov)} accentColor="#f9a8d4" subtitle={`${n(st.newCustomers)} new · ${n(st.returningCustomers)} returning customers${st.cvr ? ` · CVR ${st.cvr.toFixed(1)}%` : ''}`} comparison={py ? { current: st.aov, prior: py.aov, label: 'vs last year' } : undefined} />
               </div>
               {py && (

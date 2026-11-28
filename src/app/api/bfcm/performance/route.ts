@@ -48,6 +48,10 @@ export async function GET(req: NextRequest) {
   // Day by day from Shopify itself, not the once-a-day synced copy (asked
   // again now that the queries above have released Shopify's rate limit).
   const days = await freshShopifyDays(from, to, ov?.revenueData || [], ov?.shopifySource).catch(() => ({ daily: ov?.revenueData || [], source: 'synced' as const, error: undefined }));
+  // The ad spend goal counts from the public sale start (Black Friday), not
+  // from early access, per Angie; revenue keeps counting from early access.
+  const spendGoalFrom = previewLastYear ? ly.from : (plan.adSpendFrom || plan.window.from);
+  const goalSpendSoFar = days.daily.filter(d => d.date >= spendGoalFrom).reduce((t, d) => t + (d.adSpend || 0), 0);
   const m = ov?.metrics; const pm = pyOv?.metrics;
   const store = (x: typeof m) => x ? {
     // Revenue on this tab is gross sales minus discounts (before returns), per Angie.
@@ -78,6 +82,7 @@ export async function GET(req: NextRequest) {
       return { date: d.date, revenue, totalSales: d.revenue, netSales: d.netSales, orders: d.orders, adSpend: d.adSpend, mer: d.adSpend > 0 ? merSales / d.adSpend : 0 };
     }),
     dailySource: days.source, merBasis: merBasis(),
+    adSpendGoal: { from: spendGoalFrom, spend: Math.round(goalSpendSoFar) },
     platforms: ads?.platforms || [],
     creatives: { best, worst, total: crs.length, error: creatives?.error || null },
     products: prods, productsError: products?.error || null,
