@@ -25,6 +25,7 @@ interface Perf {
   detectedLastYear: { from: string; to: string; lift: number; baseline: number } | null;
   priorYearEarlyAccess: ({ window: { from: string; to: string } } & Store) | null;
   store: Store | null; priorYear: Store | null;
+  priorYearToDate?: ({ earlyAccess: { from: string; to: string } | null; publicWindow: { from: string; to: string } | null; publicDays: number } & Store) | null;
   daily: Array<{ date: string; revenue: number; totalSales?: number; netSales?: number; orders: number; adSpend: number; mer?: number }>;
   dailySource?: 'shopify' | 'orders_api' | 'synced';
   merBasis?: 'net' | 'gross_less_discounts';
@@ -102,7 +103,9 @@ export default function BfcmContent() {
 
   const done = plan ? plan.checklist.filter(c => c.done).length : 0;
   const overdue = plan ? plan.checklist.filter(c => !c.done && c.due && c.due < today) : [];
-  const st = perf?.store; const py = perf?.priorYear;
+  const st = perf?.store; const pyFull = perf?.priorYear;
+  // Cards compare with the same point of last year's sale (falls back to the full sale when previewing last year).
+  const py = perf ? (perf.previewLastYear ? null : (perf.priorYearToDate ?? null)) : null;
   const goalRev = plan?.goals.revenue || 0; const goalSpend = plan?.goals.adSpend || 0;
   const impliedMer = goalSpend > 0 ? goalRev / goalSpend : null;
   const merTarget = plan?.goals.mer || impliedMer || 0;
@@ -351,13 +354,19 @@ export default function BfcmContent() {
                 <MetricCard title="Ad spend" value={$(st.spend)} accentColor="#fdba74" subtitle={goalSpend ? `${$(goalSpendSoFar)} (${spendPct.toFixed(0)}%) of the ${$(goalSpend)} budget since ${dayLabel(perf?.adSpendGoal?.from) || 'launch'}` : 'all platforms'} comparison={py ? { current: st.spend, prior: py.spend, label: 'vs last year' } : undefined} />
                 <MetricCard title="AOV" value={$(st.aov)} accentColor="#f9a8d4" subtitle={`${n(st.newCustomers)} new · ${n(st.returningCustomers)} returning customers${st.cvr ? ` · CVR ${st.cvr.toFixed(1)}%` : ''}`} comparison={py ? { current: st.aov, prior: py.aov, label: 'vs last year' } : undefined} />
               </div>
-              {py && (
-                <p className="text-[11px] text-gray-400 mb-1">Last year&apos;s public sale ({perf.priorYearWindow.from} → {perf.priorYearWindow.to}): revenue {$(py.revenue)} · orders {n(py.orders)} · ad spend {$(py.spend)} · MER {py.mer.toFixed(2)}x · new customers {n(py.newCustomers)}</p>
+              {perf.priorYearToDate && (
+                <p className="text-[11px] text-gray-500 mb-1"><b>&quot;vs last year&quot;</b> compares the same point of last year&apos;s sale: {[
+                  perf.priorYearToDate.earlyAccess ? `early access ${dayLabel(perf.priorYearToDate.earlyAccess.from)} → ${dayLabel(perf.priorYearToDate.earlyAccess.to)}` : '',
+                  perf.priorYearToDate.publicWindow ? `public sale day${perf.priorYearToDate.publicDays > 1 ? `s 1–${perf.priorYearToDate.publicDays}` : ' 1'} (${dayLabel(perf.priorYearToDate.publicWindow.from)}${perf.priorYearToDate.publicWindow.to !== perf.priorYearToDate.publicWindow.from ? ` → ${dayLabel(perf.priorYearToDate.publicWindow.to)}` : ''})` : '',
+                ].filter(Boolean).join(' + ')}: revenue {$(perf.priorYearToDate.revenue)} · orders {n(perf.priorYearToDate.orders)} · ad spend {$(perf.priorYearToDate.spend)} · MER {perf.priorYearToDate.mer.toFixed(2)}x</p>
+              )}
+              {pyFull && (
+                <p className="text-[11px] text-gray-400 mb-1">Last year&apos;s full public sale ({perf.priorYearWindow.from} → {perf.priorYearWindow.to}): revenue {$(pyFull.revenue)} · orders {n(pyFull.orders)} · ad spend {$(pyFull.spend)} · MER {pyFull.mer.toFixed(2)}x · new customers {n(pyFull.newCustomers)}</p>
               )}
               {perf.priorYearEarlyAccess && (
                 <p className="text-[11px] text-gray-400 mb-4">Last year&apos;s VIP early access ({perf.priorYearEarlyAccess.window.from} → {perf.priorYearEarlyAccess.window.to}, gated): revenue {$(perf.priorYearEarlyAccess.revenue)} · orders {n(perf.priorYearEarlyAccess.orders)} · ad spend {$(perf.priorYearEarlyAccess.spend)} · MER {perf.priorYearEarlyAccess.mer.toFixed(2)}x</p>
               )}
-              {py && !perf.priorYearEarlyAccess && <div className="mb-3" />}
+              {pyFull && !perf.priorYearEarlyAccess && <div className="mb-3" />}
 
               {/* Daily */}
               {perf.daily.length > 1 && (
