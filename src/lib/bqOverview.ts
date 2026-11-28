@@ -11,6 +11,8 @@ export interface OverviewResult {
   metrics: {
     totalRevenue: number;
     netSales?: number;
+    /** Gross sales minus discounts, before returns. */
+    grossLessDiscounts?: number;
     /** The sales figure MER was divided from (net sales, or gross − discounts when the profile's merBasis says so). */
     merNetSales?: number;
     merBasis?: 'net' | 'gross_less_discounts';
@@ -832,6 +834,7 @@ export async function getOverview(dateFrom: string, dateTo: string): Promise<Ove
       totalOrders,
       totalAdSpend: Math.round(totalAdSpend * 100) / 100,
       netSales: Math.round(totalNetSales),
+      grossLessDiscounts: Math.round(totalGld),
       returnFees: Math.round(totalReturnFees),
       // AOV on Shopify's own basis (net before returns ÷ orders) so it matches
       // Shopify's reported average order value; falls back to net ÷ orders.

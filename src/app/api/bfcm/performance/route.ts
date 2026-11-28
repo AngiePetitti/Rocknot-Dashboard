@@ -5,6 +5,7 @@ import { getAdsOverview } from '@/src/lib/bqAds';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { makeFetcher } from '@/src/lib/analystTools';
 import { shiftMonths } from '@/src/lib/timeframes';
+import { merBasis } from '@/src/lib/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -49,7 +50,8 @@ export async function GET(req: NextRequest) {
   const days = await freshShopifyDays(from, to, ov?.revenueData || [], ov?.shopifySource).catch(() => ({ daily: ov?.revenueData || [], source: 'synced' as const, error: undefined }));
   const m = ov?.metrics; const pm = pyOv?.metrics;
   const store = (x: typeof m) => x ? {
-    revenue: num(x.totalRevenue), netSales: num(x.netSales ?? x.totalRevenue), orders: num(x.totalOrders), aov: num(x.aov),
+    // Revenue on this tab is gross sales minus discounts (before returns), per Angie.
+    revenue: num(x.grossLessDiscounts) || num(x.totalRevenue), totalSales: num(x.totalRevenue), netSales: num(x.netSales ?? x.totalRevenue), orders: num(x.totalOrders), aov: num(x.aov),
     spend: num(x.netAdSpend ?? x.totalAdSpend), mer: num(x.mer), newCustomers: num(x.newCustomers), returningCustomers: num(x.returningCustomers),
     sessions: num((x as unknown as { humanSessions?: number }).humanSessions), cvr: num(x.conversionRate),
   } : null;
@@ -69,7 +71,13 @@ export async function GET(req: NextRequest) {
     year, phase, previewLastYear, window: { from, to }, priorYearWindow: { from: pyFrom, to: pyTo, source: ly.source }, detectedLastYear: detected,
     store: store(m), priorYear: store(pm),
     priorYearEarlyAccess: ea && eaOv ? { window: ea, ...store(eaOv.metrics) } : null,
-    daily: days.daily, dailySource: days.source,
+    // Each day: revenue = gross − discounts; MER on the client's MER basis.
+    daily: days.daily.map(d => {
+      const revenue = d.grossLessDiscounts || 0;
+      const merSales = merBasis() === 'gross_less_discounts' ? revenue : (d.netSales ?? 0);
+      return { date: d.date, revenue, totalSales: d.revenue, netSales: d.netSales, orders: d.orders, adSpend: d.adSpend, mer: d.adSpend > 0 ? merSales / d.adSpend : 0 };
+    }),
+    dailySource: days.source, merBasis: merBasis(),
     platforms: ads?.platforms || [],
     creatives: { best, worst, total: crs.length, error: creatives?.error || null },
     products: prods, productsError: products?.error || null,
