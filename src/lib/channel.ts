@@ -161,3 +161,23 @@ export async function fetchMarketplaceTotals(from: string, to: string): Promise<
   if (data.length === list.length) mkMemo.set(memoKey, { t: Date.now(), data });
   return data;
 }
+
+/**
+ * Gross sales − discounts and orders of the marketplace channels kept OUT of
+ * store sales (e.g. Kailee P's Nordstrom), so a page can show how its store
+ * figure adds up to Shopify's all-channel total. [] when there are none.
+ */
+export async function fetchExcludedChannelSales(from: string, to: string): Promise<Array<{ key: string; label: string; revenue: number; orders: number }>> {
+  const list = marketplaces().filter(m => !m.countInSales);
+  if (!list.length || !trafficConfigured()) return [];
+  const out = await Promise.all(list.map(async m => {
+    try {
+      const rows = await shopifyql(`FROM sales SHOW orders, gross_sales, discounts WHERE sales_channel = ${lit(m.shopifyChannel)} SINCE ${from} UNTIL ${to}`, 12000);
+      const r = rows[0] || {};
+      return { key: m.key, label: m.label, revenue: Math.round(num(r.gross_sales) - Math.abs(num(r.discounts))), orders: Math.round(num(r.orders)) };
+    } catch {
+      return null;
+    }
+  }));
+  return out.filter((x): x is { key: string; label: string; revenue: number; orders: number } => x !== null);
+}

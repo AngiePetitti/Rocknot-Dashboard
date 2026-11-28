@@ -6,6 +6,7 @@ import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { makeFetcher } from '@/src/lib/analystTools';
 import { shiftMonths } from '@/src/lib/timeframes';
 import { merBasis } from '@/src/lib/client';
+import { fetchExcludedChannelSales } from '@/src/lib/channel';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -66,6 +67,9 @@ export async function GET(req: NextRequest) {
   // Day by day from Shopify itself, not the once-a-day synced copy (asked
   // again now that the queries above have released Shopify's rate limit).
   const days = await freshShopifyDays(from, to, ov?.revenueData || [], ov?.shopifySource).catch(() => ({ daily: ov?.revenueData || [], source: 'synced' as const, error: undefined }));
+  // Marketplace channels kept out of store sales (Kailee P's Nordstrom), so
+  // the Revenue card can show how it adds up to Shopify's all-channel total.
+  const excludedChannels = previewLastYear ? [] : await fetchExcludedChannelSales(from, to).catch(() => []);
   // The ad spend goal counts from the public sale start (Black Friday), not
   // from early access, per Angie; revenue keeps counting from early access.
   const spendGoalFrom = previewLastYear ? ly.from : (plan.adSpendFrom || plan.window.from);
@@ -134,7 +138,7 @@ export async function GET(req: NextRequest) {
   const sms = recent.filter(c => c.channel === 'sms').sort((a, b) => (b.revenue || 0) - (a.revenue || 0)).slice(0, 10);
   return NextResponse.json({
     year, phase, previewLastYear, window: { from, to }, priorYearWindow: { from: pyFrom, to: pyTo, source: ly.source }, detectedLastYear: detected,
-    store: thisStore, priorYear: store(pm),
+    store: thisStore, priorYear: store(pm), excludedChannels,
     priorYearEarlyAccess: ea && eaStore ? { window: ea, ...eaStore } : null,
     // The "vs last year" baseline: same point of last year's sale.
     priorYearToDate: priorYearToDate ? {

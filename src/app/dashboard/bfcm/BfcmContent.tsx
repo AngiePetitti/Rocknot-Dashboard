@@ -25,6 +25,7 @@ interface Perf {
   detectedLastYear: { from: string; to: string; lift: number; baseline: number } | null;
   priorYearEarlyAccess: ({ window: { from: string; to: string } } & Store) | null;
   store: Store | null; priorYear: Store | null;
+  excludedChannels?: Array<{ key: string; label: string; revenue: number; orders: number }>;
   priorYearToDate?: ({ earlyAccess: { from: string; to: string } | null; publicWindow: { from: string; to: string } | null; publicDays: number } & Store) | null;
   daily: Array<{ date: string; revenue: number; totalSales?: number; netSales?: number; orders: number; adSpend: number; mer?: number }>;
   dailySource?: 'shopify' | 'orders_api' | 'synced';
@@ -349,7 +350,7 @@ export default function BfcmContent() {
           {perf && st && (
             <>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-4">
-                <MetricCard title="Revenue" value={$(st.revenue)} accentColor="#c4b5fd" subtitle={`gross − discounts · ${n(st.orders)} orders · net sales ${$(st.netSales)}`} comparison={py ? { current: st.revenue, prior: py.revenue, label: 'vs last year' } : undefined} />
+                <MetricCard title="Revenue" value={$(st.revenue)} accentColor="#c4b5fd" subtitle={`gross − discounts · ${n(st.orders)} orders${perf.excludedChannels?.length ? ` · excludes ${perf.excludedChannels.map(c => `${c.label} ${$(c.revenue)}`).join(', ')} · all channels ${$(st.revenue + perf.excludedChannels.reduce((t, c) => t + c.revenue, 0))}` : ` · net sales ${$(st.netSales)}`}`} comparison={py ? { current: st.revenue, prior: py.revenue, label: 'vs last year' } : undefined} />
                 <MetricCard title="MER" value={st.mer ? `${st.mer.toFixed(2)}x` : '—'} accentColor="#a7f3d0" subtitle={`${perf.merBasis === 'gross_less_discounts' ? 'gross − discounts' : 'net sales'} ÷ ad spend${!perf.previewLastYear && perf.adSpendGoal?.from ? ` since ${dayLabel(perf.adSpendGoal.from)}` : ''}${impliedMer ? ` · goal ${impliedMer.toFixed(1)}x` : ''}`} comparison={py && py.mer ? { current: st.mer, prior: py.mer, label: 'vs last year' } : undefined} />
                 <MetricCard title="Ad spend" value={$(st.spend)} accentColor="#fdba74" subtitle={`${!perf.previewLastYear && perf.adSpendGoal?.from ? `since ${dayLabel(perf.adSpendGoal.from)}` : 'all platforms'}${goalSpend ? ` · ${spendPct.toFixed(0)}% of the ${$(goalSpend)} budget` : ''}`} comparison={py ? { current: st.spend, prior: py.spend, label: 'vs last year' } : undefined} />
                 <MetricCard title="AOV" value={$(st.aov)} accentColor="#f9a8d4" subtitle={`${n(st.newCustomers)} new · ${n(st.returningCustomers)} returning customers${st.cvr ? ` · CVR ${st.cvr.toFixed(1)}%` : ''}`} comparison={py ? { current: st.aov, prior: py.aov, label: 'vs last year' } : undefined} />
