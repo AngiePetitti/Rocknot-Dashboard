@@ -933,7 +933,7 @@ export default function OverviewContent() {
         <MetricCard
           title="Revenue"
           value={formatCurrency(metrics.totalRevenue)}
-          subtitle={`gross − discounts · ${metrics.totalOrders} orders`}
+          subtitle={`gross − discounts · ${metrics.totalOrders} orders${metrics.totalSales != null && metrics.totalSales > 0 ? ` · ${formatCurrency(metrics.totalSales, true)} incl. ship + tax (Shopify's "Total sales")` : ''}`}
           accentColor="#c4b5fd"
           comparison={
             // No intraday delta on the Today view — a partial day has no
