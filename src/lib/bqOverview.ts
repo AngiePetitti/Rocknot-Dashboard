@@ -284,7 +284,7 @@ export async function fetchShopifyCustomerSplit(from: string, to: string): Promi
 // the Orders API shows, the report copy is stale or throttled — rebuild the
 // headline numbers from the orders themselves (net = subtotal after
 // discounts, before shipping/tax; same-day refunds are the only drift).
-async function fetchOrdersApiDay(date: string): Promise<{ orders: number; netPlaced: number; totalSales: number } | null> {
+export async function fetchOrdersApiDay(date: string): Promise<{ orders: number; netPlaced: number; totalSales: number } | null> {
   const { adminGraphql } = await import('@/src/lib/shopifyAdmin');
   const skip = marketplaces().filter(m => !m.countInSales).map(m => new RegExp(m.sourceMatch, 'i'));
   let after: string | null = null;
@@ -316,6 +316,57 @@ async function fetchOrdersApiDay(date: string): Promise<{ orders: number; netPla
     after = r.orders.pageInfo.endCursor;
   }
   return { orders, netPlaced, totalSales };
+}
+
+export type OverviewDay = OverviewResult['revenueData'][number];
+export type DailySource = 'shopify' | 'orders_api' | 'synced';
+
+/**
+ * Day-by-day sales that are safe to show day by day. getOverview's daily
+ * series falls back to the Windsor → BigQuery order rows when Shopify's
+ * per-day report is throttled, and that copy is synced once a day, so the
+ * most recent days sit hours behind (Kailee P BFCM 2026: Nov 26 showed 35
+ * orders / $5.3K against 40 / $7.3K in Shopify). This asks Shopify's report
+ * again once the page's other queries are done, and if it still fails,
+ * rebuilds the last three days from the real-time Orders API. Sales come from
+ * Shopify; ad spend and customers stay from `base`. Works with an empty base
+ * (no BigQuery) too.
+ */
+export async function freshShopifyDays(from: string, to: string, base: OverviewDay[], baseSource?: string): Promise<{ daily: OverviewDay[]; source: DailySource; error?: string }> {
+  if (baseSource === 'shopifyql' && base.length) return { daily: base, source: 'shopify' };
+  const blank = (date: string): OverviewDay => ({ date, revenue: 0, netSales: 0, grossLessDiscounts: 0, orders: 0, adSpend: 0, newCustomers: 0, totalCustomers: 0 });
+  let error: string | undefined;
+  if (shopifyConfigured()) {
+    try {
+      const days = await fetchShopifyDaily(from, to);
+      if (days.length) {
+        const byDate: Record<string, OverviewDay> = {};
+        for (const b of base) byDate[b.date] = { ...b };
+        for (const d of days) {
+          if (!d.date || d.date < from || d.date > to) continue;
+          byDate[d.date] = {
+            ...(byDate[d.date] || blank(d.date)),
+            revenue: Math.round(d.totalSales), netSales: Math.round(d.netSales),
+            grossLessDiscounts: Math.round(d.grossLessDiscounts), orders: d.orders,
+          };
+        }
+        return { daily: Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)), source: 'shopify' };
+      }
+    } catch (e) { error = e instanceof Error ? e.message : String(e); }
+  }
+  // Report still unavailable: the Orders API is real time. Only the last few
+  // days can be behind the synced copy, so only those are rebuilt.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const cutoff = new Date(Date.parse(today) - 2 * 86400000).toISOString().slice(0, 10);
+  let patched = false;
+  const daily = await Promise.all(base.map(async row => {
+    if (row.date < cutoff || row.date > today || !shopifyConfigured()) return row;
+    const live = await fetchOrdersApiDay(row.date).catch(() => null);
+    if (!live || live.orders <= row.orders) return row;
+    patched = true;
+    return { ...row, revenue: Math.round(live.totalSales), netSales: Math.round(live.netPlaced), grossLessDiscounts: Math.round(live.netPlaced), orders: live.orders };
+  }));
+  return { daily, source: patched ? 'orders_api' : 'synced', ...(error ? { error } : {}) };
 }
 
 export async function getOverview(dateFrom: string, dateTo: string): Promise<OverviewResult> {

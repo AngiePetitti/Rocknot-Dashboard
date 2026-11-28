@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bfcmYear, loadBfcmPlan, bfcmPhase, detectSaleWindow } from '@/src/lib/bfcm';
-import { getOverview, fetchShopifyDaily } from '@/src/lib/bqOverview';
+import { getOverview, fetchShopifyDaily, freshShopifyDays } from '@/src/lib/bqOverview';
 import { getAdsOverview } from '@/src/lib/bqAds';
 import { isBigQueryConfigured } from '@/src/lib/bigquery';
 import { makeFetcher } from '@/src/lib/analystTools';
@@ -44,6 +44,9 @@ export async function GET(req: NextRequest) {
     get(`/api/windsor/products?${q}`).catch(() => null),
     get(`/api/retention?${q}`).catch(() => null),
   ]);
+  // Day by day from Shopify itself, not the once-a-day synced copy (asked
+  // again now that the queries above have released Shopify's rate limit).
+  const days = await freshShopifyDays(from, to, ov?.revenueData || [], ov?.shopifySource).catch(() => ({ daily: ov?.revenueData || [], source: 'synced' as const, error: undefined }));
   const m = ov?.metrics; const pm = pyOv?.metrics;
   const store = (x: typeof m) => x ? {
     revenue: num(x.totalRevenue), netSales: num(x.netSales ?? x.totalRevenue), orders: num(x.totalOrders), aov: num(x.aov),
@@ -66,7 +69,7 @@ export async function GET(req: NextRequest) {
     year, phase, previewLastYear, window: { from, to }, priorYearWindow: { from: pyFrom, to: pyTo, source: ly.source }, detectedLastYear: detected,
     store: store(m), priorYear: store(pm),
     priorYearEarlyAccess: ea && eaOv ? { window: ea, ...store(eaOv.metrics) } : null,
-    daily: ov?.revenueData || [],
+    daily: days.daily, dailySource: days.source,
     platforms: ads?.platforms || [],
     creatives: { best, worst, total: crs.length, error: creatives?.error || null },
     products: prods, productsError: products?.error || null,

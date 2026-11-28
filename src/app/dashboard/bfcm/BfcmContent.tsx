@@ -25,7 +25,8 @@ interface Perf {
   detectedLastYear: { from: string; to: string; lift: number; baseline: number } | null;
   priorYearEarlyAccess: ({ window: { from: string; to: string } } & Store) | null;
   store: Store | null; priorYear: Store | null;
-  daily: Array<{ date: string; revenue: number; netSales?: number; orders: number; adSpend: number }>;
+  daily: Array<{ date: string; revenue: number; netSales?: number; grossLessDiscounts?: number; orders: number; adSpend: number }>;
+  dailySource?: 'shopify' | 'orders_api' | 'synced';
   platforms: Array<{ platform: string; spend: number; revenue: number; roas: number; conversions: number; costPerConversion: number; color: string }>;
   creatives: { best: Creative[]; worst: Creative[]; total: number; error: string | null };
   products: Array<{ id: string; name: string; unitsSold: number; revenue: number; percentOfTotal: number }>; productsError: string | null;
@@ -351,11 +352,12 @@ export default function BfcmContent() {
                 <Card className="mb-4">
                   <h3 className="text-sm font-bold text-gray-800 mb-2">Day by day</h3>
                   <div className="overflow-x-auto"><table className="w-full text-sm min-w-[520px]">
-                    <thead><tr className="border-b border-gray-100 text-xs text-gray-400 uppercase"><th className="text-left pb-2">Day</th><th className="text-right pb-2">Revenue</th><th className="text-right pb-2">Orders</th><th className="text-right pb-2">Ad spend</th><th className="text-right pb-2">MER</th></tr></thead>
+                    <thead><tr className="border-b border-gray-100 text-xs text-gray-400 uppercase"><th className="text-left pb-2">Day</th><th className="text-right pb-2">Revenue</th><th className="text-right pb-2">Before returns</th><th className="text-right pb-2">Orders</th><th className="text-right pb-2">Ad spend</th><th className="text-right pb-2">MER</th></tr></thead>
                     <tbody>{perf.daily.map(r => (
-                      <tr key={r.date} className="border-b border-gray-50"><td className="py-1.5 text-gray-700">{r.date}{r.date === plan.window.from ? ' · Black Friday' : r.date === plan.window.to ? ' · Cyber Monday' : ''}</td><td className="py-1.5 text-right tabular-nums font-semibold">{$(r.revenue)}</td><td className="py-1.5 text-right tabular-nums">{n(r.orders)}</td><td className="py-1.5 text-right tabular-nums text-gray-600">{$(r.adSpend)}</td><td className="py-1.5 text-right tabular-nums text-gray-600">{r.adSpend > 0 ? `${((r.netSales ?? r.revenue) / r.adSpend).toFixed(2)}x` : '—'}</td></tr>
+                      <tr key={r.date} className="border-b border-gray-50"><td className="py-1.5 text-gray-700">{r.date}{r.date === plan.window.from ? ' · Black Friday' : r.date === plan.window.to ? ' · Cyber Monday' : ''}</td><td className="py-1.5 text-right tabular-nums font-semibold">{$(r.revenue)}</td><td className="py-1.5 text-right tabular-nums text-gray-600">{r.grossLessDiscounts ? $(r.grossLessDiscounts) : '—'}</td><td className="py-1.5 text-right tabular-nums">{n(r.orders)}</td><td className="py-1.5 text-right tabular-nums text-gray-600">{$(r.adSpend)}</td><td className="py-1.5 text-right tabular-nums text-gray-600">{r.adSpend > 0 ? `${((r.netSales ?? r.revenue) / r.adSpend).toFixed(2)}x` : '—'}</td></tr>
                     ))}</tbody>
                   </table></div>
+                  <p className="text-[11px] text-gray-400 mt-2">Revenue is Shopify&apos;s total sales for the day, which subtracts returns processed that day; &ldquo;Before returns&rdquo; is what was ordered that day (gross − discounts).{perf.dailySource === 'orders_api' ? ' Shopify\'s report was busy, so the last days are counted live from Shopify orders.' : perf.dailySource === 'synced' ? ' Shopify\'s report was busy, so these come from the synced copy and the last day or two may be behind. Refresh in a minute.' : ''}</p>
                 </Card>
               )}
 
