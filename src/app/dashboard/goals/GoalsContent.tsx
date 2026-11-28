@@ -653,7 +653,7 @@ export default function GoalsContent() {
           <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-gray-100">
-                {['Month', 'Actual / Forecast', 'LY Revenue', 'Revenue Goal', 'vs Goal', '± vs Goal', 'Ad Budget', 'Actual Spend', 'LY Ad Spend', 'Units Needed'].map(h => (
+                {['Month', `${year} Actual / Forecast`, `${year - 1} Revenue`, 'Revenue Goal', 'vs Goal', '± vs Goal', 'Ad Budget', `${year} Ad Spend`, `${year - 1} Ad Spend`, 'Units Needed'].map(h => (
                   <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
