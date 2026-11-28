@@ -40,6 +40,8 @@ const $ = (v: number) => formatCurrency(v);
 const n = (v: number) => Math.round(v || 0).toLocaleString();
 const pct = (a: number, b: number) => (b > 0 ? `${(((a - b) / b) * 100).toFixed(0)}%` : '—');
 const uid = () => Math.random().toString(36).slice(2, 10);
+/** '2026-11-25' → 'Wed, Nov 25' */
+const dayLabel = (d?: string) => d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
 
 export default function BfcmContent() {
   const client = useClient();
@@ -284,8 +286,8 @@ export default function BfcmContent() {
                   {plan.notes && <p className="text-xs text-gray-500 mt-3 whitespace-pre-wrap">{plan.notes}</p>}
                 </div>
                 <div className="grid grid-cols-2 gap-3 content-start">
-                  <Tile label="Revenue goal" value={goalRev ? $(goalRev) : '—'} sub={st && goalRev ? `${$(st.revenue)} so far · ${revPct.toFixed(0)}%` : 'gross − discounts over the sale window'} bar={st && goalRev ? revPct : undefined} tone="violet" />
-                  <Tile label="Ad spend goal" value={goalSpend ? $(goalSpend) : '—'} sub={st && goalSpend ? `${$(goalSpendSoFar)} since ${perf?.adSpendGoal?.from.slice(5) || 'launch'} · ${spendPct.toFixed(0)}%` : impliedMer ? `implies ${impliedMer.toFixed(1)}x MER` : 'all platforms'} bar={st && goalSpend ? spendPct : undefined} tone="amber" />
+                  <Tile label="Revenue goal" value={goalRev ? $(goalRev) : '—'} sub={st && goalRev ? `${$(st.revenue)} so far · ${revPct.toFixed(0)}%` : 'gross − discounts over the sale window'} bar={st && goalRev ? revPct : undefined} tone="violet" since={st && goalRev ? dayLabel(perf?.window.from) : undefined} />
+                  <Tile label="Ad spend goal" value={goalSpend ? $(goalSpend) : '—'} sub={st && goalSpend ? `${$(goalSpendSoFar)} so far · ${spendPct.toFixed(0)}%` : impliedMer ? `implies ${impliedMer.toFixed(1)}x MER` : 'all platforms'} bar={st && goalSpend ? spendPct : undefined} tone="amber" since={st && goalSpend ? dayLabel(perf?.adSpendGoal?.from) : undefined} />
                   {plan.goals.orders ? <Tile label="Orders goal" value={n(plan.goals.orders)} sub={st ? `${n(st.orders)} so far` : ''} /> : null}
                   {plan.goals.emailRevenue ? <Tile label="Email + SMS goal" value={$(plan.goals.emailRevenue)} sub={perf?.owned?.overview ? `${$(perf.owned.overview.email.revenue + perf.owned.overview.sms.revenue)} so far` : ''} /> : null}
                 </div>
@@ -340,7 +342,7 @@ export default function BfcmContent() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-4">
                 <MetricCard title="Revenue" value={$(st.revenue)} accentColor="#c4b5fd" subtitle={`gross − discounts · ${n(st.orders)} orders · net sales ${$(st.netSales)}`} comparison={py ? { current: st.revenue, prior: py.revenue, label: 'vs last year' } : undefined} />
                 <MetricCard title="MER" value={st.mer ? `${st.mer.toFixed(2)}x` : '—'} accentColor="#a7f3d0" subtitle={`${perf.merBasis === 'gross_less_discounts' ? 'gross − discounts' : 'net sales'} ÷ ad spend${impliedMer ? ` · goal ${impliedMer.toFixed(1)}x` : ''}`} comparison={py && py.mer ? { current: st.mer, prior: py.mer, label: 'vs last year' } : undefined} />
-                <MetricCard title="Ad spend" value={$(st.spend)} accentColor="#fdba74" subtitle={goalSpend ? `${$(goalSpendSoFar)} (${spendPct.toFixed(0)}%) of the ${$(goalSpend)} budget since ${perf?.adSpendGoal?.from.slice(5) || 'launch'}` : 'all platforms'} comparison={py ? { current: st.spend, prior: py.spend, label: 'vs last year' } : undefined} />
+                <MetricCard title="Ad spend" value={$(st.spend)} accentColor="#fdba74" subtitle={goalSpend ? `${$(goalSpendSoFar)} (${spendPct.toFixed(0)}%) of the ${$(goalSpend)} budget since ${dayLabel(perf?.adSpendGoal?.from) || 'launch'}` : 'all platforms'} comparison={py ? { current: st.spend, prior: py.spend, label: 'vs last year' } : undefined} />
                 <MetricCard title="AOV" value={$(st.aov)} accentColor="#f9a8d4" subtitle={`${n(st.newCustomers)} new · ${n(st.returningCustomers)} returning customers${st.cvr ? ` · CVR ${st.cvr.toFixed(1)}%` : ''}`} comparison={py ? { current: st.aov, prior: py.aov, label: 'vs last year' } : undefined} />
               </div>
               {py && (
@@ -417,13 +419,14 @@ export default function BfcmContent() {
   );
 }
 
-function Tile({ label, value, sub, bar, tone }: { label: string; value: string; sub?: string; bar?: number; tone?: 'violet' | 'amber' }) {
+function Tile({ label, value, sub, bar, tone, since }: { label: string; value: string; sub?: string; bar?: number; tone?: 'violet' | 'amber'; since?: string }) {
   return (
     <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
       <p className="text-[10px] uppercase tracking-wider text-gray-400">{label}</p>
       <p className="text-xl font-bold text-gray-800 tabular-nums">{value}</p>
       {sub && <p className="text-[11px] text-gray-400 mt-0.5">{sub}</p>}
       {bar != null && <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-2"><div className={`h-full rounded-full ${tone === 'amber' ? 'bg-amber-400' : 'bg-violet-500'}`} style={{ width: `${bar}%` }} /></div>}
+      {since && <p className="text-[10px] text-gray-400 mt-1">Counting since {since}</p>}
     </div>
   );
 }
