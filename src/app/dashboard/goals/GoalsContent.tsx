@@ -653,7 +653,7 @@ export default function GoalsContent() {
           <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-gray-100">
-                {['Month', 'Actual / Forecast', 'Last Year', 'Revenue Goal', 'vs Goal', '± vs Goal', 'Ad Budget', 'Actual Spend', 'Units Needed'].map(h => (
+                {['Month', 'Actual / Forecast', 'LY Revenue', 'Revenue Goal', 'vs Goal', '± vs Goal', 'Ad Budget', 'Actual Spend', 'LY Ad Spend', 'Units Needed'].map(h => (
                   <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase pb-2 pr-4 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -692,17 +692,16 @@ export default function GoalsContent() {
                     <td className="py-2.5 pr-4 whitespace-nowrap">
                       {(() => {
                         const ly = lastYear[`${year - 1}${k.slice(4)}`];
-                        if (!ly?.revenue && !ly?.adSpend) return <span className="text-gray-300">—</span>;
-                        const yoy = ly?.revenue && shown !== undefined && shown > 0 ? ((shown - ly.revenue) / ly.revenue) * 100 : null;
+                        if (!ly?.revenue) return <span className="text-gray-300">—</span>;
+                        const yoy = shown !== undefined && shown > 0 ? ((shown - ly.revenue) / ly.revenue) * 100 : null;
                         return (
                           <span className="text-xs text-gray-500">
-                            {ly?.revenue ? formatCurrency(ly.revenue) : '—'}
+                            {formatCurrency(ly.revenue)}
                             {yoy !== null && (
                               <span className={`ml-1 font-semibold ${yoy >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                                 {yoy >= 0 ? '▲' : '▼'}{Math.abs(yoy).toFixed(0)}%
                               </span>
                             )}
-                            <span className="block text-[10px] text-gray-400">{ly?.adSpend ? `${formatCurrency(ly.adSpend)} ads` : ''}</span>
                           </span>
                         );
                       })()}
@@ -768,6 +767,20 @@ export default function GoalsContent() {
                       {a?.adSpend ? formatCurrency(isCurrent && currentForecast ? currentForecast.adSpend : a.adSpend) : <span className="text-gray-300">—</span>}
                       {isCurrent && a?.adSpend ? <span className="text-[10px] text-gray-400 ml-1">proj.</span> : null}
                     </td>
+                    <td className="py-2.5 pr-4 whitespace-nowrap">
+                      {(() => {
+                        const lySpend = lastYear[`${year - 1}${k.slice(4)}`]?.adSpend || 0;
+                        if (!lySpend) return <span className="text-gray-300">—</span>;
+                        const spentNow = isCurrent && currentForecast ? currentForecast.adSpend : a?.adSpend;
+                        const yoy = spentNow && spentNow > 0 ? ((spentNow - lySpend) / lySpend) * 100 : null;
+                        return (
+                          <span className="text-xs text-gray-500">
+                            {formatCurrency(lySpend)}
+                            {yoy !== null && <span className={`ml-1 font-semibold ${yoy <= 0 ? 'text-green-600' : 'text-amber-600'}`}>{yoy >= 0 ? '+' : '−'}{Math.abs(yoy).toFixed(0)}%</span>}
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td className="py-2.5 text-gray-500 whitespace-nowrap">
                       {units ? `~${units.toLocaleString()}` : <span className="text-gray-300">—</span>}
                     </td>
@@ -806,10 +819,7 @@ export default function GoalsContent() {
                     <td className="py-2.5 pr-4 whitespace-nowrap">
                       {(() => {
                         const lyRev = months.reduce((s, k2) => s + (lastYear[`${year - 1}${k2.slice(4)}`]?.revenue || 0), 0);
-                        const lySpend = months.reduce((s, k2) => s + (lastYear[`${year - 1}${k2.slice(4)}`]?.adSpend || 0), 0);
-                        return lyRev > 0 ? (
-                          <span className="text-xs text-gray-500">{formatCurrency(lyRev)}<span className="block text-[10px] text-gray-400">{lySpend > 0 ? `${formatCurrency(lySpend)} ads` : ''}</span></span>
-                        ) : '—';
+                        return lyRev > 0 ? <span className="text-xs text-gray-500">{formatCurrency(lyRev)}</span> : '—';
                       })()}
                     </td>
                     <td className="py-2.5 pr-4 text-gray-800 whitespace-nowrap">{goalTotal > 0 ? formatCurrency(goalTotal) : '—'}</td>
@@ -830,6 +840,12 @@ export default function GoalsContent() {
                     </td>
                     <td className="py-2.5 pr-4 text-gray-800 whitespace-nowrap">{budgetTotal > 0 ? formatCurrency(budgetTotal) : '—'}</td>
                     <td className="py-2.5 pr-4 text-gray-600 whitespace-nowrap">{spendTotal > 0 ? formatCurrency(spendTotal) : '—'}</td>
+                    <td className="py-2.5 pr-4 whitespace-nowrap">
+                      {(() => {
+                        const lySpend = months.reduce((s, k2) => s + (lastYear[`${year - 1}${k2.slice(4)}`]?.adSpend || 0), 0);
+                        return lySpend > 0 ? <span className="text-xs text-gray-500">{formatCurrency(lySpend)}</span> : '—';
+                      })()}
+                    </td>
                     <td className="py-2.5 text-gray-600 whitespace-nowrap">{unitsTotal ? `~${unitsTotal.toLocaleString()}` : '—'}</td>
                   </tr>
                 </tfoot>
