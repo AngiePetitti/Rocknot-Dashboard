@@ -294,7 +294,7 @@ export async function fetchOrdersApiDay(date: string): Promise<{ orders: number;
   const skip = marketplaces().filter(m => !m.countInSales).map(m => new RegExp(m.sourceMatch, 'i'));
   let after: string | null = null;
   let orders = 0, netPlaced = 0, totalSales = 0;
-  for (let page = 0; page < 8; page++) {
+  for (let page = 0; page < 20; page++) {
     const r: {
       orders: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: Array<{
         sourceName: string | null; test: boolean; cancelledAt: string | null;

@@ -542,7 +542,9 @@ async function directPeriod(from: string, to: string, lite = false): Promise<Dir
   }
   // The analytics feed trails the admin under load; when the Orders API has
   // 15%+ more orders for the day, rebuild the day from the orders themselves.
-  if (ordersCheck && ordersCheck.orders > orders * 1.15) {
+  const laNow = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const liveDayCheck = to === laNow ? 1 : 1.15; // today: the real-time count simply wins
+  if (ordersCheck && ordersCheck.orders > orders * liveDayCheck) {
     totalSales = ordersCheck.totalSales; netSales = ordersCheck.netPlaced;
     grossLessDiscounts = ordersCheck.netPlaced; aovBasis = ordersCheck.netPlaced;
     returnFees = 0; orders = ordersCheck.orders;
@@ -924,7 +926,8 @@ export async function GET(request: NextRequest) {
       // the admin even when it answers. When the Orders API shows 15%+ more
       // orders for the day, rebuild the headlines from the orders themselves.
       const ordersCheck = await ordersCheckPromise;
-      if (ordersCheck && ordersCheck.orders > current.metrics.totalOrders * 1.15) {
+      const liveBar = isTodayRange ? 1 : 1.15; // today: the real-time count simply wins
+      if (ordersCheck && ordersCheck.orders > current.metrics.totalOrders * liveBar) {
         const merSales = ordersCheck.netPlaced;
         current.metrics.totalRevenue = Math.round(ordersCheck.netPlaced);
         current.metrics.totalSales = Math.round(ordersCheck.totalSales);
