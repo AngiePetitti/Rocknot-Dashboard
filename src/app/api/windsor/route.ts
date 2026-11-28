@@ -941,7 +941,7 @@ export async function GET(request: NextRequest) {
           current.revenueData[0].revenue = Math.round(ordersCheck.netPlaced);
           current.revenueData[0].orders = ordersCheck.orders;
         } else {
-          current.revenueData = [{ date: currentParams.date_from, revenue: Math.round(ordersCheck.netPlaced), netSales: Math.round(ordersCheck.netPlaced), orders: ordersCheck.orders, adSpend: current.metrics.totalAdSpend }];
+          current.revenueData = [{ date: currentParams.date_from, revenue: Math.round(ordersCheck.netPlaced), totalSales: Math.round(ordersCheck.totalSales), netSales: Math.round(ordersCheck.netPlaced), orders: ordersCheck.orders, adSpend: current.metrics.totalAdSpend }];
         }
       }
     }
