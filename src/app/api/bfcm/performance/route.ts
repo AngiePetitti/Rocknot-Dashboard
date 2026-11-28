@@ -114,6 +114,12 @@ export async function GET(req: NextRequest) {
   const eaStore = eaOv ? store(eaOv.metrics) : null;
   const pyPublicToDate = pyToDateTo ? (pyToDateTo === pyTo ? store(pm) : (pyToDateOv ? store(pyToDateOv.metrics) : null)) : null;
   const priorYearToDate = previewLastYear ? null : combine([eaInBaseline ? eaStore : null, pyPublicToDate]);
+  // Ad spend for BFCM counts from the public sale start (Black Friday), per
+  // Angie: the Ad spend and MER cards use spend (and, for MER, revenue) from
+  // that day on, and so does last year's baseline (public sale days only).
+  const merFromSpendStart = goalSpendSoFar > 0 ? Math.round(((merBasis() === 'gross_less_discounts' ? merRevenue : days.daily.filter(d => d.date >= spendGoalFrom).reduce((t, d) => t + (d.netSales || 0), 0)) / goalSpendSoFar) * 100) / 100 : 0;
+  if (thisStore && !previewLastYear) Object.assign(thisStore, { spend: Math.round(goalSpendSoFar), mer: merFromSpendStart });
+  if (priorYearToDate) Object.assign(priorYearToDate, { spend: pyPublicToDate?.spend || 0, mer: pyPublicToDate?.mer || 0 });
   type Cr = { id: string; name: string; platform: string; thumbnailUrl: string | null; adUrl: string | null; campaign: string; spend: number; revenue: number; roas: number; conversions: number; costPerConversion: number; ctr: number };
   const crs = ((creatives?.creatives as Cr[]) || []).filter(c => c.spend > 0);
   const bySpend = [...crs].sort((a, b) => b.spend - a.spend);
