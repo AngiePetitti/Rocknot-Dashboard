@@ -61,6 +61,9 @@ export async function GET(req: NextRequest) {
   // from early access, per Angie; revenue keeps counting from early access.
   const spendGoalFrom = previewLastYear ? ly.from : (plan.adSpendFrom || plan.window.from);
   const goalSpendSoFar = days.daily.filter(d => d.date >= spendGoalFrom).reduce((t, d) => t + (d.adSpend || 0), 0);
+  // MER goal progress: revenue (gross − discounts) ÷ ad spend over the same
+  // days the ad spend goal counts, so both sides cover one window.
+  const merRevenue = days.daily.filter(d => d.date >= spendGoalFrom).reduce((t, d) => t + (d.grossLessDiscounts || 0), 0);
   const m = ov?.metrics; const pm = pyOv?.metrics;
   const store = (x: typeof m) => x ? {
     // Revenue on this tab is gross sales minus discounts (before returns), per Angie.
@@ -92,6 +95,7 @@ export async function GET(req: NextRequest) {
     }),
     dailySource: days.source, merBasis: merBasis(),
     adSpendGoal: { from: spendGoalFrom, spend: Math.round(goalSpendSoFar) },
+    merGoal: { from: spendGoalFrom, revenue: Math.round(merRevenue), spend: Math.round(goalSpendSoFar), mer: goalSpendSoFar > 0 ? Math.round((merRevenue / goalSpendSoFar) * 100) / 100 : 0 },
     platforms: ads?.platforms || [],
     creatives: { best, worst, total: crs.length, error: creatives?.error || null },
     products: prods, productsError: products?.error || null,

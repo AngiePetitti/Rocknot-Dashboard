@@ -29,6 +29,7 @@ interface Perf {
   dailySource?: 'shopify' | 'orders_api' | 'synced';
   merBasis?: 'net' | 'gross_less_discounts';
   adSpendGoal?: { from: string; spend: number };
+  merGoal?: { from: string; revenue: number; spend: number; mer: number };
   platforms: Array<{ platform: string; spend: number; revenue: number; roas: number; conversions: number; costPerConversion: number; color: string }>;
   creatives: { best: Creative[]; worst: Creative[]; total: number; error: string | null };
   products: Array<{ id: string; name: string; unitsSold: number; revenue: number; percentOfTotal: number }>; productsError: string | null;
@@ -104,6 +105,9 @@ export default function BfcmContent() {
   const st = perf?.store; const py = perf?.priorYear;
   const goalRev = plan?.goals.revenue || 0; const goalSpend = plan?.goals.adSpend || 0;
   const impliedMer = goalSpend > 0 ? goalRev / goalSpend : null;
+  const merTarget = plan?.goals.mer || impliedMer || 0;
+  const merNow = perf?.merGoal?.mer || 0;
+  const merPct = merTarget > 0 ? Math.min(100, (merNow / merTarget) * 100) : 0;
   const revPct = st && goalRev > 0 ? Math.min(100, (st.revenue / goalRev) * 100) : 0;
   // Ad spend counts toward the goal from the public sale start, not early access.
   const goalSpendSoFar = perf?.adSpendGoal ? perf.adSpendGoal.spend : (st?.spend || 0);
@@ -254,6 +258,7 @@ export default function BfcmContent() {
                   <label className="text-xs text-gray-500">Sale window ad spend goal $<input type="number" value={d.goals.adSpend || ''} onChange={e => setDraft({ ...d, goals: { ...d.goals, adSpend: Number(e.target.value) || 0 } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
                   <label className="text-xs text-gray-500">Orders goal<input type="number" value={d.goals.orders || ''} onChange={e => setDraft({ ...d, goals: { ...d.goals, orders: Number(e.target.value) || undefined } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
                   <label className="text-xs text-gray-500">Email + SMS revenue goal $<input type="number" value={d.goals.emailRevenue || ''} onChange={e => setDraft({ ...d, goals: { ...d.goals, emailRevenue: Number(e.target.value) || undefined } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
+                  <label className="text-xs text-gray-500">MER goal (x){d.goals.revenue && d.goals.adSpend ? ` · blank = ${(d.goals.revenue / d.goals.adSpend).toFixed(2)}x` : ''}<input type="number" step="0.1" value={d.goals.mer || ''} onChange={e => setDraft({ ...d, goals: { ...d.goals, mer: Number(e.target.value) || undefined } })} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2" /></label>
                 </div>
                 <div className="md:col-span-2">
                   <p className="text-xs text-gray-500 mb-1">Collection pages</p>
@@ -285,9 +290,10 @@ export default function BfcmContent() {
                   )}
                   {plan.notes && <p className="text-xs text-gray-500 mt-3 whitespace-pre-wrap">{plan.notes}</p>}
                 </div>
-                <div className="grid grid-cols-2 gap-3 content-start">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 content-start">
                   <Tile label="Revenue goal" value={goalRev ? $(goalRev) : '—'} sub={st && goalRev ? `${$(st.revenue)} so far · ${revPct.toFixed(0)}%` : 'gross − discounts over the sale window'} bar={st && goalRev ? revPct : undefined} tone="violet" since={st && goalRev ? dayLabel(perf?.window.from) : undefined} />
                   <Tile label="Ad spend goal" value={goalSpend ? $(goalSpend) : '—'} sub={st && goalSpend ? `${$(goalSpendSoFar)} so far · ${spendPct.toFixed(0)}%` : impliedMer ? `implies ${impliedMer.toFixed(1)}x MER` : 'all platforms'} bar={st && goalSpend ? spendPct : undefined} tone="amber" since={st && goalSpend ? dayLabel(perf?.adSpendGoal?.from) : undefined} />
+                  <Tile label="MER goal" value={merTarget ? `${merTarget.toFixed(2)}x` : '—'} sub={perf?.merGoal && perf.merGoal.spend > 0 ? `${merNow.toFixed(2)}x so far · ${$(perf.merGoal.revenue)} ÷ ${$(perf.merGoal.spend)}` : plan.goals.mer ? 'gross − discounts ÷ ad spend' : 'revenue goal ÷ ad spend goal'} bar={merTarget && perf?.merGoal?.spend ? merPct : undefined} tone="emerald" since={merTarget && perf?.merGoal?.spend ? dayLabel(perf.merGoal.from) : undefined} />
                   {plan.goals.orders ? <Tile label="Orders goal" value={n(plan.goals.orders)} sub={st ? `${n(st.orders)} so far` : ''} /> : null}
                   {plan.goals.emailRevenue ? <Tile label="Email + SMS goal" value={$(plan.goals.emailRevenue)} sub={perf?.owned?.overview ? `${$(perf.owned.overview.email.revenue + perf.owned.overview.sms.revenue)} so far` : ''} /> : null}
                 </div>
@@ -419,13 +425,13 @@ export default function BfcmContent() {
   );
 }
 
-function Tile({ label, value, sub, bar, tone, since }: { label: string; value: string; sub?: string; bar?: number; tone?: 'violet' | 'amber'; since?: string }) {
+function Tile({ label, value, sub, bar, tone, since }: { label: string; value: string; sub?: string; bar?: number; tone?: 'violet' | 'amber' | 'emerald'; since?: string }) {
   return (
     <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
       <p className="text-[10px] uppercase tracking-wider text-gray-400">{label}</p>
       <p className="text-xl font-bold text-gray-800 tabular-nums">{value}</p>
       {sub && <p className="text-[11px] text-gray-400 mt-0.5">{sub}</p>}
-      {bar != null && <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-2"><div className={`h-full rounded-full ${tone === 'amber' ? 'bg-amber-400' : 'bg-violet-500'}`} style={{ width: `${bar}%` }} /></div>}
+      {bar != null && <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-2"><div className={`h-full rounded-full ${tone === 'amber' ? 'bg-amber-400' : tone === 'emerald' ? 'bg-emerald-500' : 'bg-violet-500'}`} style={{ width: `${bar}%` }} /></div>}
       {since && <p className="text-[10px] text-gray-400 mt-1">Counting since {since}</p>}
     </div>
   );
