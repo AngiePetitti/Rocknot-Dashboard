@@ -30,6 +30,8 @@ export interface BfcmPlan {
   name: string;
   /** Sale window (inclusive). Performance tracks these dates. */
   window: { from: string; to: string };
+  /** First day the ad spend goal counts (default: the public sale start, window.from). Revenue counts from early access. */
+  adSpendFrom?: string;
   /** Early-access / VIP start, if any. */
   earlyAccessFrom?: string;
   /** Last year's actual sale dates for the baseline — set by hand, or confirmed from the detected revenue lift. */
